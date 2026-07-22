@@ -1,0 +1,8 @@
+- `activation layer`: At which point of the LLM we extract the residual-stream vector.
+    - Early layers are about lexical/syntactic features
+    - Middle layers often give useful conceptual features
+    - Late layers are usually prediction-oriented (not useful for interpretability)
+- `width multiplier`: Number of SAE features. High multiplier separates concepts better but needs more data and leaves more dead features behind otherwise.
+- `K`: Maximum features active per token.
+    - Low values can be more interpretable but lead to features that are too broad.
+    - Higher values are more specific, but may cause duplicates or "dirty" interpretations.
