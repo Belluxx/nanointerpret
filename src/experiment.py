@@ -126,7 +126,11 @@ def append_jsonl(path: Path, record: dict) -> None:
 
 def format_metrics(record: dict) -> str:
     """Format the useful metrics for terminal output."""
-    dead = "n/a" if record["dead_features"] is None else f"{record['dead_features']:,}"
+    dead = (
+        "n/a"
+        if record["dead_feature_pct"] is None
+        else f"{record['dead_feature_pct']:.2f}%"
+    )
     return (
         f"EV {record['explained_variance']:.2%} | MSE {record['mse']:,.2f} | dead {dead} | "
         f"rare {record['window_rare_feature_pct']:.2f}% | "
@@ -315,15 +319,17 @@ def train_sae(
         progress.update(batch_tokens)
 
         if processed_tokens >= next_log or processed_tokens == len(train_tokens):
+            dead_feature_pct = (
+                100.0
+                * (last_fired < processed_tokens - args.dead_window).float().mean().item()
+                if processed_tokens >= args.dead_window
+                else None
+            )
             record = {
                 "split": "train",
                 "tokens": processed_tokens,
                 **metrics.compute(),
-                "dead_features": int(
-                    (last_fired < processed_tokens - args.dead_window).sum().item()
-                )
-                if processed_tokens >= args.dead_window
-                else None,
+                "dead_feature_pct": dead_feature_pct,
                 "tokens_per_second": (processed_tokens - start_tokens)
                 / max(time.monotonic() - start_time - evaluation_seconds, 1e-9),
             }
@@ -401,7 +407,7 @@ def evaluate_sae(
         "split": "validation",
         "tokens": len(validation_tokens),
         **metrics.compute(),
-        "dead_features": int((fire_counts == 0).sum().item()),
+        "dead_feature_pct": 100.0 * (fire_counts == 0).float().mean().item(),
         "active_features": int((fire_counts > 0).sum().item()),
     }
     return result
