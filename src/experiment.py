@@ -114,6 +114,27 @@ def append_jsonl(path: Path, record: dict) -> None:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
 
 
+def validate_resume_config(checkpoint_config: object, config: ExperimentConfig) -> None:
+    current_config = asdict(config)
+    if not isinstance(checkpoint_config, dict):
+        raise ValueError("cannot resume: checkpoint has no valid experiment configuration")
+
+    fields = sorted(checkpoint_config.keys() | current_config.keys())
+    mismatches = [
+        field
+        for field in fields
+        if checkpoint_config.get(field) != current_config.get(field)
+        or (field in checkpoint_config) != (field in current_config)
+    ]
+    if mismatches:
+        details = ", ".join(
+            f"{field}: checkpoint={checkpoint_config.get(field)!r}, "
+            f"current={current_config.get(field)!r}"
+            for field in mismatches
+        )
+        raise ValueError(f"cannot resume with a different experiment configuration ({details})")
+
+
 def move_and_capture_residual(
     model: nn.Module,
     capture: ResidualStreamCapture,
@@ -156,6 +177,7 @@ def train_sae(
         if not checkpoint_path.exists():
             raise FileNotFoundError(f"cannot resume: {checkpoint_path} does not exist")
         checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        validate_resume_config(checkpoint.get("config"), config)
         sae.load_state_dict(checkpoint["sae"])
         optimizer.load_state_dict(checkpoint["optimizer"])
         processed_tokens = int(checkpoint["processed_tokens"])
@@ -170,6 +192,8 @@ def train_sae(
         )
     else:
         metrics_path.write_text("")
+
+    (args.output_dir / "config.json").write_text(json.dumps(asdict(config), indent=2) + "\n")
 
     batches = iter_context_batches(
         train_tokens,

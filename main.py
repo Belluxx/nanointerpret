@@ -11,7 +11,6 @@ import argparse
 import json
 import random
 import sys
-from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
@@ -185,8 +184,6 @@ def main() -> None:
         device=str(device),
         model_dtype=args.model_dtype,
     )
-    (args.output_dir / "config.json").write_text(json.dumps(asdict(config), indent=2) + "\n")
-
     sae = TopKSAE(d_model, d_sae, args.k, device)
     capture = ResidualStreamCapture(layers[layer_index])
     try:
