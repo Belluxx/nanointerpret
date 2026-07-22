@@ -47,9 +47,15 @@ class TopKSAE(nn.Module):
 
 
 class RunningMetrics:
-    def __init__(self, d_model: int, device: torch.device):
+    """Accumulate reconstruction and feature-use metrics for one logging window."""
+
+    RARE_FREQUENCY = 1e-4
+    OVERACTIVE_FREQUENCY = 1e-2
+
+    def __init__(self, d_model: int, d_sae: int, device: torch.device):
         self.device = device
         self.d_model = d_model
+        self.d_sae = d_sae
         self.reset()
 
     def reset(self) -> None:
@@ -59,9 +65,12 @@ class RunningMetrics:
         self.x_sq_sum = torch.zeros(self.d_model, device=self.device)
         self.error_sum = torch.zeros(self.d_model, device=self.device)
         self.error_sq_sum = torch.zeros(self.d_model, device=self.device)
+        self.feature_fire_counts = torch.zeros(self.d_sae, device=self.device)
 
     @torch.no_grad()
-    def update(self, x: Tensor, reconstruction: Tensor, values: Tensor) -> None:
+    def update(
+        self, x: Tensor, reconstruction: Tensor, indices: Tensor, values: Tensor
+    ) -> Tensor:
         error = x - reconstruction
         self.count += x.shape[0]
         self.l0_sum += (values > 0).sum()
@@ -69,6 +78,13 @@ class RunningMetrics:
         self.x_sq_sum += x.square().sum(dim=0)
         self.error_sum += error.sum(dim=0)
         self.error_sq_sum += error.square().sum(dim=0)
+        positive_indices = indices[values > 0]
+        batch_fire_counts = torch.zeros_like(self.feature_fire_counts)
+        batch_fire_counts.scatter_add_(
+            0, positive_indices, torch.ones_like(positive_indices, dtype=torch.float32)
+        )
+        self.feature_fire_counts += batch_fire_counts
+        return batch_fire_counts
 
     @torch.no_grad()
     def compute(self) -> dict[str, float]:
@@ -79,8 +95,17 @@ class RunningMetrics:
         sse = self.error_sq_sum.sum()
         x_variance = (self.x_sq_sum - self.x_sum.square() / n).sum().clamp_min(1e-12)
         error_variance = (self.error_sq_sum - self.error_sum.square() / n).sum().clamp_min(0)
+        frequencies = self.feature_fire_counts.cpu().numpy() / n
+        active = frequencies > 0
         return {
             "mse": float((sse / (n * self.d_model)).item()),
             "explained_variance": float((1.0 - error_variance / x_variance).item()),
             "l0": float((self.l0_sum / n).item()),
+            "window_dead_feature_pct": float(100.0 * (~active).mean()),
+            "window_rare_feature_pct": float(
+                100.0 * (active & (frequencies < self.RARE_FREQUENCY)).mean()
+            ),
+            "window_overactive_feature_pct": float(
+                100.0 * (frequencies > self.OVERACTIVE_FREQUENCY).mean()
+            ),
         }

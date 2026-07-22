@@ -256,7 +256,7 @@ def train_sae(
         seed=args.seed,
         skip_contexts=processed_contexts,
     )
-    metrics = RunningMetrics(sae.d_model, device)
+    metrics = RunningMetrics(sae.d_model, sae.d_sae, device)
     next_log = ((processed_tokens // args.log_every) + 1) * args.log_every
     next_checkpoint = ((processed_tokens // args.checkpoint_every) + 1) * args.checkpoint_every
     progress = tqdm(total=len(train_tokens), initial=processed_tokens, unit="tok", desc="train")
@@ -286,9 +286,11 @@ def train_sae(
             optimizer.step()
             sae.normalize_decoder()
 
-            metrics.update(x.detach(), reconstruction.detach(), values.detach())
+            batch_fire_counts = metrics.update(
+                x.detach(), reconstruction.detach(), indices.detach(), values.detach()
+            )
             with torch.no_grad():
-                fired = torch.unique(indices[values > 0])
+                fired = torch.nonzero(batch_fire_counts, as_tuple=False).flatten()
                 last_fired[fired] = processed_tokens + start + len(x)
 
         processed_tokens += batch_tokens
@@ -347,7 +349,7 @@ def evaluate_sae(
     args: argparse.Namespace,
     excluded_token_ids: set[int],
 ) -> tuple[dict, np.ndarray, np.ndarray, np.ndarray]:
-    metrics = RunningMetrics(sae.d_model, device)
+    metrics = RunningMetrics(sae.d_model, sae.d_sae, device)
     fire_counts = np.zeros(sae.d_sae, dtype=np.int64)
     max_activation = np.zeros(sae.d_sae, dtype=np.float32)
     report_max_activation = np.zeros(sae.d_sae, dtype=np.float32)
@@ -372,7 +374,7 @@ def evaluate_sae(
         for start in range(0, len(residual), args.sae_batch_size):
             x = residual[start : start + args.sae_batch_size]
             reconstruction, indices, values = sae(x)
-            metrics.update(x, reconstruction, values)
+            metrics.update(x, reconstruction, indices, values)
             idx = indices.cpu().numpy().reshape(-1)
             val = values.cpu().numpy().reshape(-1)
             positive = val > 0
