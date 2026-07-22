@@ -60,7 +60,12 @@ def parse_args() -> argparse.Namespace:
         help="SAE token microbatch; lower this if memory is limited.",
     )
     parser.add_argument("--log-every", type=int, default=100_000)
-    parser.add_argument("--checkpoint-every", type=int, default=1_000_000)
+    parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=1_000_000,
+        help="Save and evaluate a checkpoint after this many training tokens.",
+    )
     parser.add_argument("--dead-window", type=int, default=1_000_000)
     parser.add_argument("--gradient-clip", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=42)
@@ -113,6 +118,8 @@ def validate_args(args: argparse.Namespace) -> None:
     )
     if min(positive) <= 0:
         raise ValueError("token counts, context size, and batch sizes must be positive")
+    if args.log_every <= 0 or args.checkpoint_every <= 0:
+        raise ValueError("log and checkpoint intervals must be positive")
 
 
 def seed_everything(seed: int) -> None:
@@ -187,22 +194,33 @@ def main() -> None:
     sae = TopKSAE(d_model, d_sae, args.k, device)
     capture = ResidualStreamCapture(layers[layer_index])
     try:
-        processed = train_sae(
-            model, capture, sae, train_tokens, tokenizer.pad_token_id, device, args, config
-        )
-        print(f"trained on {processed:,} tokens")
-
         excluded_token_ids = set(tokenizer.all_special_ids)
-        validation, fire_counts, max_activation, report_max_activation = evaluate_sae(
+        processed, evaluation = train_sae(
             model,
             capture,
             sae,
+            train_tokens,
             validation_tokens,
             tokenizer.pad_token_id,
             device,
             args,
+            config,
             excluded_token_ids,
         )
+        print(f"trained on {processed:,} tokens")
+
+        if evaluation is None:
+            evaluation = evaluate_sae(
+                model,
+                capture,
+                sae,
+                validation_tokens,
+                tokenizer.pad_token_id,
+                device,
+                args,
+                excluded_token_ids,
+            )
+        validation, fire_counts, max_activation, report_max_activation = evaluation
         (args.output_dir / "validation_metrics.json").write_text(
             json.dumps(validation, indent=2, sort_keys=True) + "\n"
         )

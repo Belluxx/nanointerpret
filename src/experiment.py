@@ -114,6 +114,19 @@ def append_jsonl(path: Path, record: dict) -> None:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
 
 
+def has_checkpoint_evaluation(path: Path, training_tokens: int) -> bool:
+    if not path.exists():
+        return False
+    for line in path.read_text().splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(record, dict) and record.get("training_tokens") == training_tokens:
+            return True
+    return False
+
+
 def validate_resume_config(checkpoint_config: object, config: ExperimentConfig) -> None:
     current_config = asdict(config)
     if not isinstance(checkpoint_config, dict):
@@ -161,17 +174,41 @@ def train_sae(
     capture: ResidualStreamCapture,
     sae: TopKSAE,
     train_tokens: np.memmap,
+    validation_tokens: np.memmap,
     pad_token_id: int,
     device: torch.device,
     args: argparse.Namespace,
     config: ExperimentConfig,
-) -> int:
+    excluded_token_ids: set[int],
+) -> tuple[int, tuple[dict, np.ndarray, np.ndarray, np.ndarray] | None]:
     optimizer = torch.optim.Adam(sae.parameters(), lr=args.learning_rate)
     checkpoint_path = args.output_dir / "checkpoint.pt"
     metrics_path = args.output_dir / "train_metrics.jsonl"
+    checkpoint_metrics_path = args.output_dir / "checkpoint_metrics.jsonl"
     processed_tokens = 0
     processed_contexts = 0
     last_fired = torch.full((sae.d_sae,), -1, dtype=torch.int64, device=device)
+    latest_evaluation = None
+    evaluation_seconds = 0.0
+
+    def evaluate_checkpoint() -> tuple[dict, np.ndarray, np.ndarray, np.ndarray]:
+        nonlocal evaluation_seconds
+        evaluation_start = time.monotonic()
+        evaluation = evaluate_sae(
+            model,
+            capture,
+            sae,
+            validation_tokens,
+            pad_token_id,
+            device,
+            args,
+            excluded_token_ids,
+        )
+        evaluation_seconds += time.monotonic() - evaluation_start
+        checkpoint_record = {**evaluation[0], "training_tokens": processed_tokens}
+        append_jsonl(checkpoint_metrics_path, checkpoint_record)
+        print(json.dumps(checkpoint_record, sort_keys=True))
+        return evaluation
 
     if args.resume:
         if not checkpoint_path.exists():
@@ -192,8 +229,12 @@ def train_sae(
         )
     else:
         metrics_path.write_text("")
+        checkpoint_metrics_path.write_text("")
 
     (args.output_dir / "config.json").write_text(json.dumps(asdict(config), indent=2) + "\n")
+
+    if args.resume and not has_checkpoint_evaluation(checkpoint_metrics_path, processed_tokens):
+        latest_evaluation = evaluate_checkpoint()
 
     batches = iter_context_batches(
         train_tokens,
@@ -210,6 +251,7 @@ def train_sae(
     progress = tqdm(total=len(train_tokens), initial=processed_tokens, unit="tok", desc="train")
     start_time = time.monotonic()
     start_tokens = processed_tokens
+    evaluation_seconds = 0.0
 
     for input_ids, attention_mask, context_ids in batches:
         batch_tokens = int(attention_mask.sum())
@@ -251,7 +293,7 @@ def train_sae(
                 if processed_tokens >= args.dead_window
                 else None,
                 "tokens_per_second": (processed_tokens - start_tokens)
-                / max(time.monotonic() - start_time, 1e-9),
+                / max(time.monotonic() - start_time - evaluation_seconds, 1e-9),
             }
             append_jsonl(metrics_path, record)
             print(json.dumps(record, sort_keys=True))
@@ -269,6 +311,7 @@ def train_sae(
                 last_fired,
                 config,
             )
+            latest_evaluation = evaluate_checkpoint()
             while next_checkpoint <= processed_tokens:
                 next_checkpoint += args.checkpoint_every
 
@@ -283,7 +326,7 @@ def train_sae(
         config,
     )
     torch.save({"sae": sae.state_dict(), "config": asdict(config)}, args.output_dir / "sae_final.pt")
-    return processed_tokens
+    return processed_tokens, latest_evaluation
 
 
 @torch.inference_mode()
