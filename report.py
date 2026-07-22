@@ -1,4 +1,4 @@
-"""Report rare, overactive, and typical SAE features with token examples."""
+"""Find SAE features that activate strongly across diverse target tokens."""
 
 from __future__ import annotations
 
@@ -23,29 +23,154 @@ from src.experiment import (
     find_transformer_layers,
     move_and_capture_residual,
 )
-from src.sae import RunningMetrics, TopKSAE
-
-
-CATEGORIES = ("rare", "overactive", "other")
-CATEGORY_TITLES = {
-    "rare": "Rare features",
-    "overactive": "Overactive features",
-    "other": "Other features",
-}
+from src.sae import TopKSAE
 
 
 @dataclass(frozen=True)
-class Feature:
-    index: int
-    category: str
-    fire_count: int
-    frequency: float
+class ActivationBatch:
+    indices: Tensor
+    values: Tensor
+    positions: Tensor
+    token_ids: Tensor
 
 
 @dataclass(frozen=True)
 class Sample:
     activation: float
     position: int
+    token_id: int
+    token: str
+
+
+@dataclass(frozen=True)
+class FeatureReport:
+    index: int
+    fire_count: int
+    frequency: float
+    score: float
+    diversity_score: float
+    activation_score: float
+    unique_strong_tokens: int
+    mean_sample_activation: float
+    max_activation: float
+    samples: tuple[Sample, ...]
+
+
+class DiverseSamplePool:
+    """Keep high-activation examples without letting one token dominate."""
+
+    def __init__(self, token_limit: int, samples_per_token: int, context_size: int):
+        self.token_limit = token_limit
+        self.samples_per_token = samples_per_token
+        self.context_size = context_size
+        self.by_token: dict[str, dict[int, Sample]] = {}
+        self.best_by_token: dict[str, float] = {}
+        self.weakest_tokens: list[tuple[float, str]] = []
+
+    def _context_id(self, sample: Sample) -> int:
+        return sample.position // self.context_size
+
+    def _discard_stale_tokens(self) -> None:
+        while self.weakest_tokens:
+            activation, token = self.weakest_tokens[0]
+            if self.best_by_token.get(token) == activation:
+                break
+            heapq.heappop(self.weakest_tokens)
+
+    def add(self, sample: Sample) -> None:
+        contexts = self.by_token.get(sample.token)
+        if contexts is None:
+            if len(self.by_token) >= self.token_limit:
+                self._discard_stale_tokens()
+                if self.weakest_tokens and sample.activation <= self.weakest_tokens[0][0]:
+                    return
+                _activation, weakest = heapq.heappop(self.weakest_tokens)
+                del self.by_token[weakest]
+                del self.best_by_token[weakest]
+            context_id = self._context_id(sample)
+            self.by_token[sample.token] = {context_id: sample}
+            self.best_by_token[sample.token] = sample.activation
+            heapq.heappush(self.weakest_tokens, (sample.activation, sample.token))
+            return
+
+        context_id = self._context_id(sample)
+        previous = contexts.get(context_id)
+        if previous is not None:
+            if sample.activation > previous.activation:
+                contexts[context_id] = sample
+        elif len(contexts) < self.samples_per_token:
+            contexts[context_id] = sample
+        else:
+            weakest_context, weakest = min(
+                contexts.items(), key=lambda item: item[1].activation
+            )
+            if sample.activation > weakest.activation:
+                del contexts[weakest_context]
+                contexts[context_id] = sample
+
+        best = max(item.activation for item in contexts.values())
+        if best != self.best_by_token[sample.token]:
+            self.best_by_token[sample.token] = best
+            heapq.heappush(self.weakest_tokens, (best, sample.token))
+
+    def strong_tokens(self, relative_threshold: float) -> list[tuple[str, list[Sample]]]:
+        if not self.best_by_token:
+            return []
+        maximum = max(self.best_by_token.values())
+        threshold = maximum * relative_threshold
+        result = []
+        for token, contexts in self.by_token.items():
+            samples = sorted(contexts.values(), key=lambda sample: sample.activation, reverse=True)
+            if samples[0].activation >= threshold:
+                result.append((token, samples))
+        return sorted(result, key=lambda item: item[1][0].activation, reverse=True)
+
+    def diversified_samples(
+        self, limit: int, relative_threshold: float
+    ) -> tuple[list[Sample], int]:
+        strong = self.strong_tokens(relative_threshold)
+        selected: list[Sample] = []
+        used_contexts: set[int] = set()
+
+        # First show one example per distinct token. Prefer a fresh context, but never
+        # sacrifice token diversity merely because two tokens occur in the same context.
+        for _token, samples in strong:
+            sample = next(
+                (
+                    candidate
+                    for candidate in samples
+                    if self._context_id(candidate) not in used_contexts
+                ),
+                None,
+            )
+            if sample is None:
+                sample = samples[0]
+            selected.append(sample)
+            used_contexts.add(self._context_id(sample))
+            if len(selected) == limit:
+                return selected, len(strong)
+
+        # Then fill remaining space with different contexts, still limiting each token.
+        used_positions = {sample.position for sample in selected}
+        remaining = sorted(
+            (
+                sample
+                for _token, samples in strong
+                for sample in samples
+                if sample.position not in used_positions
+            ),
+            key=lambda sample: sample.activation,
+            reverse=True,
+        )
+        for sample in remaining:
+            context_id = self._context_id(sample)
+            if context_id in used_contexts:
+                continue
+            selected.append(sample)
+            used_contexts.add(context_id)
+            if len(selected) == limit:
+                break
+        return selected, len(strong)
 
 
 def parse_args() -> argparse.Namespace:
@@ -64,19 +189,26 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Defaults to OUTPUT_DIR/feature_report.md.",
     )
-    parser.add_argument("--features-per-category", type=int, default=5)
+    parser.add_argument("--features", type=int, default=20)
     parser.add_argument("--samples-per-feature", type=int, default=10)
+    parser.add_argument("--minimum-fires", type=int, default=100)
+    parser.add_argument("--minimum-frequency", type=float, default=1e-4)
+    parser.add_argument("--maximum-frequency", type=float, default=1e-2)
+    parser.add_argument("--minimum-unique-tokens", type=int, default=5)
+    parser.add_argument("--candidate-features", type=int, default=4096)
+    parser.add_argument("--candidate-tokens-per-feature", type=int, default=64)
+    parser.add_argument("--samples-per-token", type=int, default=2)
+    parser.add_argument(
+        "--minimum-relative-activation",
+        type=float,
+        default=0.5,
+        help="A token counts as diverse only if its best activation reaches this fraction of the feature maximum.",
+    )
     parser.add_argument("--context-tokens", type=int, default=20)
     parser.add_argument(
         "--scan-tokens",
         type=int,
         help="Number of validation tokens to scan. Defaults to the complete cache.",
-    )
-    parser.add_argument(
-        "--rare-frequency", type=float, default=RunningMetrics.RARE_FREQUENCY
-    )
-    parser.add_argument(
-        "--overactive-frequency", type=float, default=RunningMetrics.OVERACTIVE_FREQUENCY
     )
     parser.add_argument("--model-batch-size", type=int)
     parser.add_argument("--sae-batch-size", type=int)
@@ -90,13 +222,25 @@ def parse_args() -> argparse.Namespace:
 
 
 def validate_args(args: argparse.Namespace) -> None:
-    values = [args.features_per_category, args.samples_per_feature, args.context_tokens]
+    positive = (
+        args.features,
+        args.samples_per_feature,
+        args.minimum_fires,
+        args.minimum_unique_tokens,
+        args.candidate_features,
+        args.candidate_tokens_per_feature,
+        args.samples_per_token,
+        args.context_tokens,
+    )
     optional = (args.scan_tokens, args.model_batch_size, args.sae_batch_size)
-    values += [value for value in optional if value is not None]
-    if min(values) <= 0:
+    if min(positive) <= 0 or any(value is not None and value <= 0 for value in optional):
         raise ValueError("counts and batch sizes must be positive")
-    if not 0 < args.rare_frequency < args.overactive_frequency <= 1:
-        raise ValueError("frequencies must satisfy 0 < rare < overactive <= 1")
+    if not 0 < args.minimum_frequency < args.maximum_frequency <= 1:
+        raise ValueError("frequencies must satisfy 0 < minimum < maximum <= 1")
+    if not 0 < args.minimum_relative_activation <= 1:
+        raise ValueError("minimum relative activation must be in (0, 1]")
+    if args.minimum_unique_tokens > args.candidate_tokens_per_feature:
+        raise ValueError("minimum unique tokens cannot exceed candidate tokens per feature")
 
 
 def choose_device(requested: str) -> torch.device:
@@ -173,7 +317,7 @@ def iter_feature_activations(
     sae_batch_size: int,
     device: torch.device,
     description: str,
-) -> Iterator[tuple[Tensor, Tensor, Tensor]]:
+) -> Iterator[ActivationBatch]:
     batches = iter_context_batches(
         tokens,
         context_size,
@@ -186,115 +330,212 @@ def iter_feature_activations(
     try:
         for input_ids, attention_mask, context_ids in batches:
             token_count = int(attention_mask.sum())
-            residual, _input_ids, _valid_mask = move_and_capture_residual(
+            residual, device_input_ids, valid_mask = move_and_capture_residual(
                 model, capture, input_ids, attention_mask, token_count, device
             )
             positions = (
                 torch.as_tensor(context_ids)[:, None] * context_size
                 + torch.arange(context_size)[None, :]
             )[attention_mask.bool()]
+            packed_token_ids = (
+                device_input_ids.flatten()
+                if valid_mask is None
+                else device_input_ids[valid_mask]
+            )
 
             for start in range(0, len(residual), sae_batch_size):
-                batch = residual[start : start + sae_batch_size]
-                indices, values = sae.encode(batch)
-                yield indices, values, positions[start : start + len(batch)]
+                end = start + sae_batch_size
+                indices, values = sae.encode(residual[start:end])
+                yield ActivationBatch(
+                    indices=indices,
+                    values=values,
+                    positions=positions[start:end],
+                    token_ids=packed_token_ids[start:end],
+                )
             progress.update(token_count)
     finally:
         progress.close()
 
 
-def count_fires(activation_batches, feature_count: int) -> np.ndarray:
-    counts = torch.zeros(feature_count, dtype=torch.int64)
-    for indices, values, _positions in activation_batches:
-        fired = indices[values > 0].cpu()
-        counts += torch.bincount(fired, minlength=feature_count)
-    return counts.numpy()
+def collect_feature_stats(
+    activation_batches: Iterator[ActivationBatch], feature_count: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    counts = np.zeros(feature_count, dtype=np.int64)
+    activation_sums = np.zeros(feature_count, dtype=np.float64)
+    activation_square_sums = np.zeros(feature_count, dtype=np.float64)
+    for batch in activation_batches:
+        positive = batch.values > 0
+        indices = batch.indices[positive].cpu().numpy()
+        values = batch.values[positive].float().cpu().numpy()
+        counts += np.bincount(indices, minlength=feature_count)
+        activation_sums += np.bincount(indices, weights=values, minlength=feature_count)
+        activation_square_sums += np.bincount(
+            indices, weights=values * values, minlength=feature_count
+        )
+    return counts, activation_sums, activation_square_sums
 
 
-def select_features(
+def select_candidate_features(
+    counts: np.ndarray,
+    activation_sums: np.ndarray,
+    activation_square_sums: np.ndarray,
+    token_count: int,
+    args: argparse.Namespace,
+) -> np.ndarray:
+    frequencies = counts / token_count
+    eligible = (
+        (counts >= args.minimum_fires)
+        & (frequencies >= args.minimum_frequency)
+        & (frequencies <= args.maximum_frequency)
+    )
+    candidates = np.flatnonzero(eligible)
+    if not len(candidates):
+        return candidates
+
+    means = activation_sums[candidates] / counts[candidates]
+    rms = np.sqrt(activation_square_sums[candidates] / counts[candidates])
+    strength = np.sqrt(means * rms)
+    order = np.argsort(-strength, kind="stable")
+    return candidates[order[: args.candidate_features]]
+
+
+def normalized_token(tokenizer, token_id: int, cache: dict[int, str | None]) -> str | None:
+    if token_id in cache:
+        return cache[token_id]
+    if token_id in tokenizer.all_special_ids:
+        cache[token_id] = None
+        return None
+    decoded = tokenizer.decode(
+        [token_id], skip_special_tokens=False, clean_up_tokenization_spaces=False
+    ).strip()
+    normalized = decoded.casefold()
+    # Pure digits trivially look diverse by covering 0-9, but do not make a
+    # feature linguistically interesting. Alphanumeric technical tokens remain.
+    if not normalized or not any(character.isalpha() for character in normalized):
+        cache[token_id] = None
+        return None
+    cache[token_id] = normalized
+    return normalized
+
+
+def collect_diverse_pools(
+    activation_batches: Iterator[ActivationBatch],
+    candidate_features: np.ndarray,
+    feature_count: int,
+    vocab_size: int,
+    tokenizer,
+    args: argparse.Namespace,
+    context_size: int,
+    device: torch.device,
+) -> dict[int, DiverseSamplePool]:
+    feature_ids = [int(index) for index in candidate_features]
+    pools = {
+        index: DiverseSamplePool(
+            args.candidate_tokens_per_feature, args.samples_per_token, context_size
+        )
+        for index in feature_ids
+    }
+    if not feature_ids:
+        return pools
+
+    lookup = torch.full((feature_count,), -1, dtype=torch.int64, device=device)
+    lookup[torch.tensor(feature_ids, dtype=torch.int64, device=device)] = torch.arange(
+        len(feature_ids), dtype=torch.int64, device=device
+    )
+    token_cache: dict[int, str | None] = {}
+
+    for batch in activation_batches:
+        slots = lookup[batch.indices]
+        rows, columns = torch.where((slots >= 0) & (batch.values > 0))
+        if rows.numel() == 0:
+            continue
+
+        event_slots = slots[rows, columns].cpu().numpy()
+        event_values = batch.values[rows, columns].float().cpu().numpy()
+        event_token_ids = batch.token_ids[rows].cpu().numpy()
+        cpu_rows = rows.cpu()
+        event_positions = batch.positions[cpu_rows].numpy()
+
+        # Retain the strongest occurrence of each feature/token pair per batch.
+        keys = event_slots.astype(np.int64) * vocab_size + event_token_ids
+        order = np.lexsort((-event_values, keys))
+        sorted_keys = keys[order]
+        first = np.empty(len(order), dtype=bool)
+        first[0] = True
+        first[1:] = sorted_keys[1:] != sorted_keys[:-1]
+
+        for event in order[first]:
+            token_id = int(event_token_ids[event])
+            token = normalized_token(tokenizer, token_id, token_cache)
+            if token is None:
+                continue
+            feature_id = feature_ids[int(event_slots[event])]
+            pools[feature_id].add(
+                Sample(
+                    activation=float(event_values[event]),
+                    position=int(event_positions[event]),
+                    token_id=token_id,
+                    token=token,
+                )
+            )
+    return pools
+
+
+def build_feature_reports(
+    pools: dict[int, DiverseSamplePool],
     counts: np.ndarray,
     token_count: int,
-    per_category: int,
-    minimum_fires: int,
-    rare_threshold: float,
-    overactive_threshold: float,
-) -> tuple[list[Feature], dict[str, int]]:
-    frequencies = counts / token_count
-    masks = {
-        "rare": (counts > 0) & (frequencies < rare_threshold),
-        "overactive": frequencies > overactive_threshold,
-        "other": (frequencies >= rare_threshold)
-        & (frequencies <= overactive_threshold),
-    }
-    totals = {category: int(mask.sum()) for category, mask in masks.items()}
-    selected: list[Feature] = []
+    args: argparse.Namespace,
+) -> list[FeatureReport]:
+    raw: list[dict] = []
+    for feature_id, pool in pools.items():
+        samples, unique_tokens = pool.diversified_samples(
+            args.samples_per_feature, args.minimum_relative_activation
+        )
+        if unique_tokens < args.minimum_unique_tokens or not samples:
+            continue
+        first_per_token: dict[str, Sample] = {}
+        for sample in samples:
+            first_per_token.setdefault(sample.token, sample)
+        distinct_samples = list(first_per_token.values())
+        activations = np.asarray(
+            [sample.activation for sample in distinct_samples], dtype=np.float64
+        )
+        maximum = max(pool.best_by_token.values())
+        coverage = min(unique_tokens / args.samples_per_feature, 1.0)
+        balance = float(activations.mean() / maximum)
+        raw.append(
+            {
+                "index": feature_id,
+                "fire_count": int(counts[feature_id]),
+                "frequency": float(counts[feature_id] / token_count),
+                "diversity_score": coverage * balance,
+                "unique_strong_tokens": unique_tokens,
+                "mean_sample_activation": float(activations.mean()),
+                "max_activation": float(maximum),
+                "samples": tuple(samples),
+            }
+        )
 
-    for category in CATEGORIES:
-        candidates = np.flatnonzero(masks[category] & (counts >= minimum_fires))
-        if category == "other" and len(candidates):
-            median = np.median(np.log(frequencies[candidates]))
-            order = np.argsort(np.abs(np.log(frequencies[candidates]) - median), kind="stable")
-        else:
-            order = np.argsort(-counts[candidates], kind="stable")
+    if not raw:
+        return []
 
-        for index in candidates[order[:per_category]]:
-            selected.append(
-                Feature(
-                    index=int(index),
-                    category=category,
-                    fire_count=int(counts[index]),
-                    frequency=float(frequencies[index]),
-                )
+    log_strengths = np.log1p([item["mean_sample_activation"] for item in raw])
+    low, high = np.percentile(log_strengths, (10, 90))
+    scale = max(float(high - low), 1e-12)
+    reports = []
+    for item, log_strength in zip(raw, log_strengths):
+        activation_score = float(np.clip((log_strength - low) / scale, 0.0, 1.0))
+        score = 0.7 * item["diversity_score"] + 0.3 * activation_score
+        reports.append(
+            FeatureReport(
+                **item,
+                score=score,
+                activation_score=activation_score,
             )
-    return selected, totals
-
-
-def keep_top_sample(heap: list[tuple[float, int]], item: tuple[float, int], limit: int) -> None:
-    if len(heap) < limit:
-        heapq.heappush(heap, item)
-    elif item > heap[0]:
-        heapq.heapreplace(heap, item)
-
-
-def collect_samples(
-    activation_batches,
-    features: list[Feature],
-    feature_count: int,
-    sample_count: int,
-    device: torch.device,
-) -> dict[int, list[Sample]]:
-    heaps = {feature.index: [] for feature in features}
-    if not features:
-        return {}
-
-    feature_ids = [feature.index for feature in features]
-    lookup = torch.full((feature_count,), -1, dtype=torch.int64, device=device)
-    lookup[torch.tensor(feature_ids, device=device)] = torch.arange(
-        len(feature_ids), device=device
-    )
-
-    for indices, values, positions in activation_batches:
-        selected = lookup[indices]
-        for slot, feature_id in enumerate(feature_ids):
-            rows, columns = torch.where((selected == slot) & (values > 0))
-            if rows.numel() == 0:
-                continue
-            activations = values[rows, columns]
-            top_values, top_indices = torch.topk(
-                activations, min(sample_count, len(activations))
-            )
-            top_positions = positions[rows[top_indices].cpu()]
-            for activation, position in zip(top_values.cpu(), top_positions):
-                keep_top_sample(
-                    heaps[feature_id],
-                    (float(activation), int(position)),
-                    sample_count,
-                )
-
-    return {
-        feature_id: [Sample(*item) for item in sorted(heap, reverse=True)]
-        for feature_id, heap in heaps.items()
-    }
+        )
+    reports.sort(key=lambda feature: (-feature.score, feature.index))
+    return reports[: args.features]
 
 
 def highlighted_context(
@@ -319,11 +560,11 @@ def highlighted_context(
     return context.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
 
 
-def inline_code(text: str) -> str:
-    longest_run = max((len(run) for run in re.findall(r"`+", text)), default=0)
+def inline_code(value: str) -> str:
+    longest_run = max((len(run) for run in re.findall(r"`+", value)), default=0)
     fence = "`" * (longest_run + 1)
-    padding = " " if text.startswith("`") or text.endswith("`") else ""
-    return f"{fence}{padding}{text}{padding}{fence}"
+    padding = " " if value.startswith("`") or value.endswith("`") else ""
+    return f"{fence}{padding}{value}{padding}{fence}"
 
 
 def render_report(
@@ -331,59 +572,60 @@ def render_report(
     config: dict,
     tokenizer,
     tokens: np.ndarray,
-    features: list[Feature],
-    samples: dict[int, list[Sample]],
-    totals: dict[str, int],
+    features: list[FeatureReport],
+    candidate_count: int,
     args: argparse.Namespace,
 ) -> str:
     lines = [
-        "# SAE feature report",
+        "# Interesting SAE features",
         "",
         f"- Checkpoint: `{checkpoint}`",
         f"- Model: `{config['model_id']}`",
         f"- Validation tokens scanned: {len(tokens):,}",
-        f"- Rare: `0 < frequency < {args.rare_frequency:g}`",
-        f"- Overactive: `frequency > {args.overactive_frequency:g}`",
-        f"- Live features: rare {totals['rare']:,}, overactive "
-        f"{totals['overactive']:,}, other {totals['other']:,}",
+        f"- Strong candidates inspected: {candidate_count:,}",
+        f"- Frequency range: `{args.minimum_frequency:g}` to `{args.maximum_frequency:g}`",
+        f"- Strong-token cutoff: `{args.minimum_relative_activation:.0%}` of feature maximum",
         "",
-        "Samples are ordered by activation; the scored token is marked as `<<token>>`.",
+        "Features are ranked primarily by strong normalized-token diversity, then by activation strength. "
+        "Repeated case variants, numeric-only tokens, punctuation, special tokens, and duplicate "
+        "contexts are suppressed.",
         "",
     ]
+    if not features:
+        lines.append("No features satisfied the interestingness thresholds.")
+        return "\n".join(lines) + "\n"
 
-    for category in CATEGORIES:
-        lines += [f"## {CATEGORY_TITLES[category]}", ""]
-        category_features = [feature for feature in features if feature.category == category]
-        if not category_features:
-            lines += [
-                f"No features in this category fired at least "
-                f"{args.samples_per_feature} times.",
-                "",
-            ]
-            continue
-
-        for feature in category_features:
-            lines += [
-                f"### Feature {feature.index}",
-                "",
-                f"Fires: {feature.fire_count:,} / {len(tokens):,} tokens "
-                f"({feature.frequency:.6%}).",
-                "",
-            ]
-            for number, sample in enumerate(samples[feature.index], 1):
-                context = highlighted_context(
-                    tokenizer,
-                    tokens,
-                    sample.position,
-                    args.context_tokens,
-                    int(config["context_size"]),
-                )
-                lines.append(
-                    f"{number}. activation `{sample.activation:.5g}`, "
-                    f"token id `{int(tokens[sample.position])}`, position `{sample.position}` "
-                    f"— {inline_code(context)}"
-                )
-            lines.append("")
+    for rank, feature in enumerate(features, 1):
+        token_preview = ", ".join(
+            dict.fromkeys(sample.token for sample in feature.samples)
+        )
+        lines += [
+            f"## {rank}. Feature {feature.index}",
+            "",
+            f"- Interestingness: `{feature.score:.3f}` "
+            f"(diversity `{feature.diversity_score:.3f}`, activation `{feature.activation_score:.3f}`)",
+            f"- Fires: {feature.fire_count:,} / {len(tokens):,} tokens "
+            f"(`{feature.frequency:.6%}`)",
+            f"- Strong distinct tokens: {feature.unique_strong_tokens}",
+            f"- Sample activation: mean `{feature.mean_sample_activation:.5g}`, "
+            f"maximum `{feature.max_activation:.5g}`",
+            f"- Sampled tokens: {inline_code(token_preview)}",
+            "",
+        ]
+        for number, sample in enumerate(feature.samples, 1):
+            context = highlighted_context(
+                tokenizer,
+                tokens,
+                sample.position,
+                args.context_tokens,
+                int(config["context_size"]),
+            )
+            lines.append(
+                f"{number}. activation `{sample.activation:.5g}`, token `{sample.token}`, "
+                f"token id `{sample.token_id}`, position `{sample.position}` — "
+                f"{inline_code(context)}"
+            )
+        lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -439,30 +681,35 @@ def main() -> None:
         )
 
     with ResidualStreamCapture(layers[layer_index]) as capture:
-        counts = count_fires(scan(capture, "Classify features"), sae.d_sae)
-        features, totals = select_features(
-            counts,
-            len(tokens),
-            args.features_per_category,
-            args.samples_per_feature,
-            args.rare_frequency,
-            args.overactive_frequency,
+        counts, activation_sums, activation_square_sums = collect_feature_stats(
+            scan(capture, "Measure features"), sae.d_sae
         )
-        samples = collect_samples(
-            scan(capture, "Collect samples"),
-            features,
+        candidates = select_candidate_features(
+            counts,
+            activation_sums,
+            activation_square_sums,
+            len(tokens),
+            args,
+        )
+        pools = collect_diverse_pools(
+            scan(capture, "Find diverse tokens"),
+            candidates,
             sae.d_sae,
-            args.samples_per_feature,
+            int(tokenizer.vocab_size),
+            tokenizer,
+            args,
+            int(config["context_size"]),
             device,
         )
 
+    features = build_feature_reports(pools, counts, len(tokens), args)
     report = render_report(
-        checkpoint, config, tokenizer, tokens, features, samples, totals, args
+        checkpoint, config, tokenizer, tokens, features, len(candidates), args
     )
     report_path = args.report_path or args.output_dir / "feature_report.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(report)
-    print(f"wrote {report_path} ({len(features)} features)")
+    print(f"wrote {report_path} ({len(features)} interesting features)")
 
 
 if __name__ == "__main__":
