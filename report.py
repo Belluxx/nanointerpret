@@ -176,9 +176,6 @@ class DiverseSamplePool:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--output-dir", type=Path, default=Path("artifacts/sae_gemma_3_270m")
-    )
-    parser.add_argument(
         "--checkpoint",
         type=Path,
         required=True,
@@ -187,7 +184,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--report-path",
         type=Path,
-        help="Defaults to OUTPUT_DIR/feature_report.md.",
+        help="Defaults to feature_report.md beside the checkpoint.",
     )
     parser.add_argument("--features", type=int, default=20)
     parser.add_argument("--samples-per-feature", type=int, default=10)
@@ -694,7 +691,7 @@ def main() -> None:
     report = render_report(
         checkpoint, config, tokenizer, tokens, features, len(candidates), args
     )
-    report_path = args.report_path or args.output_dir / "feature_report.md"
+    report_path = args.report_path or checkpoint.parent / "feature_report.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(report)
     print(f"wrote {report_path} ({len(features)} interesting features)")
