@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-tokens", type=int, default=10_000_000)
     parser.add_argument("--validation-tokens", type=int, default=1_000_000)
     parser.add_argument("--context-size", type=int, default=256)
-    parser.add_argument("--width-multiplier", type=int, default=16)
+    parser.add_argument("--width-multiplier", type=int, default=32)
     parser.add_argument("--k", type=int, default=32)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument(
