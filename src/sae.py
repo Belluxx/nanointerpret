@@ -25,8 +25,12 @@ class TopKSAE(nn.Module):
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         pre_activations = (x - self.decoder_bias) @ self.encoder_weight + self.encoder_bias
         values, indices = torch.topk(F.relu(pre_activations), self.k, dim=-1, sorted=False)
-        selected_decoder = self.decoder_weight[indices]
-        reconstruction = torch.einsum("nk,nkd->nd", values, selected_decoder) + self.decoder_bias
+        reconstruction = F.embedding_bag(
+            indices,
+            self.decoder_weight,
+            mode="sum",
+            per_sample_weights=values,
+        ) + self.decoder_bias
         return reconstruction, indices, values
 
     @torch.no_grad()
