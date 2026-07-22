@@ -15,6 +15,7 @@ from torch import Tensor, nn
 from tqdm.auto import tqdm
 
 from .data import iter_context_batches
+from .plot import save_training_plot
 from .sae import RunningMetrics, TopKSAE
 
 
@@ -365,6 +366,7 @@ def train_sae(
         {"sae": sae.state_dict(), "config": asdict(config)},
         args.output_dir / "sae_final.pt",
     )
+    save_training_plot(metrics_path, args.output_dir / "training_metrics.png")
     return processed_tokens, latest_evaluation
 
 

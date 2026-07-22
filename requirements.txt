@@ -4,3 +4,5 @@ huggingface_hub>=0.28
 datasets>=2.20
 numpy>=1.26
 tqdm>=4.66
+matplotlib>=3.8
+seaborn>=0.13
