@@ -181,7 +181,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint",
         type=Path,
-        help="Defaults to OUTPUT_DIR/sae_final.pt, then checkpoint.pt.",
+        required=True,
     )
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"))
     parser.add_argument(
@@ -257,18 +257,6 @@ def choose_device(requested: str) -> torch.device:
     if requested == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA is unavailable")
     return torch.device(requested)
-
-
-def resolve_checkpoint(args: argparse.Namespace) -> Path:
-    candidates = (
-        [args.checkpoint]
-        if args.checkpoint
-        else [args.output_dir / "sae_final.pt", args.output_dir / "checkpoint.pt"]
-    )
-    for path in candidates:
-        if path.exists():
-            return path
-    raise FileNotFoundError("no SAE checkpoint found: " + ", ".join(map(str, candidates)))
 
 
 def load_checkpoint(path: Path) -> tuple[dict, dict]:
@@ -633,7 +621,7 @@ def main() -> None:
     args = parse_args()
     validate_args(args)
     device = choose_device(args.device)
-    checkpoint = resolve_checkpoint(args)
+    checkpoint = args.checkpoint
     state, config = load_checkpoint(checkpoint)
 
     cache_path = find_validation_cache(config, args.cache_dir)
