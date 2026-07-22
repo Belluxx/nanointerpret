@@ -61,7 +61,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint-every",
         type=int,
-        default=1_000_000,
+        default=5_000_000,
         help="Save and evaluate a checkpoint after this many training tokens.",
     )
     parser.add_argument("--dead-window", type=int, default=1_000_000)
