@@ -22,9 +22,13 @@ class TopKSAE(nn.Module):
         self.d_model = d_model
         self.d_sae = d_sae
 
-    def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+    def encode(self, x: Tensor) -> tuple[Tensor, Tensor]:
         pre_activations = (x - self.decoder_bias) @ self.encoder_weight + self.encoder_bias
         values, indices = torch.topk(F.relu(pre_activations), self.k, dim=-1, sorted=False)
+        return indices, values
+
+    def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+        indices, values = self.encode(x)
         reconstruction = F.embedding_bag(
             indices,
             self.decoder_weight,
