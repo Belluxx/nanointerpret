@@ -38,7 +38,8 @@ class TopKSAE(nn.Module):
 
     @torch.no_grad()
     def normalize_decoder(self) -> None:
-        self.decoder_weight.copy_(F.normalize(self.decoder_weight, dim=1))
+        norms = self.decoder_weight.norm(dim=1, keepdim=True).clamp_min_(1e-12)
+        self.decoder_weight.div_(norms)
 
 
 class RunningMetrics:

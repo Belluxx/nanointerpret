@@ -48,12 +48,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--width-multiplier", type=int, default=16)
     parser.add_argument("--k", type=int, default=32)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
-    parser.add_argument("--model-batch-size", type=int, default=4)
+    parser.add_argument(
+        "--model-batch-size",
+        type=int,
+        default=32,
+        help="Contexts processed together; lower this if memory is limited.",
+    )
     parser.add_argument(
         "--sae-batch-size",
         type=int,
-        default=1024,
-        help="Token microbatch for the SAE; lower this if MPS runs out of memory.",
+        default=8192,
+        help="SAE token microbatch; lower this if memory is limited.",
     )
     parser.add_argument("--log-every", type=int, default=100_000)
     parser.add_argument("--checkpoint-every", type=int, default=1_000_000)
@@ -125,7 +130,10 @@ def main() -> None:
     dtype = getattr(torch, args.model_dtype)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"device={device}, model dtype={dtype}")
+    print(
+        f"device={device}, model dtype={dtype}, model batch={args.model_batch_size}, "
+        f"SAE batch={args.sae_batch_size}"
+    )
     tokenizer = AutoTokenizer.from_pretrained(args.model_id)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -171,6 +179,8 @@ def main() -> None:
         width_multiplier=args.width_multiplier,
         k=args.k,
         learning_rate=args.learning_rate,
+        model_batch_size=args.model_batch_size,
+        sae_batch_size=args.sae_batch_size,
         seed=args.seed,
         device=str(device),
         model_dtype=args.model_dtype,

@@ -34,6 +34,8 @@ class ExperimentConfig:
     width_multiplier: int
     k: int
     learning_rate: float
+    model_batch_size: int
+    sae_batch_size: int
     seed: int
     device: str
     model_dtype: str
@@ -67,7 +69,9 @@ class ResidualStreamCapture:
         self.handle = layer.register_forward_pre_hook(capture, with_kwargs=True)
 
     @torch.no_grad()
-    def __call__(self, model: nn.Module, input_ids: Tensor, attention_mask: Tensor) -> Tensor:
+    def __call__(
+        self, model: nn.Module, input_ids: Tensor, attention_mask: Tensor | None
+    ) -> Tensor:
         self.activation = None
         try:
             model(input_ids=input_ids, attention_mask=attention_mask, use_cache=False)
@@ -108,6 +112,27 @@ def save_checkpoint(
 def append_jsonl(path: Path, record: dict) -> None:
     with path.open("a") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def move_and_capture_residual(
+    model: nn.Module,
+    capture: ResidualStreamCapture,
+    input_ids: Tensor,
+    attention_mask: Tensor,
+    batch_tokens: int,
+    device: torch.device,
+) -> tuple[Tensor, Tensor, Tensor | None]:
+    """Capture packed residuals without constructing an all-true GPU mask."""
+    full_batch = batch_tokens == input_ids.numel()
+    input_ids = input_ids.to(device, non_blocking=True)
+    if full_batch:
+        residual = capture(model, input_ids, None).flatten(0, 1).float()
+        return residual, input_ids, None
+
+    attention_mask = attention_mask.to(device, non_blocking=True)
+    valid_mask = attention_mask.bool()
+    residual = capture(model, input_ids, attention_mask)[valid_mask].float()
+    return residual, input_ids, valid_mask
 
 
 def train_sae(
@@ -160,12 +185,13 @@ def train_sae(
     next_checkpoint = ((processed_tokens // args.checkpoint_every) + 1) * args.checkpoint_every
     progress = tqdm(total=len(train_tokens), initial=processed_tokens, unit="tok", desc="train")
     start_time = time.monotonic()
+    start_tokens = processed_tokens
 
     for input_ids, attention_mask, context_ids in batches:
-        input_ids = input_ids.to(device)
-        attention_mask = attention_mask.to(device)
-        residual = capture(model, input_ids, attention_mask)
-        residual = residual[attention_mask.bool()].float()
+        batch_tokens = int(attention_mask.sum())
+        residual, _input_ids, _valid_mask = move_and_capture_residual(
+            model, capture, input_ids, attention_mask, batch_tokens, device
+        )
 
         if processed_tokens == 0:
             with torch.no_grad():
@@ -185,12 +211,9 @@ def train_sae(
 
             metrics.update(x.detach(), reconstruction.detach(), values.detach())
             with torch.no_grad():
-                positive = values > 0
-                if positive.any():
-                    fired = torch.unique(indices[positive])
-                    last_fired[fired] = processed_tokens + start + len(x)
+                fired = torch.unique(indices[values > 0])
+                last_fired[fired] = processed_tokens + start + len(x)
 
-        batch_tokens = int(attention_mask.sum().item())
         processed_tokens += batch_tokens
         processed_contexts += len(context_ids)
         progress.update(batch_tokens)
@@ -203,7 +226,8 @@ def train_sae(
                 "dead_features": int((last_fired < processed_tokens - args.dead_window).sum().item())
                 if processed_tokens >= args.dead_window
                 else None,
-                "tokens_per_second": processed_tokens / max(time.monotonic() - start_time, 1e-9),
+                "tokens_per_second": (processed_tokens - start_tokens)
+                / max(time.monotonic() - start_time, 1e-9),
             }
             append_jsonl(metrics_path, record)
             print(json.dumps(record, sort_keys=True))
@@ -263,12 +287,13 @@ def evaluate_sae(
     )
     progress = tqdm(total=len(validation_tokens), unit="tok", desc="validate")
     for input_ids, attention_mask, _context_ids in batches:
-        input_ids = input_ids.to(device)
-        attention_mask = attention_mask.to(device)
-        residual = capture(model, input_ids, attention_mask)
-        valid_mask = attention_mask.bool()
-        valid_token_ids = input_ids[valid_mask].cpu().numpy()
-        residual = residual[valid_mask].float()
+        batch_tokens = int(attention_mask.sum())
+        residual, input_ids, valid_mask = move_and_capture_residual(
+            model, capture, input_ids, attention_mask, batch_tokens, device
+        )
+        valid_token_ids = (
+            input_ids.flatten() if valid_mask is None else input_ids[valid_mask]
+        ).cpu().numpy()
         for start in range(0, len(residual), args.sae_batch_size):
             x = residual[start : start + args.sae_batch_size]
             reconstruction, indices, values = sae(x)
@@ -282,7 +307,7 @@ def evaluate_sae(
             token_ids = np.repeat(valid_token_ids[start : start + len(x)], sae.k)[positive]
             reportable = ~np.isin(token_ids, tuple(excluded_token_ids))
             np.maximum.at(report_max_activation, idx[reportable], val[reportable])
-        progress.update(int(attention_mask.sum().item()))
+        progress.update(batch_tokens)
     progress.close()
 
     result = {
@@ -323,15 +348,17 @@ def collect_top_examples(
     progress = tqdm(total=len(validation_tokens), unit="tok", desc="top examples")
 
     for input_ids, attention_mask, context_ids in batches:
-        input_ids = input_ids.to(device)
-        attention_mask = attention_mask.to(device)
-        residual = capture(model, input_ids, attention_mask)
-        valid_mask = attention_mask.bool()
-        absolute_positions = (
+        batch_tokens = int(attention_mask.sum())
+        residual, _input_ids, valid_mask = move_and_capture_residual(
+            model, capture, input_ids, attention_mask, batch_tokens, device
+        )
+        position_grid = (
             torch.as_tensor(context_ids, device=device)[:, None] * args.context_size
             + torch.arange(args.context_size, device=device)[None, :]
-        )[valid_mask]
-        residual = residual[valid_mask].float()
+        )
+        absolute_positions = (
+            position_grid.flatten() if valid_mask is None else position_grid[valid_mask]
+        )
 
         for start in range(0, len(residual), args.sae_batch_size):
             x = residual[start : start + args.sae_batch_size]
@@ -349,7 +376,7 @@ def collect_top_examples(
                 mask = slots == slot
                 hit_values[int(slot)].append(val[mask])
                 hit_positions[int(slot)].append(positions[mask])
-        progress.update(int(attention_mask.sum().item()))
+        progress.update(batch_tokens)
     progress.close()
 
     reports: list[dict] = []
