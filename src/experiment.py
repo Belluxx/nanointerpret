@@ -124,6 +124,20 @@ def append_jsonl(path: Path, record: dict) -> None:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
 
 
+def format_metrics(record: dict) -> str:
+    """Format the useful metrics for terminal output."""
+    dead = "n/a" if record["dead_features"] is None else f"{record['dead_features']:,}"
+    return (
+        f"EV {record['explained_variance']:.2%} | MSE {record['mse']:,.2f} | dead {dead} | "
+        f"rare {record['window_rare_feature_pct']:.2f}% | "
+        f"overactive {record['window_overactive_feature_pct']:.2f}%"
+    )
+
+
+def format_metrics_line(record: dict) -> str:
+    return f"{record['split']:<10} {record['tokens']:>12,} tok | {format_metrics(record)}"
+
+
 def has_checkpoint_evaluation(path: Path, training_tokens: int) -> bool:
     if not path.exists():
         return False
@@ -215,7 +229,7 @@ def train_sae(
         evaluation_seconds += time.monotonic() - evaluation_start
         checkpoint_record = {**evaluation, "training_tokens": processed_tokens}
         append_jsonl(checkpoint_metrics_path, checkpoint_record)
-        print(json.dumps(checkpoint_record, sort_keys=True))
+        tqdm.write(format_metrics_line(checkpoint_record))
         return evaluation
 
     if args.resume:
@@ -256,7 +270,13 @@ def train_sae(
     metrics = RunningMetrics(sae.d_model, sae.d_sae, device)
     next_log = ((processed_tokens // args.log_every) + 1) * args.log_every
     next_checkpoint = ((processed_tokens // args.checkpoint_every) + 1) * args.checkpoint_every
-    progress = tqdm(total=len(train_tokens), initial=processed_tokens, unit="tok", desc="train")
+    progress = tqdm(
+        total=len(train_tokens), initial=processed_tokens, unit="tok", desc="Train",
+        dynamic_ncols=True, disable=None,
+    )
+    metric_status = tqdm(
+        desc="Metrics", bar_format="{desc}", dynamic_ncols=True, disable=progress.disable
+    )
     start_time = time.monotonic()
     start_tokens = processed_tokens
     evaluation_seconds = 0.0
@@ -308,7 +328,13 @@ def train_sae(
                 / max(time.monotonic() - start_time - evaluation_seconds, 1e-9),
             }
             append_jsonl(metrics_path, record)
-            print(json.dumps(record, sort_keys=True))
+            if progress.disable:
+                # Redirected output cannot redraw a line, so emit readable log records.
+                print(format_metrics_line(record))
+            else:
+                metric_status.set_description_str(
+                    f"Metrics\t{format_metrics(record)}", refresh=True
+                )
             metrics.reset()
             while next_log <= processed_tokens:
                 next_log += args.log_every
@@ -327,6 +353,7 @@ def train_sae(
             while next_checkpoint <= processed_tokens:
                 next_checkpoint += args.checkpoint_every
 
+    metric_status.close()
     progress.close()
     torch.save(
         {"sae": sae.state_dict(), "config": asdict(config)},
@@ -354,7 +381,9 @@ def evaluate_sae(
         shuffle=False,
         seed=args.seed,
     )
-    progress = tqdm(total=len(validation_tokens), unit="tok", desc="validate")
+    progress = tqdm(
+        total=len(validation_tokens), unit="tok", desc="Validate", leave=False, disable=None
+    )
     for input_ids, attention_mask, _context_ids in batches:
         batch_tokens = int(attention_mask.sum())
         residual, _input_ids, _valid_mask = move_and_capture_residual(

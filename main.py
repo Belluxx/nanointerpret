@@ -23,6 +23,7 @@ from src.experiment import (
     ResidualStreamCapture,
     evaluate_sae,
     find_transformer_layers,
+    format_metrics_line,
     train_sae,
 )
 from src.sae import TopKSAE
@@ -219,7 +220,7 @@ def main() -> None:
         (args.output_dir / "validation_metrics.json").write_text(
             json.dumps(validation, indent=2, sort_keys=True) + "\n"
         )
-        print(json.dumps(validation, sort_keys=True))
+        print(format_metrics_line(validation))
 
 
 if __name__ == "__main__":
