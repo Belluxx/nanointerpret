@@ -21,12 +21,9 @@ from src.data import build_token_cache
 from src.experiment import (
     ExperimentConfig,
     ResidualStreamCapture,
-    collect_top_examples,
     evaluate_sae,
     find_transformer_layers,
-    rank_reports_by_token_coherence,
     train_sae,
-    write_example_markdown,
 )
 from src.sae import TopKSAE
 
@@ -85,10 +82,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"))
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--cache-only", action="store_true")
-    parser.add_argument("--skip-examples", action="store_true")
-    parser.add_argument("--report-features", type=int, default=64)
-    parser.add_argument("--examples-per-feature", type=int, default=5)
-    parser.add_argument("--example-radius", type=int, default=24)
     return parser.parse_args()
 
 
@@ -121,12 +114,11 @@ def validate_args(args: argparse.Namespace) -> None:
         args.log_every,
         args.checkpoint_every,
         args.dead_window,
-        args.examples_per_feature,
     )
     if min(positive) <= 0:
         raise ValueError("counts, sizes, intervals, and learning rate must be positive")
-    if args.gradient_clip < 0 or args.report_features < 0 or args.example_radius < 0:
-        raise ValueError("gradient clip, report features, and example radius cannot be negative")
+    if args.gradient_clip < 0:
+        raise ValueError("gradient clip cannot be negative")
 
 
 def seed_everything(seed: int) -> None:
@@ -200,7 +192,6 @@ def main() -> None:
     )
     sae = TopKSAE(d_model, d_sae, args.k, device)
     with ResidualStreamCapture(layers[layer_index]) as capture:
-        excluded_token_ids = set(tokenizer.all_special_ids)
         processed, evaluation = train_sae(
             model,
             capture,
@@ -211,7 +202,6 @@ def main() -> None:
             device,
             args,
             config,
-            excluded_token_ids,
         )
         print(f"trained on {processed:,} tokens")
 
@@ -224,46 +214,12 @@ def main() -> None:
                 tokenizer.pad_token_id,
                 device,
                 args,
-                excluded_token_ids,
             )
-        validation, fire_counts, max_activation, report_max_activation = evaluation
+        validation = evaluation
         (args.output_dir / "validation_metrics.json").write_text(
             json.dumps(validation, indent=2, sort_keys=True) + "\n"
         )
         print(json.dumps(validation, sort_keys=True))
-
-        torch.save(
-            {
-                "fire_counts": torch.from_numpy(fire_counts),
-                "max_activation": torch.from_numpy(max_activation),
-                "max_non_special_activation": torch.from_numpy(report_max_activation),
-            },
-            args.output_dir / "validation_feature_stats.pt",
-        )
-        if not args.skip_examples and args.report_features > 0:
-            eligible = np.flatnonzero(
-                (fire_counts >= args.examples_per_feature) & (report_max_activation > 0)
-            )
-            selected = eligible[
-                np.argsort(-report_max_activation[eligible])[: args.report_features]
-            ]
-            reports = collect_top_examples(
-                model,
-                capture,
-                sae,
-                validation_tokens,
-                selected,
-                tokenizer,
-                tokenizer.pad_token_id,
-                device,
-                args,
-                excluded_token_ids,
-            )
-            reports = rank_reports_by_token_coherence(reports, validation_tokens, tokenizer)
-            (args.output_dir / "top_examples.json").write_text(
-                json.dumps(reports, indent=2, ensure_ascii=False) + "\n"
-            )
-            write_example_markdown(args.output_dir / "top_examples.md", reports)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,6 @@ import json
 import math
 import os
 import time
-from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -190,8 +189,7 @@ def train_sae(
     device: torch.device,
     args: argparse.Namespace,
     config: ExperimentConfig,
-    excluded_token_ids: set[int],
-) -> tuple[int, tuple[dict, np.ndarray, np.ndarray, np.ndarray] | None]:
+) -> tuple[int, dict | None]:
     optimizer = torch.optim.Adam(sae.parameters(), lr=args.learning_rate)
     checkpoint_path = args.output_dir / "checkpoint.pt"
     metrics_path = args.output_dir / "train_metrics.jsonl"
@@ -202,7 +200,7 @@ def train_sae(
     latest_evaluation = None
     evaluation_seconds = 0.0
 
-    def evaluate_checkpoint() -> tuple[dict, np.ndarray, np.ndarray, np.ndarray]:
+    def evaluate_checkpoint() -> dict:
         nonlocal evaluation_seconds
         evaluation_start = time.monotonic()
         evaluation = evaluate_sae(
@@ -213,10 +211,9 @@ def train_sae(
             pad_token_id,
             device,
             args,
-            excluded_token_ids,
         )
         evaluation_seconds += time.monotonic() - evaluation_start
-        checkpoint_record = {**evaluation[0], "training_tokens": processed_tokens}
+        checkpoint_record = {**evaluation, "training_tokens": processed_tokens}
         append_jsonl(checkpoint_metrics_path, checkpoint_record)
         print(json.dumps(checkpoint_record, sort_keys=True))
         return evaluation
@@ -347,13 +344,8 @@ def evaluate_sae(
     pad_token_id: int,
     device: torch.device,
     args: argparse.Namespace,
-    excluded_token_ids: set[int],
-) -> tuple[dict, np.ndarray, np.ndarray, np.ndarray]:
+) -> dict:
     metrics = RunningMetrics(sae.d_model, sae.d_sae, device)
-    fire_counts = np.zeros(sae.d_sae, dtype=np.int64)
-    max_activation = np.zeros(sae.d_sae, dtype=np.float32)
-    report_max_activation = np.zeros(sae.d_sae, dtype=np.float32)
-    excluded_ids = np.fromiter(excluded_token_ids, dtype=np.int64)
     batches = iter_context_batches(
         validation_tokens,
         args.context_size,
@@ -365,168 +357,22 @@ def evaluate_sae(
     progress = tqdm(total=len(validation_tokens), unit="tok", desc="validate")
     for input_ids, attention_mask, _context_ids in batches:
         batch_tokens = int(attention_mask.sum())
-        residual, input_ids, valid_mask = move_and_capture_residual(
+        residual, _input_ids, _valid_mask = move_and_capture_residual(
             model, capture, input_ids, attention_mask, batch_tokens, device
         )
-        valid_token_ids = (
-            input_ids.flatten() if valid_mask is None else input_ids[valid_mask]
-        ).cpu().numpy()
         for start in range(0, len(residual), args.sae_batch_size):
             x = residual[start : start + args.sae_batch_size]
             reconstruction, indices, values = sae(x)
             metrics.update(x, reconstruction, indices, values)
-            idx = indices.cpu().numpy().reshape(-1)
-            val = values.cpu().numpy().reshape(-1)
-            positive = val > 0
-            idx, val = idx[positive], val[positive]
-            fire_counts += np.bincount(idx, minlength=sae.d_sae)
-            np.maximum.at(max_activation, idx, val)
-            token_ids = np.repeat(valid_token_ids[start : start + len(x)], sae.k)[positive]
-            reportable = ~np.isin(token_ids, excluded_ids)
-            np.maximum.at(report_max_activation, idx[reportable], val[reportable])
         progress.update(batch_tokens)
     progress.close()
 
+    fire_counts = metrics.feature_fire_counts
     result = {
         "split": "validation",
         "tokens": len(validation_tokens),
         **metrics.compute(),
-        "dead_features": int((fire_counts == 0).sum()),
-        "active_features": int((fire_counts > 0).sum()),
+        "dead_features": int((fire_counts == 0).sum().item()),
+        "active_features": int((fire_counts > 0).sum().item()),
     }
-    return result, fire_counts, max_activation, report_max_activation
-
-
-@torch.inference_mode()
-def collect_top_examples(
-    model: nn.Module,
-    capture: ResidualStreamCapture,
-    sae: TopKSAE,
-    validation_tokens: np.memmap,
-    selected_features: np.ndarray,
-    tokenizer,
-    pad_token_id: int,
-    device: torch.device,
-    args: argparse.Namespace,
-    excluded_token_ids: set[int],
-) -> list[dict]:
-    lookup = np.full(sae.d_sae, -1, dtype=np.int64)
-    lookup[selected_features] = np.arange(len(selected_features))
-    hit_values: list[list[np.ndarray]] = [[] for _ in selected_features]
-    hit_positions: list[list[np.ndarray]] = [[] for _ in selected_features]
-    excluded_ids = np.fromiter(excluded_token_ids, dtype=np.int64)
-    batches = iter_context_batches(
-        validation_tokens,
-        args.context_size,
-        args.model_batch_size,
-        pad_token_id,
-        shuffle=False,
-        seed=args.seed,
-    )
-    progress = tqdm(total=len(validation_tokens), unit="tok", desc="top examples")
-
-    for input_ids, attention_mask, context_ids in batches:
-        batch_tokens = int(attention_mask.sum())
-        residual, _input_ids, valid_mask = move_and_capture_residual(
-            model, capture, input_ids, attention_mask, batch_tokens, device
-        )
-        position_grid = (
-            torch.as_tensor(context_ids, device=device)[:, None] * args.context_size
-            + torch.arange(args.context_size, device=device)[None, :]
-        )
-        absolute_positions = (
-            position_grid.flatten() if valid_mask is None else position_grid[valid_mask]
-        ).cpu().numpy()
-
-        for start in range(0, len(residual), args.sae_batch_size):
-            x = residual[start : start + args.sae_batch_size]
-            _reconstruction, indices, values = sae(x)
-            idx = indices.cpu().numpy().reshape(-1)
-            val = values.cpu().numpy().reshape(-1)
-            positions = np.repeat(absolute_positions[start : start + len(x)], sae.k)
-            slots = lookup[idx]
-            token_ids = np.asarray(validation_tokens[positions], dtype=np.int64)
-            wanted = (slots >= 0) & (val > 0) & ~np.isin(token_ids, excluded_ids)
-            slots, val, positions = slots[wanted], val[wanted], positions[wanted]
-            for slot in np.unique(slots):
-                mask = slots == slot
-                hit_values[int(slot)].append(val[mask])
-                hit_positions[int(slot)].append(positions[mask])
-        progress.update(batch_tokens)
-    progress.close()
-
-    reports: list[dict] = []
-    for slot, feature_id in enumerate(selected_features):
-        if not hit_values[slot]:
-            continue
-        values = np.concatenate(hit_values[slot])
-        positions = np.concatenate(hit_positions[slot])
-        take = min(args.examples_per_feature, len(values))
-        best = np.argpartition(-values, take - 1)[:take]
-        best = best[np.argsort(-values[best])]
-        examples = []
-        for index in best:
-            position = int(positions[index])
-            context_start = (position // args.context_size) * args.context_size
-            context_end = min(context_start + args.context_size, len(validation_tokens))
-            left = max(context_start, position - args.example_radius)
-            right = min(context_end, position + args.example_radius + 1)
-            prefix = tokenizer.decode(
-                validation_tokens[left:position].tolist(), skip_special_tokens=True
-            )
-            token_text = tokenizer.decode(
-                [int(validation_tokens[position])], skip_special_tokens=False
-            )
-            suffix = tokenizer.decode(
-                validation_tokens[position + 1 : right].tolist(), skip_special_tokens=True
-            )
-            examples.append(
-                {
-                    "activation": float(values[index]),
-                    "token_position": position,
-                    "text": f"{prefix}<<{token_text}>>{suffix}",
-                }
-            )
-        reports.append({"feature": int(feature_id), "examples": examples})
-    return reports
-
-
-def rank_reports_by_token_coherence(
-    reports: list[dict], validation_tokens: np.memmap, tokenizer
-) -> list[dict]:
-    """Put consistent lexical detectors first in the human-inspection report."""
-
-    def score(report: dict) -> tuple[bool, float, float]:
-        labels = [
-            tokenizer.decode([int(validation_tokens[example["token_position"]])])
-            .strip()
-            .casefold()
-            for example in report["examples"]
-        ]
-        labels = [label for label in labels if label]
-        max_activation = max(example["activation"] for example in report["examples"])
-        if not labels:
-            return False, 0.0, max_activation
-        dominant_label, dominant_count = Counter(labels).most_common(1)[0]
-        dominance = dominant_count / len(labels)
-        lexical = any(character.isalnum() for character in dominant_label)
-        return lexical, dominance, max_activation
-
-    return sorted(reports, key=score, reverse=True)
-
-
-def write_example_markdown(path: Path, reports: list[dict]) -> None:
-    lines = [
-        "# Top-activating validation examples",
-        "",
-        "Features are ordered by token-level coherence, then activation magnitude. "
-        "The activating token is enclosed in `<<...>>`.",
-        "",
-    ]
-    for report in reports:
-        lines.extend([f"## Feature {report['feature']}", ""])
-        for example in report["examples"]:
-            text = example["text"].replace("\n", " ").strip()
-            lines.append(f"- `{example['activation']:.5f}` — {text}")
-        lines.append("")
-    path.write_text("\n".join(lines))
+    return result
