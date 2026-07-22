@@ -5,6 +5,7 @@ import json
 import math
 import os
 import time
+from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -44,7 +45,11 @@ class ExperimentConfig:
 def find_transformer_layers(model: nn.Module) -> tuple[str, nn.ModuleList]:
     candidates: list[tuple[str, nn.ModuleList]] = []
     for name, module in model.named_modules():
-        if isinstance(module, nn.ModuleList) and name.split(".")[-1] == "layers" and len(module) > 1:
+        if (
+            isinstance(module, nn.ModuleList)
+            and name.split(".")[-1] == "layers"
+            and len(module) > 1
+        ):
             candidates.append((name, module))
     if not candidates:
         raise RuntimeError("could not locate the transformer's ModuleList named 'layers'")
@@ -83,6 +88,12 @@ class ResidualStreamCapture:
 
     def close(self) -> None:
         self.handle.remove()
+
+    def __enter__(self) -> ResidualStreamCapture:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
 
 
 def save_checkpoint(
@@ -289,7 +300,9 @@ def train_sae(
                 "split": "train",
                 "tokens": processed_tokens,
                 **metrics.compute(),
-                "dead_features": int((last_fired < processed_tokens - args.dead_window).sum().item())
+                "dead_features": int(
+                    (last_fired < processed_tokens - args.dead_window).sum().item()
+                )
                 if processed_tokens >= args.dead_window
                 else None,
                 "tokens_per_second": (processed_tokens - start_tokens)
@@ -316,16 +329,10 @@ def train_sae(
                 next_checkpoint += args.checkpoint_every
 
     progress.close()
-    save_checkpoint(
-        checkpoint_path,
-        sae,
-        optimizer,
-        processed_tokens,
-        processed_contexts,
-        last_fired,
-        config,
+    torch.save(
+        {"sae": sae.state_dict(), "config": asdict(config)},
+        args.output_dir / "sae_final.pt",
     )
-    torch.save({"sae": sae.state_dict(), "config": asdict(config)}, args.output_dir / "sae_final.pt")
     return processed_tokens, latest_evaluation
 
 
@@ -344,6 +351,7 @@ def evaluate_sae(
     fire_counts = np.zeros(sae.d_sae, dtype=np.int64)
     max_activation = np.zeros(sae.d_sae, dtype=np.float32)
     report_max_activation = np.zeros(sae.d_sae, dtype=np.float32)
+    excluded_ids = np.fromiter(excluded_token_ids, dtype=np.int64)
     batches = iter_context_batches(
         validation_tokens,
         args.context_size,
@@ -372,7 +380,7 @@ def evaluate_sae(
             fire_counts += np.bincount(idx, minlength=sae.d_sae)
             np.maximum.at(max_activation, idx, val)
             token_ids = np.repeat(valid_token_ids[start : start + len(x)], sae.k)[positive]
-            reportable = ~np.isin(token_ids, tuple(excluded_token_ids))
+            reportable = ~np.isin(token_ids, excluded_ids)
             np.maximum.at(report_max_activation, idx[reportable], val[reportable])
         progress.update(batch_tokens)
     progress.close()
@@ -404,6 +412,7 @@ def collect_top_examples(
     lookup[selected_features] = np.arange(len(selected_features))
     hit_values: list[list[np.ndarray]] = [[] for _ in selected_features]
     hit_positions: list[list[np.ndarray]] = [[] for _ in selected_features]
+    excluded_ids = np.fromiter(excluded_token_ids, dtype=np.int64)
     batches = iter_context_batches(
         validation_tokens,
         args.context_size,
@@ -425,19 +434,17 @@ def collect_top_examples(
         )
         absolute_positions = (
             position_grid.flatten() if valid_mask is None else position_grid[valid_mask]
-        )
+        ).cpu().numpy()
 
         for start in range(0, len(residual), args.sae_batch_size):
             x = residual[start : start + args.sae_batch_size]
             _reconstruction, indices, values = sae(x)
             idx = indices.cpu().numpy().reshape(-1)
             val = values.cpu().numpy().reshape(-1)
-            positions = np.repeat(
-                absolute_positions[start : start + len(x)].cpu().numpy(), sae.k
-            )
+            positions = np.repeat(absolute_positions[start : start + len(x)], sae.k)
             slots = lookup[idx]
             token_ids = np.asarray(validation_tokens[positions], dtype=np.int64)
-            wanted = (slots >= 0) & (val > 0) & ~np.isin(token_ids, tuple(excluded_token_ids))
+            wanted = (slots >= 0) & (val > 0) & ~np.isin(token_ids, excluded_ids)
             slots, val, positions = slots[wanted], val[wanted], positions[wanted]
             for slot in np.unique(slots):
                 mask = slots == slot
@@ -498,8 +505,8 @@ def rank_reports_by_token_coherence(
         max_activation = max(example["activation"] for example in report["examples"])
         if not labels:
             return False, 0.0, max_activation
-        dominance = max(labels.count(label) for label in set(labels)) / len(labels)
-        dominant_label = max(set(labels), key=labels.count)
+        dominant_label, dominant_count = Counter(labels).most_common(1)[0]
+        dominance = dominant_count / len(labels)
         lexical = any(character.isalnum() for character in dominant_label)
         return lexical, dominance, max_activation
 

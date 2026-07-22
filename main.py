@@ -113,13 +113,20 @@ def validate_args(args: argparse.Namespace) -> None:
         args.train_tokens,
         args.validation_tokens,
         args.context_size,
+        args.width_multiplier,
+        args.k,
+        args.learning_rate,
         args.model_batch_size,
         args.sae_batch_size,
+        args.log_every,
+        args.checkpoint_every,
+        args.dead_window,
+        args.examples_per_feature,
     )
     if min(positive) <= 0:
-        raise ValueError("token counts, context size, and batch sizes must be positive")
-    if args.log_every <= 0 or args.checkpoint_every <= 0:
-        raise ValueError("log and checkpoint intervals must be positive")
+        raise ValueError("counts, sizes, intervals, and learning rate must be positive")
+    if args.gradient_clip < 0 or args.report_features < 0 or args.example_radius < 0:
+        raise ValueError("gradient clip, report features, and example radius cannot be negative")
 
 
 def seed_everything(seed: int) -> None:
@@ -192,8 +199,7 @@ def main() -> None:
         model_dtype=args.model_dtype,
     )
     sae = TopKSAE(d_model, d_sae, args.k, device)
-    capture = ResidualStreamCapture(layers[layer_index])
-    try:
+    with ResidualStreamCapture(layers[layer_index]) as capture:
         excluded_token_ids = set(tokenizer.all_special_ids)
         processed, evaluation = train_sae(
             model,
@@ -258,8 +264,6 @@ def main() -> None:
                 json.dumps(reports, indent=2, ensure_ascii=False) + "\n"
             )
             write_example_markdown(args.output_dir / "top_examples.md", reports)
-    finally:
-        capture.close()
 
 
 if __name__ == "__main__":
