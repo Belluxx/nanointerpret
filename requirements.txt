@@ -1,0 +1,6 @@
+torch>=2.5
+transformers>=4.50
+huggingface_hub>=0.28
+datasets>=2.20
+numpy>=1.26
+tqdm>=4.66
