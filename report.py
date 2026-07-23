@@ -182,6 +182,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"))
     parser.add_argument(
+        "--tokens-path",
+        type=Path,
+        help="Explicit uint32 token file to scan instead of the checkpoint's validation cache.",
+    )
+    parser.add_argument(
         "--report-path",
         type=Path,
         help="Defaults to feature_report.md beside the checkpoint.",
@@ -621,7 +626,13 @@ def main() -> None:
     checkpoint = args.checkpoint
     state, config = load_checkpoint(checkpoint)
 
-    cache_path = find_validation_cache(config, args.cache_dir)
+    cache_path = (
+        args.tokens_path
+        if args.tokens_path is not None
+        else find_validation_cache(config, args.cache_dir)
+    )
+    if not cache_path.is_file():
+        raise FileNotFoundError(f"token file not found at {cache_path}")
     cached_tokens = np.memmap(cache_path, mode="r", dtype=np.uint32)
     token_count = min(args.scan_tokens or len(cached_tokens), len(cached_tokens))
     tokens = cached_tokens[:token_count]
