@@ -6,10 +6,11 @@ import argparse
 import heapq
 import re
 import sys
-from dataclasses import dataclass
+import tempfile
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Iterator
+from typing import BinaryIO, Iterator
 
 import numpy as np
 import torch
@@ -120,7 +121,9 @@ class DiverseSamplePool:
         threshold = maximum * relative_threshold
         result = []
         for token, contexts in self.by_token.items():
-            samples = sorted(contexts.values(), key=lambda sample: sample.activation, reverse=True)
+            samples = sorted(
+                contexts.values(), key=lambda sample: sample.activation, reverse=True
+            )
             if samples[0].activation >= threshold:
                 result.append((token, samples))
         return sorted(result, key=lambda item: item[1][0].activation, reverse=True)
@@ -175,11 +178,7 @@ class DiverseSamplePool:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--checkpoint",
-        type=Path,
-        required=True,
-    )
+    parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"))
     parser.add_argument(
         "--tokens-path",
@@ -290,7 +289,7 @@ def find_validation_cache(config: dict, cache_dir: Path) -> Path:
     _train, validation, _metadata = token_cache_paths(cache_args)
     if not validation.exists():
         raise FileNotFoundError(
-            f"validation cache not found at {validation}; run main.py --cache-only first"
+            f"validation cache not found at {validation}; run train.py --cache-only first"
         )
     return validation
 
@@ -307,6 +306,7 @@ def iter_feature_activations(
     sae_batch_size: int,
     device: torch.device,
     description: str,
+    include_metadata: bool = True,
 ) -> Iterator[ActivationBatch]:
     batches = iter_context_batches(
         tokens,
@@ -323,15 +323,19 @@ def iter_feature_activations(
             residual, device_input_ids, valid_mask = move_and_capture_residual(
                 model, capture, input_ids, attention_mask, token_count, device
             )
-            positions = (
-                torch.as_tensor(context_ids)[:, None] * context_size
-                + torch.arange(context_size)[None, :]
-            )[attention_mask.bool()]
-            packed_token_ids = (
-                device_input_ids.flatten()
-                if valid_mask is None
-                else device_input_ids[valid_mask]
-            )
+            if include_metadata:
+                positions = (
+                    torch.as_tensor(context_ids)[:, None] * context_size
+                    + torch.arange(context_size)[None, :]
+                )[attention_mask.bool()]
+                packed_token_ids = (
+                    device_input_ids.flatten()
+                    if valid_mask is None
+                    else device_input_ids[valid_mask]
+                )
+            else:
+                positions = torch.empty(0, dtype=torch.int64)
+                packed_token_ids = torch.empty(0, dtype=torch.int64)
 
             for start in range(0, len(residual), sae_batch_size):
                 end = start + sae_batch_size
@@ -348,21 +352,68 @@ def iter_feature_activations(
 
 
 def collect_feature_stats(
-    activation_batches: Iterator[ActivationBatch], feature_count: int
+    activation_batches: Iterator[ActivationBatch],
+    feature_count: int,
+    index_cache: BinaryIO | None = None,
+    value_cache: BinaryIO | None = None,
+    index_dtype: np.dtype | type[np.unsignedinteger] = np.uint32,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if (index_cache is None) != (value_cache is None):
+        raise ValueError("index and value caches must be provided together")
+
     counts = np.zeros(feature_count, dtype=np.int64)
     activation_sums = np.zeros(feature_count, dtype=np.float64)
     activation_square_sums = np.zeros(feature_count, dtype=np.float64)
     for batch in activation_batches:
-        positive = batch.values > 0
-        indices = batch.indices[positive].cpu().numpy()
-        values = batch.values[positive].float().cpu().numpy()
+        indices = batch.indices.cpu().numpy()
+        values = batch.values.float().cpu().numpy()
+        if index_cache is not None and value_cache is not None:
+            indices.astype(index_dtype, copy=False).tofile(index_cache)
+            values.tofile(value_cache)
+
+        positive = values > 0
+        indices = indices[positive]
+        values = values[positive]
         counts += np.bincount(indices, minlength=feature_count)
         activation_sums += np.bincount(indices, weights=values, minlength=feature_count)
         activation_square_sums += np.bincount(
             indices, weights=values * values, minlength=feature_count
         )
     return counts, activation_sums, activation_square_sums
+
+
+def iter_cached_feature_activations(
+    index_cache: BinaryIO,
+    value_cache: BinaryIO,
+    tokens: np.ndarray,
+    k: int,
+    batch_size: int,
+    index_dtype: np.dtype | type[np.unsignedinteger],
+) -> Iterator[ActivationBatch]:
+    """Replay a compact activation stream without rerunning the model and SAE."""
+    index_cache.seek(0)
+    value_cache.seek(0)
+    progress = tqdm(
+        total=len(tokens), unit="tok", desc="Rank diverse tokens", dynamic_ncols=True
+    )
+    try:
+        for start in range(0, len(tokens), batch_size):
+            end = min(start + batch_size, len(tokens))
+            shape = (end - start, k)
+            count = shape[0] * shape[1]
+            indices = np.fromfile(index_cache, dtype=index_dtype, count=count)
+            values = np.fromfile(value_cache, dtype=np.float32, count=count)
+            if len(indices) != count or len(values) != count:
+                raise RuntimeError("temporary activation cache is incomplete")
+            yield ActivationBatch(
+                indices=torch.from_numpy(indices.astype(np.int64).reshape(shape)),
+                values=torch.from_numpy(values.reshape(shape)),
+                positions=torch.arange(start, end),
+                token_ids=torch.from_numpy(np.asarray(tokens[start:end], dtype=np.int64)),
+            )
+            progress.update(end - start)
+    finally:
+        progress.close()
 
 
 def select_candidate_features(
@@ -418,48 +469,43 @@ def collect_diverse_pools(
     context_size: int,
     device: torch.device,
 ) -> dict[int, DiverseSamplePool]:
-    feature_ids = [int(index) for index in candidate_features]
     pools = {
-        index: DiverseSamplePool(
+        int(index): DiverseSamplePool(
             args.candidate_tokens_per_feature, args.samples_per_token, context_size
         )
-        for index in feature_ids
+        for index in candidate_features
     }
-    if not feature_ids:
+    if not pools:
         return pools
 
     lookup = torch.full((feature_count,), -1, dtype=torch.int64, device=device)
-    lookup[torch.tensor(feature_ids, dtype=torch.int64, device=device)] = torch.arange(
-        len(feature_ids), dtype=torch.int64, device=device
-    )
+    candidate_ids = torch.tensor(list(pools), dtype=torch.int64, device=device)
+    lookup[candidate_ids] = candidate_ids
     token_cache: dict[int, str | None] = {}
 
     for batch in activation_batches:
-        slots = lookup[batch.indices]
-        rows, columns = torch.where((slots >= 0) & (batch.values > 0))
+        feature_indices = lookup[batch.indices]
+        rows, columns = torch.where((feature_indices >= 0) & (batch.values > 0))
         if rows.numel() == 0:
             continue
 
-        event_slots = slots[rows, columns].cpu().numpy()
+        event_features = feature_indices[rows, columns].cpu().numpy()
         event_values = batch.values[rows, columns].float().cpu().numpy()
         event_token_ids = batch.token_ids[rows].cpu().numpy()
-        cpu_rows = rows.cpu()
-        event_positions = batch.positions[cpu_rows].numpy()
+        event_positions = batch.positions[rows.cpu()].numpy()
 
         # Retain the strongest occurrence of each feature/token pair per batch.
-        keys = event_slots.astype(np.int64) * vocab_size + event_token_ids
+        keys = event_features * vocab_size + event_token_ids
         order = np.lexsort((-event_values, keys))
         sorted_keys = keys[order]
-        first = np.empty(len(order), dtype=bool)
-        first[0] = True
-        first[1:] = sorted_keys[1:] != sorted_keys[:-1]
+        first = np.concatenate(([True], sorted_keys[1:] != sorted_keys[:-1]))
 
         for event in order[first]:
             token_id = int(event_token_ids[event])
             token = normalized_token(tokenizer, token_id, token_cache)
             if token is None:
                 continue
-            feature_id = feature_ids[int(event_slots[event])]
+            feature_id = int(event_features[event])
             pools[feature_id].add(
                 Sample(
                     activation=float(event_values[event]),
@@ -477,7 +523,7 @@ def build_feature_reports(
     token_count: int,
     args: argparse.Namespace,
 ) -> list[FeatureReport]:
-    raw: list[dict] = []
+    candidates: list[FeatureReport] = []
     for feature_id, pool in pools.items():
         samples, unique_tokens = pool.diversified_samples(
             args.samples_per_feature, args.minimum_relative_activation
@@ -494,32 +540,36 @@ def build_feature_reports(
         maximum = max(pool.best_by_token.values())
         coverage = min(unique_tokens / args.samples_per_feature, 1.0)
         balance = float(activations.mean() / maximum)
-        raw.append(
-            {
-                "index": feature_id,
-                "fire_count": int(counts[feature_id]),
-                "frequency": float(counts[feature_id] / token_count),
-                "diversity_score": coverage * balance,
-                "unique_strong_tokens": unique_tokens,
-                "mean_sample_activation": float(activations.mean()),
-                "max_activation": float(maximum),
-                "samples": tuple(samples),
-            }
+        candidates.append(
+            FeatureReport(
+                index=feature_id,
+                fire_count=int(counts[feature_id]),
+                frequency=float(counts[feature_id] / token_count),
+                score=0.0,
+                diversity_score=coverage * balance,
+                activation_score=0.0,
+                unique_strong_tokens=unique_tokens,
+                mean_sample_activation=float(activations.mean()),
+                max_activation=float(maximum),
+                samples=tuple(samples),
+            )
         )
 
-    if not raw:
+    if not candidates:
         return []
 
-    log_strengths = np.log1p([item["mean_sample_activation"] for item in raw])
+    log_strengths = np.log1p(
+        [candidate.mean_sample_activation for candidate in candidates]
+    )
     low, high = np.percentile(log_strengths, (10, 90))
     scale = max(float(high - low), 1e-12)
     reports = []
-    for item, log_strength in zip(raw, log_strengths):
+    for candidate, log_strength in zip(candidates, log_strengths):
         activation_score = float(np.clip((log_strength - low) / scale, 0.0, 1.0))
-        score = 0.7 * item["diversity_score"] + 0.3 * activation_score
+        score = 0.7 * candidate.diversity_score + 0.3 * activation_score
         reports.append(
-            FeatureReport(
-                **item,
+            replace(
+                candidate,
                 score=score,
                 activation_score=activation_score,
             )
@@ -585,6 +635,7 @@ def render_report(
         lines.append("No features satisfied the interestingness thresholds.")
         return "\n".join(lines) + "\n"
 
+    context_size = int(config["context_size"])
     for rank, feature in enumerate(features, 1):
         token_preview = ", ".join(
             dict.fromkeys(sample.token for sample in feature.samples)
@@ -608,7 +659,7 @@ def render_report(
                 tokens,
                 sample.position,
                 args.context_tokens,
-                int(config["context_size"]),
+                context_size,
             )
             lines.append(
                 f"{number}. activation `{sample.activation:.5g}`, token `{sample.token}`, "
@@ -636,6 +687,7 @@ def main() -> None:
     cached_tokens = np.memmap(cache_path, mode="r", dtype=np.uint32)
     token_count = min(args.scan_tokens or len(cached_tokens), len(cached_tokens))
     tokens = cached_tokens[:token_count]
+    context_size = int(config["context_size"])
     model_batch_size = args.model_batch_size or int(config.get("model_batch_size", 32))
     sae_batch_size = args.sae_batch_size or int(config.get("sae_batch_size", 8192))
     dtype = getattr(torch, args.model_dtype or config.get("model_dtype", "float32"))
@@ -662,23 +714,33 @@ def main() -> None:
     sae.load_state_dict(state)
     sae.eval().requires_grad_(False)
 
-    def scan(capture, description):
-        return iter_feature_activations(
+    index_dtype = (
+        np.uint16 if sae.d_sae <= np.iinfo(np.uint16).max + 1 else np.uint32
+    )
+    with (
+        tempfile.TemporaryFile() as index_cache,
+        tempfile.TemporaryFile() as value_cache,
+        ResidualStreamCapture(layers[layer_index]) as capture,
+    ):
+        activation_batches = iter_feature_activations(
             model,
             capture,
             sae,
             tokens,
             tokenizer.pad_token_id,
-            int(config["context_size"]),
+            context_size,
             model_batch_size,
             sae_batch_size,
             device,
-            description,
+            "Scan features",
+            include_metadata=False,
         )
-
-    with ResidualStreamCapture(layers[layer_index]) as capture:
         counts, activation_sums, activation_square_sums = collect_feature_stats(
-            scan(capture, "Measure features"), sae.d_sae
+            activation_batches,
+            sae.d_sae,
+            index_cache,
+            value_cache,
+            index_dtype,
         )
         candidates = select_candidate_features(
             counts,
@@ -688,14 +750,21 @@ def main() -> None:
             args,
         )
         pools = collect_diverse_pools(
-            scan(capture, "Find diverse tokens"),
+            iter_cached_feature_activations(
+                index_cache,
+                value_cache,
+                tokens,
+                sae.k,
+                sae_batch_size,
+                index_dtype,
+            ),
             candidates,
             sae.d_sae,
             int(tokenizer.vocab_size),
             tokenizer,
             args,
-            int(config["context_size"]),
-            device,
+            context_size,
+            torch.device("cpu"),
         )
 
     features = build_feature_reports(pools, counts, len(tokens), args)
