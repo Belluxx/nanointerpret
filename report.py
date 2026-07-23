@@ -31,6 +31,10 @@ from src.sae import TopKSAE
 class ActivationBatch:
     indices: Tensor
     values: Tensor
+
+
+@dataclass(frozen=True)
+class TokenActivationBatch(ActivationBatch):
     positions: Tensor
     token_ids: Tensor
 
@@ -78,6 +82,12 @@ class DiverseSamplePool:
                 break
             heapq.heappop(self.weakest_tokens)
 
+    def _update_best(self, token: str, contexts: dict[int, Sample]) -> None:
+        best = max(sample.activation for sample in contexts.values())
+        if self.best_by_token.get(token) != best:
+            self.best_by_token[token] = best
+            heapq.heappush(self.weakest_tokens, (best, token))
+
     def add(self, sample: Sample) -> None:
         contexts = self.by_token.get(sample.token)
         if contexts is None:
@@ -89,9 +99,9 @@ class DiverseSamplePool:
                 del self.by_token[weakest]
                 del self.best_by_token[weakest]
             context_id = self._context_id(sample)
-            self.by_token[sample.token] = {context_id: sample}
-            self.best_by_token[sample.token] = sample.activation
-            heapq.heappush(self.weakest_tokens, (sample.activation, sample.token))
+            contexts = {context_id: sample}
+            self.by_token[sample.token] = contexts
+            self._update_best(sample.token, contexts)
             return
 
         context_id = self._context_id(sample)
@@ -109,10 +119,7 @@ class DiverseSamplePool:
                 del contexts[weakest_context]
                 contexts[context_id] = sample
 
-        best = max(item.activation for item in contexts.values())
-        if best != self.best_by_token[sample.token]:
-            self.best_by_token[sample.token] = best
-            heapq.heappush(self.weakest_tokens, (best, sample.token))
+        self._update_best(sample.token, contexts)
 
     def strong_tokens(self, relative_threshold: float) -> list[tuple[str, list[Sample]]]:
         if not self.best_by_token:
@@ -144,10 +151,8 @@ class DiverseSamplePool:
                     for candidate in samples
                     if self._context_id(candidate) not in used_contexts
                 ),
-                None,
+                samples[0],
             )
-            if sample is None:
-                sample = samples[0]
             selected.append(sample)
             used_contexts.add(self._context_id(sample))
             if len(selected) == limit:
@@ -306,7 +311,6 @@ def iter_feature_activations(
     sae_batch_size: int,
     device: torch.device,
     description: str,
-    include_metadata: bool = True,
 ) -> Iterator[ActivationBatch]:
     batches = iter_context_batches(
         tokens,
@@ -318,34 +322,15 @@ def iter_feature_activations(
     )
     progress = tqdm(total=len(tokens), unit="tok", desc=description, dynamic_ncols=True)
     try:
-        for input_ids, attention_mask, context_ids in batches:
+        for input_ids, attention_mask, _ in batches:
             token_count = int(attention_mask.sum())
-            residual, device_input_ids, valid_mask = move_and_capture_residual(
+            residual, _, _ = move_and_capture_residual(
                 model, capture, input_ids, attention_mask, token_count, device
             )
-            if include_metadata:
-                positions = (
-                    torch.as_tensor(context_ids)[:, None] * context_size
-                    + torch.arange(context_size)[None, :]
-                )[attention_mask.bool()]
-                packed_token_ids = (
-                    device_input_ids.flatten()
-                    if valid_mask is None
-                    else device_input_ids[valid_mask]
-                )
-            else:
-                positions = torch.empty(0, dtype=torch.int64)
-                packed_token_ids = torch.empty(0, dtype=torch.int64)
 
             for start in range(0, len(residual), sae_batch_size):
-                end = start + sae_batch_size
-                indices, values = sae.encode(residual[start:end])
-                yield ActivationBatch(
-                    indices=indices,
-                    values=values,
-                    positions=positions[start:end],
-                    token_ids=packed_token_ids[start:end],
-                )
+                indices, values = sae.encode(residual[start : start + sae_batch_size])
+                yield ActivationBatch(indices, values)
             progress.update(token_count)
     finally:
         progress.close()
@@ -354,22 +339,18 @@ def iter_feature_activations(
 def collect_feature_stats(
     activation_batches: Iterator[ActivationBatch],
     feature_count: int,
-    index_cache: BinaryIO | None = None,
-    value_cache: BinaryIO | None = None,
-    index_dtype: np.dtype | type[np.unsignedinteger] = np.uint32,
+    index_cache: BinaryIO,
+    value_cache: BinaryIO,
+    index_dtype: np.dtype | type[np.unsignedinteger],
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    if (index_cache is None) != (value_cache is None):
-        raise ValueError("index and value caches must be provided together")
-
     counts = np.zeros(feature_count, dtype=np.int64)
     activation_sums = np.zeros(feature_count, dtype=np.float64)
     activation_square_sums = np.zeros(feature_count, dtype=np.float64)
     for batch in activation_batches:
         indices = batch.indices.cpu().numpy()
         values = batch.values.float().cpu().numpy()
-        if index_cache is not None and value_cache is not None:
-            indices.astype(index_dtype, copy=False).tofile(index_cache)
-            values.tofile(value_cache)
+        indices.astype(index_dtype, copy=False).tofile(index_cache)
+        values.tofile(value_cache)
 
         positive = values > 0
         indices = indices[positive]
@@ -389,7 +370,7 @@ def iter_cached_feature_activations(
     k: int,
     batch_size: int,
     index_dtype: np.dtype | type[np.unsignedinteger],
-) -> Iterator[ActivationBatch]:
+) -> Iterator[TokenActivationBatch]:
     """Replay a compact activation stream without rerunning the model and SAE."""
     index_cache.seek(0)
     value_cache.seek(0)
@@ -405,7 +386,7 @@ def iter_cached_feature_activations(
             values = np.fromfile(value_cache, dtype=np.float32, count=count)
             if len(indices) != count or len(values) != count:
                 raise RuntimeError("temporary activation cache is incomplete")
-            yield ActivationBatch(
+            yield TokenActivationBatch(
                 indices=torch.from_numpy(indices.astype(np.int64).reshape(shape)),
                 values=torch.from_numpy(values.reshape(shape)),
                 positions=torch.arange(start, end),
@@ -430,9 +411,6 @@ def select_candidate_features(
         & (frequencies <= args.maximum_frequency)
     )
     candidates = np.flatnonzero(eligible)
-    if not len(candidates):
-        return candidates
-
     means = activation_sums[candidates] / counts[candidates]
     rms = np.sqrt(activation_square_sums[candidates] / counts[candidates])
     strength = np.sqrt(means * rms)
@@ -444,30 +422,29 @@ def normalized_token(tokenizer, token_id: int, cache: dict[int, str | None]) -> 
     if token_id in cache:
         return cache[token_id]
     if token_id in tokenizer.all_special_ids:
-        cache[token_id] = None
-        return None
-    decoded = tokenizer.decode(
-        [token_id], skip_special_tokens=False, clean_up_tokenization_spaces=False
-    ).strip()
-    normalized = decoded.casefold()
-    # Pure digits trivially look diverse by covering 0-9, but do not make a
-    # feature linguistically interesting. Alphanumeric technical tokens remain.
-    if not normalized or not any(character.isalpha() for character in normalized):
-        cache[token_id] = None
-        return None
+        normalized = None
+    else:
+        decoded = tokenizer.decode(
+            [token_id],
+            skip_special_tokens=False,
+            clean_up_tokenization_spaces=False,
+        ).strip()
+        normalized = decoded.casefold()
+        # Pure digits trivially look diverse by covering 0-9, but do not make a
+        # feature linguistically interesting. Alphanumeric technical tokens remain.
+        if not normalized or not any(character.isalpha() for character in normalized):
+            normalized = None
     cache[token_id] = normalized
     return normalized
 
 
 def collect_diverse_pools(
-    activation_batches: Iterator[ActivationBatch],
+    activation_batches: Iterator[TokenActivationBatch],
     candidate_features: np.ndarray,
     feature_count: int,
-    vocab_size: int,
     tokenizer,
     args: argparse.Namespace,
     context_size: int,
-    device: torch.device,
 ) -> dict[int, DiverseSamplePool]:
     pools = {
         int(index): DiverseSamplePool(
@@ -478,8 +455,8 @@ def collect_diverse_pools(
     if not pools:
         return pools
 
-    lookup = torch.full((feature_count,), -1, dtype=torch.int64, device=device)
-    candidate_ids = torch.tensor(list(pools), dtype=torch.int64, device=device)
+    lookup = torch.full((feature_count,), -1, dtype=torch.int64)
+    candidate_ids = torch.tensor(list(pools), dtype=torch.int64)
     lookup[candidate_ids] = candidate_ids
     token_cache: dict[int, str | None] = {}
 
@@ -495,7 +472,7 @@ def collect_diverse_pools(
         event_positions = batch.positions[rows.cpu()].numpy()
 
         # Retain the strongest occurrence of each feature/token pair per batch.
-        keys = event_features * vocab_size + event_token_ids
+        keys = event_features * len(tokenizer) + event_token_ids
         order = np.lexsort((-event_values, keys))
         sorted_keys = keys[order]
         first = np.concatenate(([True], sorted_keys[1:] != sorted_keys[:-1]))
@@ -537,9 +514,10 @@ def build_feature_reports(
         activations = np.asarray(
             [sample.activation for sample in distinct_samples], dtype=np.float64
         )
+        mean_activation = float(activations.mean())
         maximum = max(pool.best_by_token.values())
         coverage = min(unique_tokens / args.samples_per_feature, 1.0)
-        balance = float(activations.mean() / maximum)
+        balance = mean_activation / maximum
         candidates.append(
             FeatureReport(
                 index=feature_id,
@@ -549,7 +527,7 @@ def build_feature_reports(
                 diversity_score=coverage * balance,
                 activation_score=0.0,
                 unique_strong_tokens=unique_tokens,
-                mean_sample_activation=float(activations.mean()),
+                mean_sample_activation=mean_activation,
                 max_activation=float(maximum),
                 samples=tuple(samples),
             )
@@ -733,7 +711,6 @@ def main() -> None:
             sae_batch_size,
             device,
             "Scan features",
-            include_metadata=False,
         )
         counts, activation_sums, activation_square_sums = collect_feature_stats(
             activation_batches,
@@ -760,11 +737,9 @@ def main() -> None:
             ),
             candidates,
             sae.d_sae,
-            int(tokenizer.vocab_size),
             tokenizer,
             args,
             context_size,
-            torch.device("cpu"),
         )
 
     features = build_feature_reports(pools, counts, len(tokens), args)
