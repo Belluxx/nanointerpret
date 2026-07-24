@@ -50,7 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sae-batch-size", type=int, default=4096, help="SAE token microbatch; lower this if memory is limited.")
     parser.add_argument("--normalization-tokens", type=int, default=1_000_000, help="Training-token sample used to estimate one global activation scale.")
     parser.add_argument("--log-every", type=int, default=100_000)
-    parser.add_argument("--checkpoint-every", type=int, default=5_000_000, help="Save and evaluate a checkpoint after this many training tokens.")
+    parser.add_argument("--checkpoint-every", type=int, default=50_000_000, help="Save and evaluate a checkpoint after this many training tokens.")
     parser.add_argument("--dead-window", type=int, default=1_000_000)
     parser.add_argument("--gradient-clip", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=42)
