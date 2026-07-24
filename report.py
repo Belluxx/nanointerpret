@@ -8,16 +8,15 @@ import re
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
-from types import SimpleNamespace
 from typing import BinaryIO, Iterator
 
 import numpy as np
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 from tqdm.auto import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from src.data import iter_context_batches, token_cache_paths
+from src.data import TokenCacheSpec, iter_context_batches, token_cache_paths
 from src.experiment import (
     ResidualStreamCapture,
     capture_residual_batch,
@@ -258,6 +257,7 @@ def load_checkpoint(path: Path) -> tuple[dict, dict]:
 
     required = {
         "model_id",
+        "dataset_id",
         "dataset_config",
         "train_tokens",
         "validation_tokens",
@@ -274,8 +274,8 @@ def load_checkpoint(path: Path) -> tuple[dict, dict]:
 
 
 def find_validation_cache(config: dict, cache_dir: Path) -> Path:
-    cache_args = SimpleNamespace(cache_dir=cache_dir, **config)
-    _train, validation, _metadata = token_cache_paths(cache_args)
+    cache_spec = TokenCacheSpec.from_mapping(config, cache_dir)
+    _train, validation, _metadata = token_cache_paths(cache_spec)
     if not validation.exists():
         raise FileNotFoundError(
             f"validation cache not found at {validation}; run train.py --cache-only first"
@@ -640,58 +640,31 @@ def render_report(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def main() -> None:
-    args = parse_args()
-    validate_args(args)
-    device = choose_device(args.device)
-    checkpoint = args.checkpoint
-    state, config = load_checkpoint(checkpoint)
-
-    cache_path = (
-        args.tokens_path
-        if args.tokens_path is not None
-        else find_validation_cache(config, args.cache_dir)
-    )
-    if not cache_path.is_file():
-        raise FileNotFoundError(f"token file not found at {cache_path}")
-    cached_tokens = np.memmap(cache_path, mode="r", dtype=np.uint32)
-    token_count = min(args.scan_tokens or len(cached_tokens), len(cached_tokens))
-    tokens = cached_tokens[:token_count]
+def analyze_features(
+    model: nn.Module,
+    layer: nn.Module,
+    sae: TopKSAE,
+    tokens: np.ndarray,
+    tokenizer,
+    device: torch.device,
+    args: argparse.Namespace,
+    config: dict,
+) -> tuple[list[FeatureReport], int]:
+    """Run the two-pass feature scan and rank the resulting sample pools."""
     context_size = int(config["context_size"])
-    model_batch_size = args.model_batch_size or int(config.get("model_batch_size", 32))
-    sae_batch_size = args.sae_batch_size or int(config.get("sae_batch_size", 8192))
-    dtype = getattr(torch, args.model_dtype or config.get("model_dtype", "float32"))
-    activation_scale = float(config.get("activation_scale", 1.0))
-
-    print(f"device={device}, tokens={len(tokens):,}, checkpoint={checkpoint}")
-    tokenizer = AutoTokenizer.from_pretrained(config["model_id"])
-    if tokenizer.pad_token_id is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLM.from_pretrained(
-        config["model_id"], dtype=dtype, attn_implementation="eager"
-    ).to(device)
-    model.eval().requires_grad_(False)
-
-    layer_path, layers = find_transformer_layers(model)
-    layer_index = int(config["layer_index"])
-    if config.get("layer_path", layer_path) != layer_path:
-        raise ValueError(f"model layer path changed from {config['layer_path']} to {layer_path}")
-    if not 0 <= layer_index < len(layers):
-        raise ValueError(f"layer index must be in [0, {len(layers) - 1}]")
-
-    sae = TopKSAE(
-        int(config["d_model"]), int(config["d_sae"]), int(config["k"]), device
+    model_batch_size = args.model_batch_size or int(
+        config.get("model_batch_size", 32)
     )
-    sae.load_state_dict(state)
-    sae.eval().requires_grad_(False)
-
+    sae_batch_size = args.sae_batch_size or int(config.get("sae_batch_size", 8192))
+    activation_scale = float(config.get("activation_scale", 1.0))
     index_dtype = (
         np.uint16 if sae.d_sae <= np.iinfo(np.uint16).max + 1 else np.uint32
     )
+
     with (
         tempfile.TemporaryFile() as index_cache,
         tempfile.TemporaryFile() as value_cache,
-        ResidualStreamCapture(layers[layer_index]) as capture,
+        ResidualStreamCapture(layer) as capture,
     ):
         activation_batches = iter_feature_activations(
             model,
@@ -736,9 +709,70 @@ def main() -> None:
             context_size,
         )
 
-    features = build_feature_reports(pools, counts, len(tokens), args)
+    return build_feature_reports(pools, counts, len(tokens), args), len(candidates)
+
+
+def main() -> None:
+    args = parse_args()
+    validate_args(args)
+    device = choose_device(args.device)
+    checkpoint = args.checkpoint
+    state, config = load_checkpoint(checkpoint)
+
+    cache_path = (
+        args.tokens_path
+        if args.tokens_path is not None
+        else find_validation_cache(config, args.cache_dir)
+    )
+    if not cache_path.is_file():
+        raise FileNotFoundError(f"token file not found at {cache_path}")
+    cached_tokens = np.memmap(cache_path, mode="r", dtype=np.uint32)
+    token_count = min(args.scan_tokens or len(cached_tokens), len(cached_tokens))
+    tokens = cached_tokens[:token_count]
+    dtype = getattr(torch, args.model_dtype or config.get("model_dtype", "float32"))
+
+    print(f"device={device}, tokens={len(tokens):,}, checkpoint={checkpoint}")
+    tokenizer = AutoTokenizer.from_pretrained(config["model_id"])
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    model = AutoModelForCausalLM.from_pretrained(
+        config["model_id"], dtype=dtype, attn_implementation="eager"
+    ).to(device)
+    model.eval().requires_grad_(False)
+
+    layer_path, layers = find_transformer_layers(model)
+    layer_index = int(config["layer_index"])
+    if config.get("layer_path", layer_path) != layer_path:
+        raise ValueError(
+            f"model layer path changed from {config['layer_path']} to {layer_path}"
+        )
+    if not 0 <= layer_index < len(layers):
+        raise ValueError(f"layer index must be in [0, {len(layers) - 1}]")
+
+    sae = TopKSAE(
+        int(config["d_model"]), int(config["d_sae"]), int(config["k"]), device
+    )
+    sae.load_state_dict(state)
+    sae.eval().requires_grad_(False)
+
+    features, candidate_count = analyze_features(
+        model,
+        layers[layer_index],
+        sae,
+        tokens,
+        tokenizer,
+        device,
+        args,
+        config,
+    )
     report = render_report(
-        checkpoint, config, tokenizer, tokens, features, len(candidates), args
+        checkpoint,
+        config,
+        tokenizer,
+        tokens,
+        features,
+        candidate_count,
+        args,
     )
     report_path = args.report_path or checkpoint.parent / "feature_report.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)

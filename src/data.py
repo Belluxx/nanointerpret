@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import argparse
 import json
 import math
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Mapping
 
 import numpy as np
 import torch
@@ -13,13 +13,40 @@ from torch import Tensor
 from tqdm.auto import tqdm
 
 
-def token_cache_paths(args: argparse.Namespace) -> tuple[Path, Path, Path]:
-    safe_model = args.model_id.replace("/", "--")
-    stem = f"{safe_model}_{args.dataset_config}_{args.train_tokens}_{args.validation_tokens}"
+@dataclass(frozen=True)
+class TokenCacheSpec:
+    cache_dir: Path
+    model_id: str
+    dataset_id: str
+    dataset_config: str
+    train_tokens: int
+    validation_tokens: int
+
+    @classmethod
+    def from_mapping(
+        cls,
+        config: Mapping[str, object],
+        cache_dir: Path,
+    ) -> TokenCacheSpec:
+        return cls(
+            cache_dir=cache_dir,
+            model_id=str(config["model_id"]),
+            dataset_id=str(config["dataset_id"]),
+            dataset_config=str(config["dataset_config"]),
+            train_tokens=int(config["train_tokens"]),
+            validation_tokens=int(config["validation_tokens"]),
+        )
+
+
+def token_cache_paths(spec: TokenCacheSpec) -> tuple[Path, Path, Path]:
+    safe_model = spec.model_id.replace("/", "--")
+    stem = (
+        f"{safe_model}_{spec.dataset_config}_{spec.train_tokens}_{spec.validation_tokens}"
+    )
     return (
-        args.cache_dir / f"{stem}_train.uint32",
-        args.cache_dir / f"{stem}_validation.uint32",
-        args.cache_dir / f"{stem}_metadata.json",
+        spec.cache_dir / f"{stem}_train.uint32",
+        spec.cache_dir / f"{stem}_validation.uint32",
+        spec.cache_dir / f"{stem}_metadata.json",
     )
 
 
@@ -27,7 +54,7 @@ def cache_is_valid(
     train_path: Path,
     validation_path: Path,
     metadata_path: Path,
-    args: argparse.Namespace,
+    spec: TokenCacheSpec,
 ) -> bool:
     if not (train_path.exists() and validation_path.exists() and metadata_path.exists()):
         return False
@@ -37,25 +64,28 @@ def cache_is_valid(
         return False
 
     expected = {
-        "model_id": args.model_id,
-        "dataset_id": args.dataset_id,
-        "dataset_config": args.dataset_config,
-        "train_tokens": args.train_tokens,
-        "validation_tokens": args.validation_tokens,
+        "model_id": spec.model_id,
+        "dataset_id": spec.dataset_id,
+        "dataset_config": spec.dataset_config,
+        "train_tokens": spec.train_tokens,
+        "validation_tokens": spec.validation_tokens,
     }
     item_size = np.dtype(np.uint32).itemsize
-    return (
-        all(metadata.get(key) == value for key, value in expected.items())
-        and train_path.stat().st_size == args.train_tokens * item_size
-        and validation_path.stat().st_size == args.validation_tokens * item_size
-    )
+    try:
+        return (
+            all(metadata.get(key) == value for key, value in expected.items())
+            and train_path.stat().st_size == spec.train_tokens * item_size
+            and validation_path.stat().st_size == spec.validation_tokens * item_size
+        )
+    except OSError:
+        return False
 
 
-def build_token_cache(tokenizer, args: argparse.Namespace) -> tuple[Path, Path]:
-    train_path, validation_path, metadata_path = token_cache_paths(args)
-    args.cache_dir.mkdir(parents=True, exist_ok=True)
-    if cache_is_valid(train_path, validation_path, metadata_path, args):
-        print(f"using token cache at {args.cache_dir}")
+def build_token_cache(tokenizer, spec: TokenCacheSpec) -> tuple[Path, Path]:
+    train_path, validation_path, metadata_path = token_cache_paths(spec)
+    spec.cache_dir.mkdir(parents=True, exist_ok=True)
+    if cache_is_valid(train_path, validation_path, metadata_path, spec):
+        print(f"using token cache at {spec.cache_dir}")
         return train_path, validation_path
 
     try:
@@ -67,12 +97,12 @@ def build_token_cache(tokenizer, args: argparse.Namespace) -> tuple[Path, Path]:
 
     train_tmp = train_path.with_suffix(train_path.suffix + ".tmp")
     validation_tmp = validation_path.with_suffix(validation_path.suffix + ".tmp")
-    target_total = args.train_tokens + args.validation_tokens
+    target_total = spec.train_tokens + spec.validation_tokens
     written = 0
-    print(f"streaming {target_total:,} tokens from {args.dataset_id}/{args.dataset_config}")
+    print(f"streaming {target_total:,} tokens from {spec.dataset_id}/{spec.dataset_config}")
     dataset = load_dataset(
-        args.dataset_id,
-        name=args.dataset_config,
+        spec.dataset_id,
+        name=spec.dataset_config,
         split="train",
         streaming=True,
     )
@@ -95,7 +125,7 @@ def build_token_cache(tokenizer, args: argparse.Namespace) -> tuple[Path, Path]:
                 if take == 0:
                     continue
 
-                split_at = max(0, min(take, args.train_tokens - written))
+                split_at = max(0, min(take, spec.train_tokens - written))
                 if split_at:
                     array[:split_at].tofile(train_file)
                 if split_at < take:
@@ -122,11 +152,11 @@ def build_token_cache(tokenizer, args: argparse.Namespace) -> tuple[Path, Path]:
     os.replace(train_tmp, train_path)
     os.replace(validation_tmp, validation_path)
     metadata = {
-        "model_id": args.model_id,
-        "dataset_id": args.dataset_id,
-        "dataset_config": args.dataset_config,
-        "train_tokens": args.train_tokens,
-        "validation_tokens": args.validation_tokens,
+        "model_id": spec.model_id,
+        "dataset_id": spec.dataset_id,
+        "dataset_config": spec.dataset_config,
+        "train_tokens": spec.train_tokens,
+        "validation_tokens": spec.validation_tokens,
         "bos_token_id": bos,
         "eos_token_id": eos,
     }

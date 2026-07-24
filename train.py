@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from src.data import build_token_cache
+from src.data import TokenCacheSpec, build_token_cache
 from src.experiment import (
     ExperimentConfig,
     ResidualStreamCapture,
@@ -120,6 +120,95 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
 
 
+def prepare_activation_normalization(
+    args: argparse.Namespace,
+    model: torch.nn.Module,
+    capture: ResidualStreamCapture,
+    train_tokens: np.memmap,
+    pad_token_id: int,
+    device: torch.device,
+    d_model: int,
+) -> tuple[float, torch.Tensor | None]:
+    checkpoint_path = args.output_dir / "checkpoint.pt"
+    config_path = args.output_dir / "config.json"
+    if args.resume:
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"cannot resume: {checkpoint_path} does not exist")
+        if not config_path.exists():
+            raise FileNotFoundError(
+                f"cannot resume normalized training: {config_path} does not exist"
+            )
+        saved_config = json.loads(config_path.read_text())
+        if "activation_scale" not in saved_config:
+            raise ValueError(
+                "cannot resume this checkpoint because it predates activation normalization"
+            )
+        activation_scale = float(saved_config["activation_scale"])
+        print(f"reusing activation scale {activation_scale:.8g} from {config_path}")
+        return activation_scale, None
+
+    if checkpoint_path.exists():
+        raise FileExistsError(
+            f"{checkpoint_path} already exists; pass --resume or choose another --output-dir"
+        )
+    return estimate_activation_normalization(
+        model,
+        capture,
+        train_tokens,
+        pad_token_id,
+        device,
+        args,
+        d_model,
+    )
+
+
+def build_experiment_config(
+    args: argparse.Namespace,
+    layer_path: str,
+    layer_index: int,
+    d_model: int,
+    d_sae: int,
+    device: torch.device,
+    activation_scale: float,
+) -> ExperimentConfig:
+    return ExperimentConfig(
+        model_id=args.model_id,
+        dataset_id=args.dataset_id,
+        dataset_config=args.dataset_config,
+        train_tokens=args.train_tokens,
+        validation_tokens=args.validation_tokens,
+        context_size=args.context_size,
+        layer_index=layer_index,
+        layer_path=layer_path,
+        residual_location="layer_input",
+        d_model=d_model,
+        d_sae=d_sae,
+        width_multiplier=args.width_multiplier,
+        k=args.k,
+        learning_rate=args.learning_rate,
+        model_batch_size=args.model_batch_size,
+        sae_batch_size=args.sae_batch_size,
+        normalization_tokens=args.normalization_tokens,
+        activation_scale=activation_scale,
+        seed=args.seed,
+        device=str(device),
+        model_dtype=args.model_dtype,
+    )
+
+
+def save_experiment_plots(output_dir: Path) -> None:
+    from src.plot import save_feature_density_plot, save_training_plot
+
+    save_training_plot(
+        output_dir / "train_metrics.jsonl",
+        output_dir / "training_metrics.png",
+    )
+    save_feature_density_plot(
+        output_dir / "checkpoint_metrics.jsonl",
+        output_dir / "validation_feature_density.png",
+    )
+
+
 def main() -> None:
     args = parse_args()
     validate_args(args)
@@ -136,7 +225,15 @@ def main() -> None:
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    train_path, validation_path = build_token_cache(tokenizer, args)
+    cache_spec = TokenCacheSpec(
+        cache_dir=args.cache_dir,
+        model_id=args.model_id,
+        dataset_id=args.dataset_id,
+        dataset_config=args.dataset_config,
+        train_tokens=args.train_tokens,
+        validation_tokens=args.validation_tokens,
+    )
+    train_path, validation_path = build_token_cache(tokenizer, cache_spec)
     if args.cache_only:
         print(f"cached train tokens: {train_path}")
         print(f"cached validation tokens: {validation_path}")
@@ -163,63 +260,25 @@ def main() -> None:
         f"({len(layers)} layers, d_model={d_model}); SAE width={d_sae:,}, k={args.k}"
     )
     with ResidualStreamCapture(layers[layer_index]) as capture:
-        checkpoint_path = args.output_dir / "checkpoint.pt"
-        config_path = args.output_dir / "config.json"
-        if args.resume:
-            if not checkpoint_path.exists():
-                raise FileNotFoundError(f"cannot resume: {checkpoint_path} does not exist")
-            if not config_path.exists():
-                raise FileNotFoundError(
-                    f"cannot resume normalized training: {config_path} does not exist"
-                )
-            saved_config = json.loads(config_path.read_text())
-            if "activation_scale" not in saved_config:
-                raise ValueError(
-                    "cannot resume this checkpoint because it predates activation normalization"
-                )
-            activation_scale = float(saved_config["activation_scale"])
-            normalized_activation_mean = None
-            print(f"reusing activation scale {activation_scale:.8g} from {config_path}")
-        elif checkpoint_path.exists():
-            raise FileExistsError(
-                f"{checkpoint_path} already exists; pass --resume or choose another --output-dir"
-            )
-        else:
-            (
-                activation_scale,
-                normalized_activation_mean,
-            ) = estimate_activation_normalization(
+        activation_scale, normalized_activation_mean = (
+            prepare_activation_normalization(
+                args,
                 model,
                 capture,
                 train_tokens,
                 tokenizer.pad_token_id,
                 device,
-                args,
                 d_model,
             )
-
-        config = ExperimentConfig(
-            model_id=args.model_id,
-            dataset_id=args.dataset_id,
-            dataset_config=args.dataset_config,
-            train_tokens=args.train_tokens,
-            validation_tokens=args.validation_tokens,
-            context_size=args.context_size,
-            layer_index=layer_index,
-            layer_path=layer_path,
-            residual_location="layer_input",
-            d_model=d_model,
-            d_sae=d_sae,
-            width_multiplier=args.width_multiplier,
-            k=args.k,
-            learning_rate=args.learning_rate,
-            model_batch_size=args.model_batch_size,
-            sae_batch_size=args.sae_batch_size,
-            normalization_tokens=args.normalization_tokens,
-            activation_scale=activation_scale,
-            seed=args.seed,
-            device=str(device),
-            model_dtype=args.model_dtype,
+        )
+        config = build_experiment_config(
+            args,
+            layer_path,
+            layer_index,
+            d_model,
+            d_sae,
+            device,
+            activation_scale,
         )
         sae = TopKSAE(d_model, d_sae, args.k, device)
         if normalized_activation_mean is not None:
@@ -237,6 +296,7 @@ def main() -> None:
             config,
         )
         print(f"trained on {processed:,} tokens")
+        save_experiment_plots(args.output_dir)
 
         if evaluation is None:
             evaluation = evaluate_sae(

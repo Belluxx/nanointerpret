@@ -18,7 +18,7 @@ from .data import iter_context_batches
 from .sae import RunningMetrics, TopKSAE
 
 
-@dataclass
+@dataclass(frozen=True)
 class ExperimentConfig:
     model_id: str
     dataset_id: str
@@ -41,6 +41,13 @@ class ExperimentConfig:
     model_dtype: str
     normalization_tokens: int = 0
     activation_scale: float = 1.0
+
+
+@dataclass
+class TrainingState:
+    processed_tokens: int
+    processed_contexts: int
+    last_fired: Tensor
 
 
 def find_transformer_layers(model: nn.Module) -> tuple[str, nn.ModuleList]:
@@ -119,6 +126,79 @@ def save_checkpoint(
         temporary,
     )
     os.replace(temporary, path)
+
+
+def load_training_state(
+    path: Path,
+    sae: TopKSAE,
+    optimizer: torch.optim.Optimizer,
+    config: ExperimentConfig,
+    context_size: int,
+    device: torch.device,
+) -> TrainingState:
+    checkpoint = torch.load(path, map_location=device, weights_only=False)
+    validate_resume_config(checkpoint.get("config"), config)
+    sae.load_state_dict(checkpoint["sae"])
+    optimizer.load_state_dict(checkpoint["optimizer"])
+    processed_tokens = int(checkpoint["processed_tokens"])
+    processed_contexts = int(
+        checkpoint.get(
+            "processed_contexts",
+            math.ceil(processed_tokens / context_size),
+        )
+    )
+    return TrainingState(
+        processed_tokens=processed_tokens,
+        processed_contexts=processed_contexts,
+        last_fired=checkpoint["last_fired"].to(device),
+    )
+
+
+def initialize_training_state(
+    sae: TopKSAE,
+    optimizer: torch.optim.Optimizer,
+    config: ExperimentConfig,
+    device: torch.device,
+    args: argparse.Namespace,
+    checkpoint_path: Path,
+    metrics_path: Path,
+    checkpoint_metrics_path: Path,
+) -> TrainingState:
+    if args.resume:
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"cannot resume: {checkpoint_path} does not exist")
+        state = load_training_state(
+            checkpoint_path,
+            sae,
+            optimizer,
+            config,
+            args.context_size,
+            device,
+        )
+        print(f"resumed at {state.processed_tokens:,} training tokens")
+    else:
+        if checkpoint_path.exists():
+            raise FileExistsError(
+                f"{checkpoint_path} already exists; "
+                "pass --resume or choose another --output-dir"
+            )
+        metrics_path.write_text("")
+        checkpoint_metrics_path.write_text("")
+        state = TrainingState(
+            processed_tokens=0,
+            processed_contexts=0,
+            last_fired=torch.full(
+                (sae.d_sae,),
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+        )
+
+    (args.output_dir / "config.json").write_text(
+        json.dumps(asdict(config), indent=2) + "\n"
+    )
+    return state
 
 
 def append_jsonl(path: Path, record: dict) -> None:
@@ -236,6 +316,70 @@ def feature_density_histogram(fire_counts: Tensor, token_count: int) -> dict:
     }
 
 
+def optimize_residual_batch(
+    sae: TopKSAE,
+    optimizer: torch.optim.Optimizer,
+    residual: Tensor,
+    metrics: RunningMetrics,
+    last_fired: Tensor,
+    processed_tokens: int,
+    total_tokens: int,
+    args: argparse.Namespace,
+) -> float:
+    """Optimize the SAE over one captured model batch."""
+    current_learning_rate = optimizer.param_groups[0]["lr"]
+    for start in range(0, len(residual), args.sae_batch_size):
+        x = residual[start : start + args.sae_batch_size]
+        current_learning_rate = args.learning_rate * learning_rate_multiplier(
+            processed_tokens + start, total_tokens
+        )
+        for parameter_group in optimizer.param_groups:
+            parameter_group["lr"] = current_learning_rate
+
+        reconstruction, indices, values = sae(x)
+        loss = F.mse_loss(reconstruction, x)
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        sae.constrain_decoder_gradient()
+        if args.gradient_clip > 0:
+            torch.nn.utils.clip_grad_norm_(sae.parameters(), args.gradient_clip)
+        optimizer.step()
+        sae.normalize_decoder()
+
+        batch_fire_counts = metrics.update(
+            x.detach(), reconstruction.detach(), indices.detach(), values.detach()
+        )
+        fired = torch.nonzero(batch_fire_counts, as_tuple=False).flatten()
+        last_fired[fired] = processed_tokens + start + len(x)
+    return current_learning_rate
+
+
+def build_training_record(
+    metrics: RunningMetrics,
+    last_fired: Tensor,
+    processed_tokens: int,
+    dead_window: int,
+    learning_rate: float,
+    start_tokens: int,
+    elapsed_seconds: float,
+) -> dict:
+    dead_feature_pct = (
+        100.0
+        * (last_fired < processed_tokens - dead_window).float().mean().item()
+        if processed_tokens >= dead_window
+        else None
+    )
+    return {
+        "split": "train",
+        "tokens": processed_tokens,
+        **metrics.compute(),
+        "dead_feature_pct": dead_feature_pct,
+        "learning_rate": learning_rate,
+        "tokens_per_second": (processed_tokens - start_tokens)
+        / max(elapsed_seconds, 1e-9),
+    }
+
+
 @torch.inference_mode()
 def estimate_activation_normalization(
     model: nn.Module,
@@ -310,9 +454,16 @@ def train_sae(
     checkpoint_path = args.output_dir / "checkpoint.pt"
     metrics_path = args.output_dir / "train_metrics.jsonl"
     checkpoint_metrics_path = args.output_dir / "checkpoint_metrics.jsonl"
-    processed_tokens = 0
-    processed_contexts = 0
-    last_fired = torch.full((sae.d_sae,), -1, dtype=torch.int64, device=device)
+    state = initialize_training_state(
+        sae,
+        optimizer,
+        config,
+        device,
+        args,
+        checkpoint_path,
+        metrics_path,
+        checkpoint_metrics_path,
+    )
     latest_evaluation = None
     evaluation_seconds = 0.0
 
@@ -330,37 +481,17 @@ def train_sae(
             config.activation_scale,
         )
         evaluation_seconds += time.monotonic() - evaluation_start
-        checkpoint_record = {**evaluation, "training_tokens": processed_tokens}
+        checkpoint_record = {
+            **evaluation,
+            "training_tokens": state.processed_tokens,
+        }
         append_jsonl(checkpoint_metrics_path, checkpoint_record)
         tqdm.write(format_metrics_line(checkpoint_record))
         return evaluation
 
     if args.resume:
-        if not checkpoint_path.exists():
-            raise FileNotFoundError(f"cannot resume: {checkpoint_path} does not exist")
-        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-        validate_resume_config(checkpoint.get("config"), config)
-        sae.load_state_dict(checkpoint["sae"])
-        optimizer.load_state_dict(checkpoint["optimizer"])
-        processed_tokens = int(checkpoint["processed_tokens"])
-        processed_contexts = int(
-            checkpoint.get("processed_contexts", math.ceil(processed_tokens / args.context_size))
-        )
-        last_fired.copy_(checkpoint["last_fired"].to(device))
-        print(f"resumed at {processed_tokens:,} training tokens")
-    elif checkpoint_path.exists():
-        raise FileExistsError(
-            f"{checkpoint_path} already exists; pass --resume or choose another --output-dir"
-        )
-    else:
-        metrics_path.write_text("")
-        checkpoint_metrics_path.write_text("")
-
-    (args.output_dir / "config.json").write_text(json.dumps(asdict(config), indent=2) + "\n")
-
-    if args.resume:
         latest_evaluation = load_checkpoint_evaluation(
-            checkpoint_metrics_path, processed_tokens
+            checkpoint_metrics_path, state.processed_tokens
         )
         if latest_evaluation is None:
             latest_evaluation = evaluate_checkpoint()
@@ -372,20 +503,25 @@ def train_sae(
         pad_token_id,
         shuffle=True,
         seed=args.seed,
-        skip_contexts=processed_contexts,
+        skip_contexts=state.processed_contexts,
     )
     metrics = RunningMetrics(sae.d_model, sae.d_sae, device)
-    next_log = ((processed_tokens // args.log_every) + 1) * args.log_every
-    next_checkpoint = ((processed_tokens // args.checkpoint_every) + 1) * args.checkpoint_every
+    next_log = ((state.processed_tokens // args.log_every) + 1) * args.log_every
+    next_checkpoint = (
+        (state.processed_tokens // args.checkpoint_every) + 1
+    ) * args.checkpoint_every
     progress = tqdm(
-        total=len(train_tokens), initial=processed_tokens, unit="tok", desc="Train",
+        total=len(train_tokens),
+        initial=state.processed_tokens,
+        unit="tok",
+        desc="Train",
         dynamic_ncols=True, disable=None,
     )
     metric_status = tqdm(
         desc="Metrics", bar_format="{desc}", dynamic_ncols=True, disable=progress.disable
     )
     start_time = time.monotonic()
-    start_tokens = processed_tokens
+    start_tokens = state.processed_tokens
     evaluation_seconds = 0.0
     current_learning_rate = optimizer.param_groups[0]["lr"]
 
@@ -401,52 +537,33 @@ def train_sae(
             config.activation_scale,
         )
 
-        for start in range(0, len(residual), args.sae_batch_size):
-            x = residual[start : start + args.sae_batch_size]
-            multiplier = learning_rate_multiplier(
-                processed_tokens + start, len(train_tokens)
-            )
-            current_learning_rate = args.learning_rate * multiplier
-            for parameter_group in optimizer.param_groups:
-                parameter_group["lr"] = current_learning_rate
-
-            reconstruction, indices, values = sae(x)
-            loss = F.mse_loss(reconstruction, x)
-            optimizer.zero_grad(set_to_none=True)
-            loss.backward()
-            sae.constrain_decoder_gradient()
-            if args.gradient_clip > 0:
-                torch.nn.utils.clip_grad_norm_(sae.parameters(), args.gradient_clip)
-            optimizer.step()
-            sae.normalize_decoder()
-
-            batch_fire_counts = metrics.update(
-                x.detach(), reconstruction.detach(), indices.detach(), values.detach()
-            )
-            with torch.no_grad():
-                fired = torch.nonzero(batch_fire_counts, as_tuple=False).flatten()
-                last_fired[fired] = processed_tokens + start + len(x)
-
-        processed_tokens += batch_tokens
-        processed_contexts += len(context_ids)
+        current_learning_rate = optimize_residual_batch(
+            sae,
+            optimizer,
+            residual,
+            metrics,
+            state.last_fired,
+            state.processed_tokens,
+            len(train_tokens),
+            args,
+        )
+        state.processed_tokens += batch_tokens
+        state.processed_contexts += len(context_ids)
         progress.update(batch_tokens)
 
-        if processed_tokens >= next_log or processed_tokens == len(train_tokens):
-            dead_feature_pct = (
-                100.0
-                * (last_fired < processed_tokens - args.dead_window).float().mean().item()
-                if processed_tokens >= args.dead_window
-                else None
+        if (
+            state.processed_tokens >= next_log
+            or state.processed_tokens == len(train_tokens)
+        ):
+            record = build_training_record(
+                metrics,
+                state.last_fired,
+                state.processed_tokens,
+                args.dead_window,
+                current_learning_rate,
+                start_tokens,
+                time.monotonic() - start_time - evaluation_seconds,
             )
-            record = {
-                "split": "train",
-                "tokens": processed_tokens,
-                **metrics.compute(),
-                "dead_feature_pct": dead_feature_pct,
-                "learning_rate": current_learning_rate,
-                "tokens_per_second": (processed_tokens - start_tokens)
-                / max(time.monotonic() - start_time - evaluation_seconds, 1e-9),
-            }
             append_jsonl(metrics_path, record)
             if progress.disable:
                 # Redirected output cannot redraw a line, so emit readable log records.
@@ -456,21 +573,24 @@ def train_sae(
                     f"Metrics\t{format_metrics(record)}", refresh=True
                 )
             metrics.reset()
-            while next_log <= processed_tokens:
+            while next_log <= state.processed_tokens:
                 next_log += args.log_every
 
-        if processed_tokens >= next_checkpoint or processed_tokens == len(train_tokens):
+        if (
+            state.processed_tokens >= next_checkpoint
+            or state.processed_tokens == len(train_tokens)
+        ):
             save_checkpoint(
                 checkpoint_path,
                 sae,
                 optimizer,
-                processed_tokens,
-                processed_contexts,
-                last_fired,
+                state.processed_tokens,
+                state.processed_contexts,
+                state.last_fired,
                 config,
             )
             latest_evaluation = evaluate_checkpoint()
-            while next_checkpoint <= processed_tokens:
+            while next_checkpoint <= state.processed_tokens:
                 next_checkpoint += args.checkpoint_every
 
     metric_status.close()
@@ -479,14 +599,7 @@ def train_sae(
         {"sae": sae.state_dict(), "config": asdict(config)},
         args.output_dir / "sae_final.pt",
     )
-    from .plot import save_feature_density_plot, save_training_plot
-
-    save_training_plot(metrics_path, args.output_dir / "training_metrics.png")
-    save_feature_density_plot(
-        checkpoint_metrics_path,
-        args.output_dir / "validation_feature_density.png",
-    )
-    return processed_tokens, latest_evaluation
+    return state.processed_tokens, latest_evaluation
 
 
 @torch.inference_mode()
