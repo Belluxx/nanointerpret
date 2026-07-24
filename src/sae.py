@@ -93,16 +93,23 @@ class RunningMetrics:
     @torch.no_grad()
     def compute(self) -> dict[str, float]:
         if self.count == 0:
-            return {"mse": math.nan, "explained_variance": math.nan, "l0": math.nan}
+            return {
+                "mse": math.nan,
+                "normalized_mse": math.nan,
+                "explained_variance": math.nan,
+                "l0": math.nan,
+            }
 
         n = float(self.count)
         sse = self.error_sq_sum.sum()
+        x_energy = self.x_sq_sum.sum().clamp_min(1e-12)
         x_variance = (self.x_sq_sum - self.x_sum.square() / n).sum().clamp_min(1e-12)
         error_variance = (self.error_sq_sum - self.error_sum.square() / n).sum().clamp_min(0)
         frequencies = self.feature_fire_counts.cpu().numpy() / n
         active = frequencies > 0
         return {
             "mse": float((sse / (n * self.d_model)).item()),
+            "normalized_mse": float((sse / x_energy).item()),
             "explained_variance": float((1.0 - error_variance / x_variance).item()),
             "l0": float((self.l0_sum / n).item()),
             "window_dead_feature_pct": float(100.0 * (~active).mean()),

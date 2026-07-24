@@ -34,8 +34,10 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
     if not records:
         return
 
-    def values(field: str) -> np.ndarray:
-        return np.asarray([record[field] for record in records], dtype=float)
+    def values(field: str, default: float | None = None) -> np.ndarray:
+        if default is None:
+            return np.asarray([record[field] for record in records], dtype=float)
+        return np.asarray([record.get(field, default) for record in records], dtype=float)
 
     tokens = values("tokens") / 1_000_000
     with sns.axes_style("whitegrid", rc=STYLE), sns.plotting_context("notebook"):
@@ -45,10 +47,22 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
         mse_axis, feature_axis = figure.subplots(1, 2)
 
         sns.lineplot(
-            x=tokens, y=values("mse"), color="#2563EB",
+            x=tokens, y=values("mse"), label="Per-element MSE", color="#2563EB",
             linewidth=2.4, errorbar=None, ax=mse_axis,
         )
-        mse_axis.set(ylabel="MSE · log scale", yscale="log")
+        normalized_mse = values("normalized_mse", np.nan)
+        if np.isfinite(normalized_mse).any():
+            sns.lineplot(
+                x=tokens,
+                y=normalized_mse,
+                label="NMSE",
+                color="#7C3AED",
+                linewidth=2.4,
+                errorbar=None,
+                ax=mse_axis,
+            )
+        mse_axis.set(ylabel="Error · log scale", yscale="log")
+        mse_axis.legend(frameon=False, loc="best")
 
         for label, field, color in FEATURES:
             sns.lineplot(
