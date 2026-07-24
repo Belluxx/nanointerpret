@@ -203,6 +203,16 @@ def move_and_capture_residual(
     return residual, input_ids, valid_mask
 
 
+def learning_rate_multiplier(tokens_seen: int, total_tokens: int) -> float:
+    """Keep LR constant for 80% of training, then linearly decay toward zero."""
+    decay_start = int(0.8 * total_tokens)
+    if tokens_seen < decay_start:
+        return 1.0
+    decay_length = max(1, total_tokens - decay_start)
+    remaining = max(0, total_tokens - tokens_seen)
+    return remaining / decay_length
+
+
 @torch.inference_mode()
 def estimate_activation_scale(
     model: nn.Module,
@@ -346,6 +356,7 @@ def train_sae(
     start_time = time.monotonic()
     start_tokens = processed_tokens
     evaluation_seconds = 0.0
+    current_learning_rate = optimizer.param_groups[0]["lr"]
 
     for input_ids, attention_mask, context_ids in batches:
         batch_tokens = int(attention_mask.sum())
@@ -365,6 +376,13 @@ def train_sae(
 
         for start in range(0, len(residual), args.sae_batch_size):
             x = residual[start : start + args.sae_batch_size]
+            multiplier = learning_rate_multiplier(
+                processed_tokens + start, len(train_tokens)
+            )
+            current_learning_rate = args.learning_rate * multiplier
+            for parameter_group in optimizer.param_groups:
+                parameter_group["lr"] = current_learning_rate
+
             reconstruction, indices, values = sae(x)
             loss = F.mse_loss(reconstruction, x)
             optimizer.zero_grad(set_to_none=True)
@@ -398,6 +416,7 @@ def train_sae(
                 "tokens": processed_tokens,
                 **metrics.compute(),
                 "dead_feature_pct": dead_feature_pct,
+                "learning_rate": current_learning_rate,
                 "tokens_per_second": (processed_tokens - start_tokens)
                 / max(time.monotonic() - start_time - evaluation_seconds, 1e-9),
             }
