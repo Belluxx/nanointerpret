@@ -8,4 +8,7 @@
     - Higher values are more specific, but may cause duplicates or "dirty" interpretations.
 - `activation normalization`: One scalar is estimated from a training-token sample and
   applied everywhere so that the average squared residual norm equals `d_model`.
-  It is saved with the checkpoint and reused by validation and feature reporting.
+  The normalized calibration-sample mean initializes the decoder bias. The scale is
+  saved with the checkpoint and reused by validation and feature reporting.
+- `learning rate`: Held at the configured value for the first 80% of training tokens,
+  then linearly decayed toward zero over the final 20%.

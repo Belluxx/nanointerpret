@@ -214,7 +214,7 @@ def learning_rate_multiplier(tokens_seen: int, total_tokens: int) -> float:
 
 
 @torch.inference_mode()
-def estimate_activation_scale(
+def estimate_activation_normalization(
     model: nn.Module,
     capture: ResidualStreamCapture,
     train_tokens: np.memmap,
@@ -222,8 +222,8 @@ def estimate_activation_scale(
     device: torch.device,
     args: argparse.Namespace,
     d_model: int,
-) -> float:
-    """Estimate one scalar such that E[||scale * x||^2] = d_model."""
+) -> tuple[float, Tensor]:
+    """Estimate the global scale and normalized mean from one calibration sample."""
     target_tokens = min(args.normalization_tokens, len(train_tokens))
     batches = iter_context_batches(
         train_tokens,
@@ -235,6 +235,7 @@ def estimate_activation_scale(
     )
     tokens_seen = 0
     squared_norm_sum = 0.0
+    activation_sum = torch.zeros(d_model, dtype=torch.float64)
     progress = tqdm(
         total=target_tokens,
         unit="tok",
@@ -248,7 +249,9 @@ def estimate_activation_scale(
             model, capture, input_ids, attention_mask, batch_tokens, device
         )
         take = min(len(residual), target_tokens - tokens_seen)
-        squared_norm_sum += residual[:take].square().sum().item()
+        calibration_residual = residual[:take]
+        squared_norm_sum += calibration_residual.square().sum().item()
+        activation_sum += calibration_residual.sum(dim=0).cpu().double()
         tokens_seen += take
         progress.update(take)
         if tokens_seen >= target_tokens:
@@ -261,11 +264,12 @@ def estimate_activation_scale(
             f"cannot normalize activations with E[||x||^2]={mean_squared_norm}"
         )
     scale = math.sqrt(d_model / mean_squared_norm)
+    normalized_mean = (activation_sum * (scale / tokens_seen)).float()
     print(
         f"activation normalization: {tokens_seen:,} calibration tokens, "
         f"E[||x||^2]={mean_squared_norm:,.4g}, scale={scale:.8g}"
     )
-    return scale
+    return scale, normalized_mean
 
 
 def train_sae(
@@ -369,10 +373,6 @@ def train_sae(
             device,
             config.activation_scale,
         )
-
-        if processed_tokens == 0:
-            with torch.no_grad():
-                sae.decoder_bias.copy_(residual.mean(dim=0))
 
         for start in range(0, len(residual), args.sae_batch_size):
             x = residual[start : start + args.sae_batch_size]

@@ -21,7 +21,7 @@ from src.data import build_token_cache
 from src.experiment import (
     ExperimentConfig,
     ResidualStreamCapture,
-    estimate_activation_scale,
+    estimate_activation_normalization,
     evaluate_sae,
     find_transformer_layers,
     format_metrics_line,
@@ -194,13 +194,17 @@ def main() -> None:
                     "cannot resume this checkpoint because it predates activation normalization"
                 )
             activation_scale = float(saved_config["activation_scale"])
+            normalized_activation_mean = None
             print(f"reusing activation scale {activation_scale:.8g} from {config_path}")
         elif checkpoint_path.exists():
             raise FileExistsError(
                 f"{checkpoint_path} already exists; pass --resume or choose another --output-dir"
             )
         else:
-            activation_scale = estimate_activation_scale(
+            (
+                activation_scale,
+                normalized_activation_mean,
+            ) = estimate_activation_normalization(
                 model,
                 capture,
                 train_tokens,
@@ -234,6 +238,9 @@ def main() -> None:
             model_dtype=args.model_dtype,
         )
         sae = TopKSAE(d_model, d_sae, args.k, device)
+        if normalized_activation_mean is not None:
+            with torch.no_grad():
+                sae.decoder_bias.copy_(normalized_activation_mean.to(device))
         processed, evaluation = train_sae(
             model,
             capture,
