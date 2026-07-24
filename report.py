@@ -311,6 +311,7 @@ def iter_feature_activations(
     sae_batch_size: int,
     device: torch.device,
     description: str,
+    activation_scale: float = 1.0,
 ) -> Iterator[ActivationBatch]:
     batches = iter_context_batches(
         tokens,
@@ -325,7 +326,13 @@ def iter_feature_activations(
         for input_ids, attention_mask, _ in batches:
             token_count = int(attention_mask.sum())
             residual, _, _ = move_and_capture_residual(
-                model, capture, input_ids, attention_mask, token_count, device
+                model,
+                capture,
+                input_ids,
+                attention_mask,
+                token_count,
+                device,
+                activation_scale,
             )
 
             for start in range(0, len(residual), sae_batch_size):
@@ -599,6 +606,7 @@ def render_report(
         "",
         f"- Checkpoint: `{checkpoint}`",
         f"- Model: `{config['model_id']}`",
+        f"- Activation scale: `{float(config.get('activation_scale', 1.0)):.8g}`",
         f"- Validation tokens scanned: {len(tokens):,}",
         f"- Strong candidates inspected: {candidate_count:,}",
         f"- Frequency range: `{args.minimum_frequency:g}` to `{args.maximum_frequency:g}`",
@@ -669,6 +677,7 @@ def main() -> None:
     model_batch_size = args.model_batch_size or int(config.get("model_batch_size", 32))
     sae_batch_size = args.sae_batch_size or int(config.get("sae_batch_size", 8192))
     dtype = getattr(torch, args.model_dtype or config.get("model_dtype", "float32"))
+    activation_scale = float(config.get("activation_scale", 1.0))
 
     print(f"device={device}, tokens={len(tokens):,}, checkpoint={checkpoint}")
     tokenizer = AutoTokenizer.from_pretrained(config["model_id"])
@@ -711,6 +720,7 @@ def main() -> None:
             sae_batch_size,
             device,
             "Scan features",
+            activation_scale,
         )
         counts, activation_sums, activation_square_sums = collect_feature_stats(
             activation_batches,

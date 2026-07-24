@@ -1,8 +1,8 @@
 """
 Train a Top-K sparse autoencoder on Gemma's midpoint residual stream.
 
-Defaults: Gemma 3 270M, FineWeb-Edu sample-10BT, 10M train tokens,
-1M validation tokens, context length 256, 16x expansion, and K=32.
+Defaults: Gemma 3 270M, FineWeb-Edu sample-10BT, 100M train tokens,
+10M validation tokens, context length 256, 16x expansion, and K=32.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from src.data import build_token_cache
 from src.experiment import (
     ExperimentConfig,
     ResidualStreamCapture,
+    estimate_activation_scale,
     evaluate_sae,
     find_transformer_layers,
     format_metrics_line,
@@ -39,10 +40,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-id", default=MODEL_ID)
     parser.add_argument("--dataset-id", default=DATASET_ID)
     parser.add_argument("--dataset-config", default=DATASET_CONFIG)
-    parser.add_argument("--train-tokens", type=int, default=10_000_000)
-    parser.add_argument("--validation-tokens", type=int, default=1_000_000)
+    parser.add_argument("--train-tokens", type=int, default=100_000_000)
+    parser.add_argument("--validation-tokens", type=int, default=10_000_000)
     parser.add_argument("--context-size", type=int, default=256)
-    parser.add_argument("--width-multiplier", type=int, default=32)
+    parser.add_argument("--width-multiplier", type=int, default=16)
     parser.add_argument("--k", type=int, default=32)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument(
@@ -54,8 +55,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sae-batch-size",
         type=int,
-        default=8192,
+        default=4096,
         help="SAE token microbatch; lower this if memory is limited.",
+    )
+    parser.add_argument(
+        "--normalization-tokens",
+        type=int,
+        default=1_000_000,
+        help="Training-token sample used to estimate one global activation scale.",
     )
     parser.add_argument("--log-every", type=int, default=100_000)
     parser.add_argument(
@@ -112,6 +119,7 @@ def validate_args(args: argparse.Namespace) -> None:
         args.learning_rate,
         args.model_batch_size,
         args.sae_batch_size,
+        args.normalization_tokens,
         args.log_every,
         args.checkpoint_every,
         args.dead_window,
@@ -170,29 +178,62 @@ def main() -> None:
         f"capturing input to {layer_path}[{layer_index}] "
         f"({len(layers)} layers, d_model={d_model}); SAE width={d_sae:,}, k={args.k}"
     )
-    config = ExperimentConfig(
-        model_id=args.model_id,
-        dataset_id=args.dataset_id,
-        dataset_config=args.dataset_config,
-        train_tokens=args.train_tokens,
-        validation_tokens=args.validation_tokens,
-        context_size=args.context_size,
-        layer_index=layer_index,
-        layer_path=layer_path,
-        residual_location="layer_input",
-        d_model=d_model,
-        d_sae=d_sae,
-        width_multiplier=args.width_multiplier,
-        k=args.k,
-        learning_rate=args.learning_rate,
-        model_batch_size=args.model_batch_size,
-        sae_batch_size=args.sae_batch_size,
-        seed=args.seed,
-        device=str(device),
-        model_dtype=args.model_dtype,
-    )
-    sae = TopKSAE(d_model, d_sae, args.k, device)
     with ResidualStreamCapture(layers[layer_index]) as capture:
+        checkpoint_path = args.output_dir / "checkpoint.pt"
+        config_path = args.output_dir / "config.json"
+        if args.resume:
+            if not checkpoint_path.exists():
+                raise FileNotFoundError(f"cannot resume: {checkpoint_path} does not exist")
+            if not config_path.exists():
+                raise FileNotFoundError(
+                    f"cannot resume normalized training: {config_path} does not exist"
+                )
+            saved_config = json.loads(config_path.read_text())
+            if "activation_scale" not in saved_config:
+                raise ValueError(
+                    "cannot resume this checkpoint because it predates activation normalization"
+                )
+            activation_scale = float(saved_config["activation_scale"])
+            print(f"reusing activation scale {activation_scale:.8g} from {config_path}")
+        elif checkpoint_path.exists():
+            raise FileExistsError(
+                f"{checkpoint_path} already exists; pass --resume or choose another --output-dir"
+            )
+        else:
+            activation_scale = estimate_activation_scale(
+                model,
+                capture,
+                train_tokens,
+                tokenizer.pad_token_id,
+                device,
+                args,
+                d_model,
+            )
+
+        config = ExperimentConfig(
+            model_id=args.model_id,
+            dataset_id=args.dataset_id,
+            dataset_config=args.dataset_config,
+            train_tokens=args.train_tokens,
+            validation_tokens=args.validation_tokens,
+            context_size=args.context_size,
+            layer_index=layer_index,
+            layer_path=layer_path,
+            residual_location="layer_input",
+            d_model=d_model,
+            d_sae=d_sae,
+            width_multiplier=args.width_multiplier,
+            k=args.k,
+            learning_rate=args.learning_rate,
+            model_batch_size=args.model_batch_size,
+            sae_batch_size=args.sae_batch_size,
+            normalization_tokens=args.normalization_tokens,
+            activation_scale=activation_scale,
+            seed=args.seed,
+            device=str(device),
+            model_dtype=args.model_dtype,
+        )
+        sae = TopKSAE(d_model, d_sae, args.k, device)
         processed, evaluation = train_sae(
             model,
             capture,
@@ -215,6 +256,7 @@ def main() -> None:
                 tokenizer.pad_token_id,
                 device,
                 args,
+                config.activation_scale,
             )
         validation = evaluation
         (args.output_dir / "validation_metrics.json").write_text(

@@ -6,3 +6,6 @@
 - `K`: Maximum features active per token.
     - Low values can be more interpretable but lead to features that are too broad.
     - Higher values are more specific, but may cause duplicates or "dirty" interpretations.
+- `activation normalization`: One scalar is estimated from a training-token sample and
+  applied everywhere so that the average squared residual norm equals `d_model`.
+  It is saved with the checkpoint and reused by validation and feature reporting.

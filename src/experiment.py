@@ -40,6 +40,8 @@ class ExperimentConfig:
     seed: int
     device: str
     model_dtype: str
+    normalization_tokens: int = 0
+    activation_scale: float = 1.0
 
 
 def find_transformer_layers(model: nn.Module) -> tuple[str, nn.ModuleList]:
@@ -184,18 +186,76 @@ def move_and_capture_residual(
     attention_mask: Tensor,
     batch_tokens: int,
     device: torch.device,
+    activation_scale: float = 1.0,
 ) -> tuple[Tensor, Tensor, Tensor | None]:
-    """Capture packed residuals without constructing an all-true GPU mask."""
+    """Capture and globally scale packed residuals."""
     full_batch = batch_tokens == input_ids.numel()
     input_ids = input_ids.to(device, non_blocking=True)
     if full_batch:
         residual = capture(model, input_ids, None).flatten(0, 1).float()
+        residual.mul_(activation_scale)
         return residual, input_ids, None
 
     attention_mask = attention_mask.to(device, non_blocking=True)
     valid_mask = attention_mask.bool()
     residual = capture(model, input_ids, attention_mask)[valid_mask].float()
+    residual.mul_(activation_scale)
     return residual, input_ids, valid_mask
+
+
+@torch.inference_mode()
+def estimate_activation_scale(
+    model: nn.Module,
+    capture: ResidualStreamCapture,
+    train_tokens: np.memmap,
+    pad_token_id: int,
+    device: torch.device,
+    args: argparse.Namespace,
+    d_model: int,
+) -> float:
+    """Estimate one scalar such that E[||scale * x||^2] = d_model."""
+    target_tokens = min(args.normalization_tokens, len(train_tokens))
+    batches = iter_context_batches(
+        train_tokens,
+        args.context_size,
+        args.model_batch_size,
+        pad_token_id,
+        shuffle=True,
+        seed=args.seed,
+    )
+    tokens_seen = 0
+    squared_norm_sum = 0.0
+    progress = tqdm(
+        total=target_tokens,
+        unit="tok",
+        desc="Calibrate activation scale",
+        leave=False,
+        dynamic_ncols=True,
+    )
+    for input_ids, attention_mask, _context_ids in batches:
+        batch_tokens = int(attention_mask.sum())
+        residual, _input_ids, _valid_mask = move_and_capture_residual(
+            model, capture, input_ids, attention_mask, batch_tokens, device
+        )
+        take = min(len(residual), target_tokens - tokens_seen)
+        squared_norm_sum += residual[:take].square().sum().item()
+        tokens_seen += take
+        progress.update(take)
+        if tokens_seen >= target_tokens:
+            break
+    progress.close()
+
+    mean_squared_norm = squared_norm_sum / max(tokens_seen, 1)
+    if not math.isfinite(mean_squared_norm) or mean_squared_norm <= 0:
+        raise RuntimeError(
+            f"cannot normalize activations with E[||x||^2]={mean_squared_norm}"
+        )
+    scale = math.sqrt(d_model / mean_squared_norm)
+    print(
+        f"activation normalization: {tokens_seen:,} calibration tokens, "
+        f"E[||x||^2]={mean_squared_norm:,.4g}, scale={scale:.8g}"
+    )
+    return scale
 
 
 def train_sae(
@@ -230,6 +290,7 @@ def train_sae(
             pad_token_id,
             device,
             args,
+            config.activation_scale,
         )
         evaluation_seconds += time.monotonic() - evaluation_start
         checkpoint_record = {**evaluation, "training_tokens": processed_tokens}
@@ -289,7 +350,13 @@ def train_sae(
     for input_ids, attention_mask, context_ids in batches:
         batch_tokens = int(attention_mask.sum())
         residual, _input_ids, _valid_mask = move_and_capture_residual(
-            model, capture, input_ids, attention_mask, batch_tokens, device
+            model,
+            capture,
+            input_ids,
+            attention_mask,
+            batch_tokens,
+            device,
+            config.activation_scale,
         )
 
         if processed_tokens == 0:
@@ -379,6 +446,7 @@ def evaluate_sae(
     pad_token_id: int,
     device: torch.device,
     args: argparse.Namespace,
+    activation_scale: float = 1.0,
 ) -> dict:
     metrics = RunningMetrics(sae.d_model, sae.d_sae, device)
     batches = iter_context_batches(
@@ -395,7 +463,13 @@ def evaluate_sae(
     for input_ids, attention_mask, _context_ids in batches:
         batch_tokens = int(attention_mask.sum())
         residual, _input_ids, _valid_mask = move_and_capture_residual(
-            model, capture, input_ids, attention_mask, batch_tokens, device
+            model,
+            capture,
+            input_ids,
+            attention_mask,
+            batch_tokens,
+            device,
+            activation_scale,
         )
         for start in range(0, len(residual), args.sae_batch_size):
             x = residual[start : start + args.sae_batch_size]
