@@ -5,7 +5,7 @@ import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Mapping
+from typing import Iterator
 
 import numpy as np
 import torch
@@ -21,22 +21,6 @@ class TokenCacheSpec:
     dataset_config: str
     train_tokens: int
     validation_tokens: int
-
-    @classmethod
-    def from_mapping(
-        cls,
-        config: Mapping[str, object],
-        cache_dir: Path,
-    ) -> TokenCacheSpec:
-        return cls(
-            cache_dir=cache_dir,
-            model_id=str(config["model_id"]),
-            dataset_id=str(config["dataset_id"]),
-            dataset_config=str(config["dataset_config"]),
-            train_tokens=int(config["train_tokens"]),
-            validation_tokens=int(config["validation_tokens"]),
-        )
-
 
 def token_cache_paths(spec: TokenCacheSpec) -> tuple[Path, Path, Path]:
     safe_model = spec.model_id.replace("/", "--")

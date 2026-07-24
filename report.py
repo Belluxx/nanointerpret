@@ -33,7 +33,9 @@ class ActivationBatch:
 
 
 @dataclass(frozen=True)
-class TokenActivationBatch(ActivationBatch):
+class TokenActivationBatch:
+    indices: Tensor
+    values: Tensor
     positions: Tensor
     token_ids: Tensor
 
@@ -274,7 +276,14 @@ def load_checkpoint(path: Path) -> tuple[dict, dict]:
 
 
 def find_validation_cache(config: dict, cache_dir: Path) -> Path:
-    cache_spec = TokenCacheSpec.from_mapping(config, cache_dir)
+    cache_spec = TokenCacheSpec(
+        cache_dir=cache_dir,
+        model_id=str(config["model_id"]),
+        dataset_id=str(config["dataset_id"]),
+        dataset_config=str(config["dataset_config"]),
+        train_tokens=int(config["train_tokens"]),
+        validation_tokens=int(config["validation_tokens"]),
+    )
     _train, validation, _metadata = token_cache_paths(cache_spec)
     if not validation.exists():
         raise FileNotFoundError(

@@ -162,53 +162,6 @@ def prepare_activation_normalization(
     )
 
 
-def build_experiment_config(
-    args: argparse.Namespace,
-    layer_path: str,
-    layer_index: int,
-    d_model: int,
-    d_sae: int,
-    device: torch.device,
-    activation_scale: float,
-) -> ExperimentConfig:
-    return ExperimentConfig(
-        model_id=args.model_id,
-        dataset_id=args.dataset_id,
-        dataset_config=args.dataset_config,
-        train_tokens=args.train_tokens,
-        validation_tokens=args.validation_tokens,
-        context_size=args.context_size,
-        layer_index=layer_index,
-        layer_path=layer_path,
-        residual_location="layer_input",
-        d_model=d_model,
-        d_sae=d_sae,
-        width_multiplier=args.width_multiplier,
-        k=args.k,
-        learning_rate=args.learning_rate,
-        model_batch_size=args.model_batch_size,
-        sae_batch_size=args.sae_batch_size,
-        normalization_tokens=args.normalization_tokens,
-        activation_scale=activation_scale,
-        seed=args.seed,
-        device=str(device),
-        model_dtype=args.model_dtype,
-    )
-
-
-def save_experiment_plots(output_dir: Path) -> None:
-    from src.plot import save_feature_density_plot, save_training_plot
-
-    save_training_plot(
-        output_dir / "train_metrics.jsonl",
-        output_dir / "training_metrics.png",
-    )
-    save_feature_density_plot(
-        output_dir / "checkpoint_metrics.jsonl",
-        output_dir / "validation_feature_density.png",
-    )
-
-
 def main() -> None:
     args = parse_args()
     validate_args(args)
@@ -271,14 +224,28 @@ def main() -> None:
                 d_model,
             )
         )
-        config = build_experiment_config(
-            args,
-            layer_path,
-            layer_index,
-            d_model,
-            d_sae,
-            device,
-            activation_scale,
+        config = ExperimentConfig(
+            model_id=args.model_id,
+            dataset_id=args.dataset_id,
+            dataset_config=args.dataset_config,
+            train_tokens=args.train_tokens,
+            validation_tokens=args.validation_tokens,
+            context_size=args.context_size,
+            layer_index=layer_index,
+            layer_path=layer_path,
+            residual_location="layer_input",
+            d_model=d_model,
+            d_sae=d_sae,
+            width_multiplier=args.width_multiplier,
+            k=args.k,
+            learning_rate=args.learning_rate,
+            model_batch_size=args.model_batch_size,
+            sae_batch_size=args.sae_batch_size,
+            normalization_tokens=args.normalization_tokens,
+            activation_scale=activation_scale,
+            seed=args.seed,
+            device=str(device),
+            model_dtype=args.model_dtype,
         )
         sae = TopKSAE(d_model, d_sae, args.k, device)
         if normalized_activation_mean is not None:
@@ -296,7 +263,17 @@ def main() -> None:
             config,
         )
         print(f"trained on {processed:,} tokens")
-        save_experiment_plots(args.output_dir)
+
+        from src.plot import save_feature_density_plot, save_training_plot
+
+        save_training_plot(
+            args.output_dir / "train_metrics.jsonl",
+            args.output_dir / "training_metrics.png",
+        )
+        save_feature_density_plot(
+            args.output_dir / "checkpoint_metrics.jsonl",
+            args.output_dir / "validation_feature_density.png",
+        )
 
         if evaluation is None:
             evaluation = evaluate_sae(
