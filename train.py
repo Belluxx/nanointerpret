@@ -51,7 +51,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--normalization-tokens", type=int, default=1_000_000, help="Training-token sample used to estimate one global activation scale.")
     parser.add_argument("--log-every", type=int, default=100_000)
     parser.add_argument("--checkpoint-every", type=int, default=50_000_000, help="Save and evaluate a checkpoint after this many training tokens.")
-    parser.add_argument("--dead-window", type=int, default=1_000_000)
+    parser.add_argument("--dead-window", type=int, default=10_000_000)
     parser.add_argument("--gradient-clip", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--activation-layer", type=int, default=None, help="Layer whose input is captured. Default: len(transformer.layers) // 2.")
