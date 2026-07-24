@@ -186,16 +186,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"))
-    parser.add_argument(
-        "--tokens-path",
-        type=Path,
-        help="Explicit uint32 token file to scan instead of the checkpoint's validation cache.",
-    )
-    parser.add_argument(
-        "--report-path",
-        type=Path,
-        help="Defaults to feature_report.md beside the checkpoint.",
-    )
+    parser.add_argument("--tokens-path", type=Path, help="Explicit uint32 token file to scan instead of the checkpoint's validation cache.")
+    parser.add_argument("--report-path", type=Path, help="Defaults to feature_report.md beside the checkpoint.")
     parser.add_argument("--features", type=int, default=20)
     parser.add_argument("--samples-per-feature", type=int, default=10)
     parser.add_argument("--minimum-fires", type=int, default=100)
@@ -205,26 +197,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--candidate-features", type=int, default=4096)
     parser.add_argument("--candidate-tokens-per-feature", type=int, default=64)
     parser.add_argument("--samples-per-token", type=int, default=2)
-    parser.add_argument(
-        "--minimum-relative-activation",
-        type=float,
-        default=0.5,
-        help="A token counts as diverse only if its best activation reaches this fraction of the feature maximum.",
-    )
+    parser.add_argument("--minimum-relative-activation", type=float, default=0.5, help="A token counts as diverse only if its best activation reaches this fraction of the feature maximum.")
     parser.add_argument("--context-tokens", type=int, default=20)
-    parser.add_argument(
-        "--scan-tokens",
-        type=int,
-        help="Number of validation tokens to scan. Defaults to the complete cache.",
-    )
+    parser.add_argument("--scan-tokens", type=int, help="Number of validation tokens to scan. Defaults to the complete cache.")
     parser.add_argument("--model-batch-size", type=int)
     parser.add_argument("--sae-batch-size", type=int)
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
-    parser.add_argument(
-        "--model-dtype",
-        choices=("float32", "float16", "bfloat16"),
-        help="Defaults to the dtype stored in the checkpoint.",
-    )
+    parser.add_argument("--model-dtype", choices=("float32", "float16", "bfloat16"), help="Defaults to the dtype stored in the checkpoint.")
     return parser.parse_args()
 
 

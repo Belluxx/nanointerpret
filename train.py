@@ -46,46 +46,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--width-multiplier", type=int, default=16)
     parser.add_argument("--k", type=int, default=32)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
-    parser.add_argument(
-        "--model-batch-size",
-        type=int,
-        default=32,
-        help="Contexts processed together; lower this if memory is limited.",
-    )
-    parser.add_argument(
-        "--sae-batch-size",
-        type=int,
-        default=4096,
-        help="SAE token microbatch; lower this if memory is limited.",
-    )
-    parser.add_argument(
-        "--normalization-tokens",
-        type=int,
-        default=1_000_000,
-        help="Training-token sample used to estimate one global activation scale.",
-    )
+    parser.add_argument("--model-batch-size", type=int, default=32, help="Contexts processed together; lower this if memory is limited.")
+    parser.add_argument("--sae-batch-size", type=int, default=4096, help="SAE token microbatch; lower this if memory is limited.")
+    parser.add_argument("--normalization-tokens", type=int, default=1_000_000, help="Training-token sample used to estimate one global activation scale.")
     parser.add_argument("--log-every", type=int, default=100_000)
-    parser.add_argument(
-        "--checkpoint-every",
-        type=int,
-        default=5_000_000,
-        help="Save and evaluate a checkpoint after this many training tokens.",
-    )
+    parser.add_argument("--checkpoint-every", type=int, default=5_000_000, help="Save and evaluate a checkpoint after this many training tokens.")
     parser.add_argument("--dead-window", type=int, default=1_000_000)
     parser.add_argument("--gradient-clip", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument(
-        "--activation-layer",
-        type=int,
-        default=None,
-        help="Layer whose input is captured. Default: len(transformer.layers) // 2.",
-    )
+    parser.add_argument("--activation-layer", type=int, default=None, help="Layer whose input is captured. Default: len(transformer.layers) // 2.")
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
-    parser.add_argument(
-        "--model-dtype",
-        choices=("float32", "float16", "bfloat16"),
-        default="float32",
-    )
+    parser.add_argument("--model-dtype", choices=("float32", "float16", "bfloat16"), default="float32")
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/sae_gemma_3_270m"))
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"))
     parser.add_argument("--resume", action="store_true")
