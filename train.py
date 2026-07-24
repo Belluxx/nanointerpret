@@ -99,7 +99,7 @@ def prepare_activation_normalization(
     pad_token_id: int,
     device: torch.device,
     d_model: int,
-) -> tuple[float, torch.Tensor | None]:
+) -> float:
     checkpoint_path = args.output_dir / "checkpoint.pt"
     if args.resume:
         if not checkpoint_path.exists():
@@ -114,7 +114,7 @@ def prepare_activation_normalization(
             )
         activation_scale = float(saved_config["activation_scale"])
         print(f"reusing activation scale {activation_scale:.8g} from {checkpoint_path}")
-        return activation_scale, None
+        return activation_scale
 
     if checkpoint_path.exists():
         raise FileExistsError(
@@ -182,16 +182,14 @@ def main() -> None:
         f"({len(layers)} layers, d_model={d_model}); SAE width={d_sae:,}, k={args.k}"
     )
     with ResidualStreamCapture(layers[layer_index]) as capture:
-        activation_scale, normalized_activation_mean = (
-            prepare_activation_normalization(
-                args,
-                model,
-                capture,
-                train_tokens,
-                tokenizer.pad_token_id,
-                device,
-                d_model,
-            )
+        activation_scale = prepare_activation_normalization(
+            args,
+            model,
+            capture,
+            train_tokens,
+            tokenizer.pad_token_id,
+            device,
+            d_model,
         )
         config = ExperimentConfig(
             model_id=args.model_id,
@@ -217,9 +215,6 @@ def main() -> None:
             model_dtype=args.model_dtype,
         )
         sae = TopKSAE(d_model, d_sae, args.k, device)
-        if normalized_activation_mean is not None:
-            with torch.no_grad():
-                sae.decoder_bias.copy_(normalized_activation_mean.to(device))
         processed, evaluation = train_sae(
             model,
             capture,

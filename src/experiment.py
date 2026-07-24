@@ -389,8 +389,8 @@ def estimate_activation_normalization(
     device: torch.device,
     args: argparse.Namespace,
     d_model: int,
-) -> tuple[float, Tensor]:
-    """Estimate the global scale and normalized mean from one calibration sample."""
+) -> float:
+    """Estimate one global activation scale from a training calibration sample."""
     target_tokens = min(args.normalization_tokens, len(train_tokens))
     batches = iter_context_batches(
         train_tokens,
@@ -402,7 +402,6 @@ def estimate_activation_normalization(
     )
     tokens_seen = 0
     squared_norm_sum = 0.0
-    activation_sum = torch.zeros(d_model, dtype=torch.float64)
     progress = tqdm(
         total=target_tokens,
         unit="tok",
@@ -418,7 +417,6 @@ def estimate_activation_normalization(
         take = min(len(residual), target_tokens - tokens_seen)
         calibration_residual = residual[:take]
         squared_norm_sum += calibration_residual.square().sum().item()
-        activation_sum += calibration_residual.sum(dim=0).cpu().double()
         tokens_seen += take
         progress.update(take)
         if tokens_seen >= target_tokens:
@@ -431,12 +429,11 @@ def estimate_activation_normalization(
             f"cannot normalize activations with E[||x||^2]={mean_squared_norm}"
         )
     scale = math.sqrt(d_model / mean_squared_norm)
-    normalized_mean = (activation_sum * (scale / tokens_seen)).float()
     print(
         f"activation normalization: {tokens_seen:,} calibration tokens, "
         f"E[||x||^2]={mean_squared_norm:,.4g}, scale={scale:.8g}"
     )
-    return scale, normalized_mean
+    return scale
 
 
 def train_sae(

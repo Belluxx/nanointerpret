@@ -23,7 +23,7 @@ class TopKSAE(nn.Module):
         self.d_sae = d_sae
 
     def encode(self, x: Tensor) -> tuple[Tensor, Tensor]:
-        pre_activations = (x - self.decoder_bias) @ self.encoder_weight + self.encoder_bias
+        pre_activations = x @ self.encoder_weight + self.encoder_bias
         values, indices = torch.topk(F.relu(pre_activations), self.k, dim=-1, sorted=False)
         return indices, values
 
