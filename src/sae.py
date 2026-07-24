@@ -53,9 +53,6 @@ class TopKSAE(nn.Module):
 class RunningMetrics:
     """Accumulate reconstruction and feature-use metrics for one logging window."""
 
-    RARE_FREQUENCY = 1e-4
-    OVERACTIVE_FREQUENCY = 1e-2
-
     def __init__(self, d_model: int, d_sae: int, device: torch.device):
         self.device = device
         self.d_model = d_model
@@ -102,18 +99,12 @@ class RunningMetrics:
         sse = self.error_sq_sum.sum()
         x_energy = self.x_sq_sum.sum().clamp_min(1e-12)
         x_variance = (self.x_sq_sum - self.x_sum.square() / n).sum().clamp_min(1e-12)
-        frequencies = self.feature_fire_counts.cpu().numpy() / n
-        active = frequencies > 0
         return {
             "mse": float((sse / (n * self.d_model)).item()),
             "normalized_mse": float((sse / x_energy).item()),
             "explained_variance": float((1.0 - sse / x_variance).item()),
             "l0": float((self.l0_sum / n).item()),
-            "window_dead_feature_pct": float(100.0 * (~active).mean()),
-            "window_rare_feature_pct": float(
-                100.0 * (active & (frequencies < self.RARE_FREQUENCY)).mean()
-            ),
-            "window_overactive_feature_pct": float(
-                100.0 * (frequencies > self.OVERACTIVE_FREQUENCY).mean()
+            "window_dead_feature_pct": float(
+                100.0 * (self.feature_fire_counts == 0).float().mean().item()
             ),
         }

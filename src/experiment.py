@@ -213,9 +213,7 @@ def format_metrics(record: dict) -> str:
     )
     return (
         f"EV {record['explained_variance']:.2%} | MSE {record['mse']:,.4f} | "
-        f"NMSE {record['normalized_mse']:.4f} | dead {dead} | "
-        f"rare {record['window_rare_feature_pct']:.2f}% | "
-        f"overactive {record['window_overactive_feature_pct']:.2f}%"
+        f"NMSE {record['normalized_mse']:.4f} | dead {dead}"
     )
 
 

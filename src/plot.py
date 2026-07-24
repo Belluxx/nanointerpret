@@ -11,8 +11,6 @@ from matplotlib.figure import Figure
 
 FEATURES = (
     ("Dead", "dead_feature_pct", "#64748B"),
-    ("Rare", "window_rare_feature_pct", "#F59E0B"),
-    ("Overactive", "window_overactive_feature_pct", "#10B981"),
 )
 STYLE = {
     "axes.facecolor": "#FFFFFF",
@@ -143,13 +141,13 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
             )
         feature_axis.set(ylabel="Features (%)", ylim=(0, None))
         feature_axis.legend(
-            frameon=False, ncol=3, loc="center right",
+            frameon=False, loc="center right",
             bbox_to_anchor=(1, 1.075), borderaxespad=0,
-            handlelength=1.4, columnspacing=1.2,
+            handlelength=1.4,
         )
 
         for axis, title in zip(
-            (mse_axis, feature_axis), ("Reconstruction error", "Feature health")
+            (mse_axis, feature_axis), ("Reconstruction error", "Dead features")
         ):
             axis.set_title(title, loc="left", pad=14)
             axis.set_xlabel("Training tokens (M)")
