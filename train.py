@@ -130,21 +130,19 @@ def prepare_activation_normalization(
     d_model: int,
 ) -> tuple[float, torch.Tensor | None]:
     checkpoint_path = args.output_dir / "checkpoint.pt"
-    config_path = args.output_dir / "config.json"
     if args.resume:
         if not checkpoint_path.exists():
             raise FileNotFoundError(f"cannot resume: {checkpoint_path} does not exist")
-        if not config_path.exists():
-            raise FileNotFoundError(
-                f"cannot resume normalized training: {config_path} does not exist"
-            )
-        saved_config = json.loads(config_path.read_text())
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        saved_config = checkpoint.get("config") if isinstance(checkpoint, dict) else None
+        if not isinstance(saved_config, dict):
+            raise ValueError("cannot resume: checkpoint has no valid experiment configuration")
         if "activation_scale" not in saved_config:
             raise ValueError(
                 "cannot resume this checkpoint because it predates activation normalization"
             )
         activation_scale = float(saved_config["activation_scale"])
-        print(f"reusing activation scale {activation_scale:.8g} from {config_path}")
+        print(f"reusing activation scale {activation_scale:.8g} from {checkpoint_path}")
         return activation_scale, None
 
     if checkpoint_path.exists():
@@ -283,8 +281,7 @@ def main() -> None:
                 validation_tokens,
                 tokenizer.pad_token_id,
                 device,
-                args,
-                config.activation_scale,
+                config,
             )
         validation = evaluation
         (args.output_dir / "validation_metrics.json").write_text(

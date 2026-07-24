@@ -133,7 +133,6 @@ def load_training_state(
     sae: TopKSAE,
     optimizer: torch.optim.Optimizer,
     config: ExperimentConfig,
-    context_size: int,
     device: torch.device,
 ) -> TrainingState:
     checkpoint = torch.load(path, map_location=device, weights_only=False)
@@ -144,7 +143,7 @@ def load_training_state(
     processed_contexts = int(
         checkpoint.get(
             "processed_contexts",
-            math.ceil(processed_tokens / context_size),
+            math.ceil(processed_tokens / config.context_size),
         )
     )
     return TrainingState(
@@ -172,7 +171,6 @@ def initialize_training_state(
             sae,
             optimizer,
             config,
-            args.context_size,
             device,
         )
         print(f"resumed at {state.processed_tokens:,} training tokens")
@@ -324,13 +322,15 @@ def optimize_residual_batch(
     last_fired: Tensor,
     processed_tokens: int,
     total_tokens: int,
-    args: argparse.Namespace,
+    sae_batch_size: int,
+    learning_rate: float,
+    gradient_clip: float,
 ) -> float:
     """Optimize the SAE over one captured model batch."""
     current_learning_rate = optimizer.param_groups[0]["lr"]
-    for start in range(0, len(residual), args.sae_batch_size):
-        x = residual[start : start + args.sae_batch_size]
-        current_learning_rate = args.learning_rate * learning_rate_multiplier(
+    for start in range(0, len(residual), sae_batch_size):
+        x = residual[start : start + sae_batch_size]
+        current_learning_rate = learning_rate * learning_rate_multiplier(
             processed_tokens + start, total_tokens
         )
         for parameter_group in optimizer.param_groups:
@@ -341,8 +341,8 @@ def optimize_residual_batch(
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         sae.constrain_decoder_gradient()
-        if args.gradient_clip > 0:
-            torch.nn.utils.clip_grad_norm_(sae.parameters(), args.gradient_clip)
+        if gradient_clip > 0:
+            torch.nn.utils.clip_grad_norm_(sae.parameters(), gradient_clip)
         optimizer.step()
         sae.normalize_decoder()
 
@@ -450,7 +450,7 @@ def train_sae(
     args: argparse.Namespace,
     config: ExperimentConfig,
 ) -> tuple[int, dict | None]:
-    optimizer = torch.optim.Adam(sae.parameters(), lr=args.learning_rate)
+    optimizer = torch.optim.Adam(sae.parameters(), lr=config.learning_rate)
     checkpoint_path = args.output_dir / "checkpoint.pt"
     metrics_path = args.output_dir / "train_metrics.jsonl"
     checkpoint_metrics_path = args.output_dir / "checkpoint_metrics.jsonl"
@@ -477,8 +477,7 @@ def train_sae(
             validation_tokens,
             pad_token_id,
             device,
-            args,
-            config.activation_scale,
+            config,
         )
         evaluation_seconds += time.monotonic() - evaluation_start
         checkpoint_record = {
@@ -498,11 +497,11 @@ def train_sae(
 
     batches = iter_context_batches(
         train_tokens,
-        args.context_size,
-        args.model_batch_size,
+        config.context_size,
+        config.model_batch_size,
         pad_token_id,
         shuffle=True,
-        seed=args.seed,
+        seed=config.seed,
         skip_contexts=state.processed_contexts,
     )
     metrics = RunningMetrics(sae.d_model, sae.d_sae, device)
@@ -545,7 +544,9 @@ def train_sae(
             state.last_fired,
             state.processed_tokens,
             len(train_tokens),
-            args,
+            config.sae_batch_size,
+            config.learning_rate,
+            args.gradient_clip,
         )
         state.processed_tokens += batch_tokens
         state.processed_contexts += len(context_ids)
@@ -610,17 +611,16 @@ def evaluate_sae(
     validation_tokens: np.memmap,
     pad_token_id: int,
     device: torch.device,
-    args: argparse.Namespace,
-    activation_scale: float = 1.0,
+    config: ExperimentConfig,
 ) -> dict:
     metrics = RunningMetrics(sae.d_model, sae.d_sae, device)
     batches = iter_context_batches(
         validation_tokens,
-        args.context_size,
-        args.model_batch_size,
+        config.context_size,
+        config.model_batch_size,
         pad_token_id,
         shuffle=False,
-        seed=args.seed,
+        seed=config.seed,
     )
     progress = tqdm(
         total=len(validation_tokens), unit="tok", desc="Validate", leave=False, disable=None
@@ -634,10 +634,10 @@ def evaluate_sae(
             attention_mask,
             batch_tokens,
             device,
-            activation_scale,
+            config.activation_scale,
         )
-        for start in range(0, len(residual), args.sae_batch_size):
-            x = residual[start : start + args.sae_batch_size]
+        for start in range(0, len(residual), config.sae_batch_size):
+            x = residual[start : start + config.sae_batch_size]
             reconstruction, indices, values = sae(x)
             metrics.update(x, reconstruction, indices, values)
         progress.update(batch_tokens)
