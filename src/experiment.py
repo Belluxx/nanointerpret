@@ -532,6 +532,8 @@ def train_sae(
             device,
             config.activation_scale,
         )
+        permutation = torch.randperm(len(residual), device=residual.device)
+        residual = residual[permutation]
 
         current_learning_rate = optimize_residual_batch(
             sae,
