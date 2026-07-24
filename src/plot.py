@@ -24,6 +24,78 @@ STYLE = {
 }
 
 
+def select_spaced_validation_records(records: list[dict]) -> list[dict]:
+    """Select up to three approximately equidistant compatible validations."""
+    compatible = [
+        record
+        for record in records
+        if "feature_density_log10_bin_edges" in record
+        and "feature_density_bin_counts" in record
+        and "training_tokens" in record
+    ]
+    compatible.sort(key=lambda record: record["training_tokens"])
+    if len(compatible) <= 3:
+        return compatible
+
+    indices = np.rint(np.linspace(0, len(compatible) - 1, 3)).astype(int)
+    return [compatible[index] for index in indices]
+
+
+def save_feature_density_plot(metrics_path: Path, output_path: Path) -> None:
+    """Overlay up to three spaced validation feature-density distributions."""
+    records = [
+        json.loads(line)
+        for line in metrics_path.read_text().splitlines()
+        if line.strip()
+    ]
+    selected = select_spaced_validation_records(records)
+    if not selected:
+        return
+
+    colors = sns.color_palette("viridis", n_colors=len(selected))
+    with sns.axes_style("whitegrid", rc=STYLE), sns.plotting_context("notebook"):
+        figure = Figure(figsize=(8.5, 5.2), constrained_layout=True, facecolor="#F8FAFC")
+        FigureCanvasAgg(figure)
+        axis = figure.subplots()
+
+        for record, color in zip(selected, colors):
+            edges = np.asarray(record["feature_density_log10_bin_edges"], dtype=float)
+            counts = np.asarray(record["feature_density_bin_counts"], dtype=float)
+            centers = (edges[:-1] + edges[1:]) / 2
+            total_features = max(int(record["total_features"]), 1)
+            percentages = 100.0 * counts / total_features
+            training_tokens = int(record["training_tokens"])
+            dead_percentage = float(record["dead_feature_pct"])
+            label = (
+                f"{training_tokens / 1_000_000:g}M train "
+                f"({dead_percentage:.1f}% dead)"
+            )
+            axis.step(
+                centers,
+                percentages,
+                where="mid",
+                label=label,
+                color=color,
+                linewidth=2.3,
+            )
+
+        axis.set_title("Validation feature density", loc="left", pad=14)
+        axis.set_xlabel("log10(feature activation frequency)")
+        axis.set_ylabel("All SAE features per bin (%)")
+        axis.grid(axis="x", visible=False)
+        axis.tick_params(length=0)
+        axis.legend(frameon=False, loc="best")
+        sns.despine(fig=figure)
+
+    figure.savefig(
+        output_path,
+        dpi=160,
+        facecolor=figure.get_facecolor(),
+        bbox_inches="tight",
+        pad_inches=0.2,
+    )
+
+
 def save_training_plot(metrics_path: Path, output_path: Path) -> None:
     """Save training metrics as a two-panel PNG."""
     records = [

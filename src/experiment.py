@@ -15,7 +15,7 @@ from torch import Tensor, nn
 from tqdm.auto import tqdm
 
 from .data import iter_context_batches
-from .plot import save_training_plot
+from .plot import save_feature_density_plot, save_training_plot
 from .sae import RunningMetrics, TopKSAE
 
 
@@ -154,7 +154,11 @@ def has_checkpoint_evaluation(path: Path, training_tokens: int) -> bool:
             record = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if isinstance(record, dict) and record.get("training_tokens") == training_tokens:
+        if (
+            isinstance(record, dict)
+            and record.get("training_tokens") == training_tokens
+            and "feature_density_bin_counts" in record
+        ):
             return True
     return False
 
@@ -212,6 +216,20 @@ def learning_rate_multiplier(tokens_seen: int, total_tokens: int) -> float:
     decay_length = max(1, total_tokens - decay_start)
     remaining = max(0, total_tokens - tokens_seen)
     return remaining / decay_length
+
+
+def feature_density_histogram(fire_counts: Tensor, token_count: int) -> dict:
+    """Build fixed log10-density bins suitable for comparison across validations."""
+    nonzero_counts = fire_counts[fire_counts > 0].cpu().numpy().astype(np.float64)
+    nonzero_density = nonzero_counts / token_count
+    minimum_exponent = -max(1, math.ceil(math.log10(token_count)))
+    bin_edges = np.linspace(minimum_exponent, 0.0, -minimum_exponent * 10 + 1)
+    bin_counts, bin_edges = np.histogram(np.log10(nonzero_density), bins=bin_edges)
+    return {
+        "total_features": fire_counts.numel(),
+        "feature_density_log10_bin_edges": bin_edges.tolist(),
+        "feature_density_bin_counts": bin_counts.tolist(),
+    }
 
 
 @torch.inference_mode()
@@ -454,6 +472,10 @@ def train_sae(
         args.output_dir / "sae_final.pt",
     )
     save_training_plot(metrics_path, args.output_dir / "training_metrics.png")
+    save_feature_density_plot(
+        checkpoint_metrics_path,
+        args.output_dir / "validation_feature_density.png",
+    )
     return processed_tokens, latest_evaluation
 
 
@@ -505,5 +527,6 @@ def evaluate_sae(
         **metrics.compute(),
         "dead_feature_pct": 100.0 * (fire_counts == 0).float().mean().item(),
         "active_features": int((fire_counts > 0).sum().item()),
+        **feature_density_histogram(fire_counts, len(validation_tokens)),
     }
     return result
