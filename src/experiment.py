@@ -15,7 +15,6 @@ from torch import Tensor, nn
 from tqdm.auto import tqdm
 
 from .data import iter_context_batches
-from .plot import save_feature_density_plot, save_training_plot
 from .sae import RunningMetrics, TopKSAE
 
 
@@ -146,10 +145,11 @@ def format_metrics_line(record: dict) -> str:
     return f"{record['split']:<10} {record['tokens']:>12,} tok | {format_metrics(record)}"
 
 
-def has_checkpoint_evaluation(path: Path, training_tokens: int) -> bool:
+def load_checkpoint_evaluation(path: Path, training_tokens: int) -> dict | None:
+    """Return the latest validation for a training checkpoint, if present."""
     if not path.exists():
-        return False
-    for line in path.read_text().splitlines():
+        return None
+    for line in reversed(path.read_text().splitlines()):
         try:
             record = json.loads(line)
         except json.JSONDecodeError:
@@ -159,8 +159,12 @@ def has_checkpoint_evaluation(path: Path, training_tokens: int) -> bool:
             and record.get("training_tokens") == training_tokens
             and "feature_density_bin_counts" in record
         ):
-            return True
-    return False
+            return {
+                key: value
+                for key, value in record.items()
+                if key != "training_tokens"
+            }
+    return None
 
 
 def validate_resume_config(checkpoint_config: object, config: ExperimentConfig) -> None:
@@ -184,7 +188,7 @@ def validate_resume_config(checkpoint_config: object, config: ExperimentConfig) 
         raise ValueError(f"cannot resume with a different experiment configuration ({details})")
 
 
-def move_and_capture_residual(
+def capture_residual_batch(
     model: nn.Module,
     capture: ResidualStreamCapture,
     input_ids: Tensor,
@@ -192,20 +196,20 @@ def move_and_capture_residual(
     batch_tokens: int,
     device: torch.device,
     activation_scale: float = 1.0,
-) -> tuple[Tensor, Tensor, Tensor | None]:
+) -> Tensor:
     """Capture and globally scale packed residuals."""
     full_batch = batch_tokens == input_ids.numel()
     input_ids = input_ids.to(device, non_blocking=True)
     if full_batch:
         residual = capture(model, input_ids, None).flatten(0, 1).float()
         residual.mul_(activation_scale)
-        return residual, input_ids, None
+        return residual
 
     attention_mask = attention_mask.to(device, non_blocking=True)
     valid_mask = attention_mask.bool()
     residual = capture(model, input_ids, attention_mask)[valid_mask].float()
     residual.mul_(activation_scale)
-    return residual, input_ids, valid_mask
+    return residual
 
 
 def learning_rate_multiplier(tokens_seen: int, total_tokens: int) -> float:
@@ -264,7 +268,7 @@ def estimate_activation_normalization(
     )
     for input_ids, attention_mask, _context_ids in batches:
         batch_tokens = int(attention_mask.sum())
-        residual, _input_ids, _valid_mask = move_and_capture_residual(
+        residual = capture_residual_batch(
             model, capture, input_ids, attention_mask, batch_tokens, device
         )
         take = min(len(residual), target_tokens - tokens_seen)
@@ -354,8 +358,12 @@ def train_sae(
 
     (args.output_dir / "config.json").write_text(json.dumps(asdict(config), indent=2) + "\n")
 
-    if args.resume and not has_checkpoint_evaluation(checkpoint_metrics_path, processed_tokens):
-        latest_evaluation = evaluate_checkpoint()
+    if args.resume:
+        latest_evaluation = load_checkpoint_evaluation(
+            checkpoint_metrics_path, processed_tokens
+        )
+        if latest_evaluation is None:
+            latest_evaluation = evaluate_checkpoint()
 
     batches = iter_context_batches(
         train_tokens,
@@ -383,7 +391,7 @@ def train_sae(
 
     for input_ids, attention_mask, context_ids in batches:
         batch_tokens = int(attention_mask.sum())
-        residual, _input_ids, _valid_mask = move_and_capture_residual(
+        residual = capture_residual_batch(
             model,
             capture,
             input_ids,
@@ -471,6 +479,8 @@ def train_sae(
         {"sae": sae.state_dict(), "config": asdict(config)},
         args.output_dir / "sae_final.pt",
     )
+    from .plot import save_feature_density_plot, save_training_plot
+
     save_training_plot(metrics_path, args.output_dir / "training_metrics.png")
     save_feature_density_plot(
         checkpoint_metrics_path,
@@ -504,7 +514,7 @@ def evaluate_sae(
     )
     for input_ids, attention_mask, _context_ids in batches:
         batch_tokens = int(attention_mask.sum())
-        residual, _input_ids, _valid_mask = move_and_capture_residual(
+        residual = capture_residual_batch(
             model,
             capture,
             input_ids,

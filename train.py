@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import json
 import random
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +26,7 @@ from src.experiment import (
     format_metrics_line,
     train_sae,
 )
+from src.runtime import choose_device
 from src.sae import TopKSAE
 
 
@@ -91,22 +91,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--cache-only", action="store_true")
     return parser.parse_args()
-
-
-def choose_device(requested: str) -> torch.device:
-    if requested == "auto":
-        if torch.backends.mps.is_available():
-            requested = "mps"
-        elif torch.cuda.is_available():
-            requested = "cuda"
-        else:
-            requested = "cpu"
-            print("warning: neither MPS nor CUDA is available; using CPU", file=sys.stderr)
-    if requested == "mps" and not torch.backends.mps.is_available():
-        raise RuntimeError("--device mps was requested, but MPS is unavailable")
-    if requested == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError("--device cuda was requested, but CUDA is unavailable")
-    return torch.device(requested)
 
 
 def validate_args(args: argparse.Namespace) -> None:

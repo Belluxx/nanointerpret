@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import heapq
 import re
-import sys
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -21,9 +20,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from src.data import iter_context_batches, token_cache_paths
 from src.experiment import (
     ResidualStreamCapture,
+    capture_residual_batch,
     find_transformer_layers,
-    move_and_capture_residual,
 )
+from src.runtime import choose_device
 from src.sae import TopKSAE
 
 
@@ -249,22 +249,6 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("minimum unique tokens cannot exceed candidate tokens per feature")
 
 
-def choose_device(requested: str) -> torch.device:
-    if requested == "auto":
-        if torch.backends.mps.is_available():
-            requested = "mps"
-        elif torch.cuda.is_available():
-            requested = "cuda"
-        else:
-            requested = "cpu"
-            print("warning: neither MPS nor CUDA is available; using CPU", file=sys.stderr)
-    if requested == "mps" and not torch.backends.mps.is_available():
-        raise RuntimeError("MPS is unavailable")
-    if requested == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError("CUDA is unavailable")
-    return torch.device(requested)
-
-
 def load_checkpoint(path: Path) -> tuple[dict, dict]:
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
     state = checkpoint.get("sae") if isinstance(checkpoint, dict) else None
@@ -325,7 +309,7 @@ def iter_feature_activations(
     try:
         for input_ids, attention_mask, _ in batches:
             token_count = int(attention_mask.sum())
-            residual, _, _ = move_and_capture_residual(
+            residual = capture_residual_batch(
                 model,
                 capture,
                 input_ids,
