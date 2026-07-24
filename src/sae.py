@@ -67,7 +67,6 @@ class RunningMetrics:
         self.l0_sum = torch.zeros((), device=self.device)
         self.x_sum = torch.zeros(self.d_model, device=self.device)
         self.x_sq_sum = torch.zeros(self.d_model, device=self.device)
-        self.error_sum = torch.zeros(self.d_model, device=self.device)
         self.error_sq_sum = torch.zeros(self.d_model, device=self.device)
         self.feature_fire_counts = torch.zeros(self.d_sae, device=self.device)
 
@@ -80,7 +79,6 @@ class RunningMetrics:
         self.l0_sum += (values > 0).sum()
         self.x_sum += x.sum(dim=0)
         self.x_sq_sum += x.square().sum(dim=0)
-        self.error_sum += error.sum(dim=0)
         self.error_sq_sum += error.square().sum(dim=0)
         positive_indices = indices[values > 0]
         batch_fire_counts = torch.zeros_like(self.feature_fire_counts)
@@ -104,13 +102,12 @@ class RunningMetrics:
         sse = self.error_sq_sum.sum()
         x_energy = self.x_sq_sum.sum().clamp_min(1e-12)
         x_variance = (self.x_sq_sum - self.x_sum.square() / n).sum().clamp_min(1e-12)
-        error_variance = (self.error_sq_sum - self.error_sum.square() / n).sum().clamp_min(0)
         frequencies = self.feature_fire_counts.cpu().numpy() / n
         active = frequencies > 0
         return {
             "mse": float((sse / (n * self.d_model)).item()),
             "normalized_mse": float((sse / x_energy).item()),
-            "explained_variance": float((1.0 - error_variance / x_variance).item()),
+            "explained_variance": float((1.0 - sse / x_variance).item()),
             "l0": float((self.l0_sum / n).item()),
             "window_dead_feature_pct": float(100.0 * (~active).mean()),
             "window_rare_feature_pct": float(
