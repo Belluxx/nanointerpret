@@ -10,3 +10,5 @@ Minimal training and feature interpretability analysis of LLMs with sparse autoe
 - `src/plot.py`: training and feature-density plots.
 - `src/runtime.py`: PyTorch device selection.
 - `src/sae.py`: Top-K SAE and running metrics.
+
+NOTE: avoid over-engineering, choose simplicity over complexity and avoid trying to cover every single edge case. Be precise where it matters, and keep the rest simple.
