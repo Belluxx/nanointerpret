@@ -7,6 +7,7 @@ import numpy as np
 import seaborn as sns
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
+from matplotlib.ticker import FuncFormatter, LogLocator
 
 
 FEATURES = (
@@ -95,7 +96,7 @@ def save_feature_density_plot(metrics_path: Path, output_path: Path) -> None:
 
 
 def save_training_plot(metrics_path: Path, output_path: Path) -> None:
-    """Save training metrics as a two-panel PNG."""
+    """Save training metrics as a three-panel PNG."""
     records = [
         json.loads(line)
         for line in metrics_path.read_text().splitlines()
@@ -109,63 +110,62 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
             return np.asarray([record[field] for record in records], dtype=float)
         return np.asarray([record.get(field, default) for record in records], dtype=float)
 
-    tokens = values("tokens") / 1_000_000
+    token_counts = values("tokens")
+    tokens = token_counts / 1_000_000
     with sns.axes_style("whitegrid", rc=STYLE), sns.plotting_context("notebook"):
-        figure = Figure(figsize=(11, 4.4), constrained_layout=True, facecolor="#F8FAFC")
+        figure = Figure(figsize=(15, 4.4), constrained_layout=True, facecolor="#F8FAFC")
         figure.set_constrained_layout_pads(w_pad=0.12, h_pad=0.12, wspace=0.08)
         FigureCanvasAgg(figure)
-        mse_axis, feature_axis = figure.subplots(1, 2)
+        mse_axis, auxk_axis, feature_axis = figure.subplots(1, 3)
 
-        sns.lineplot(
-            x=tokens, y=values("mse"), label="Per-element MSE", color="#2563EB",
-            linewidth=2.4, errorbar=None, ax=mse_axis,
-        )
         normalized_mse = values("normalized_mse", np.nan)
         if np.isfinite(normalized_mse).any():
             sns.lineplot(
                 x=tokens,
                 y=normalized_mse,
-                label="NMSE",
                 color="#7C3AED",
                 linewidth=2.4,
                 errorbar=None,
                 ax=mse_axis,
             )
         auxk_loss = values("auxk_loss", np.nan)
-        auxk_loss = np.where(auxk_loss > 0, auxk_loss, np.nan)
-        if np.isfinite(auxk_loss).any():
+        config_path = metrics_path.with_name("config.json")
+        config = json.loads(config_path.read_text()) if config_path.exists() else {}
+        dead_window = float(config.get("dead_window", 0) or 0)
+        previous_token_counts = np.concatenate(([0], token_counts[:-1]))
+        after_dead_window = previous_token_counts >= dead_window
+        if np.isfinite(auxk_loss[after_dead_window]).any():
             sns.lineplot(
-                x=tokens,
-                y=auxk_loss,
-                label="Normalized AuxK",
+                x=tokens[after_dead_window],
+                y=auxk_loss[after_dead_window],
                 color="#DB2777",
                 linewidth=2.0,
                 errorbar=None,
-                ax=mse_axis,
+                ax=auxk_axis,
             )
-        mse_axis.set(ylabel="Error · log scale", yscale="log")
-        mse_axis.legend(frameon=False, loc="best")
+        mse_axis.set(ylabel="NMSE", yscale="log")
+        mse_axis.yaxis.set_major_locator(LogLocator(base=10, subs=(1, 2, 5)))
+        mse_axis.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:g}"))
+        auxk_axis.set_ylabel("Normalized error")
 
-        for label, field, color in FEATURES:
+        for _, field, color in FEATURES:
             sns.lineplot(
-                x=tokens, y=values(field), label=label, color=color,
+                x=tokens, y=values(field), color=color,
                 linewidth=2.2, errorbar=None, ax=feature_axis,
             )
-        feature_axis.set(ylabel="Features (%)", ylim=(0, None))
-        feature_axis.legend(
-            frameon=False, loc="center right",
-            bbox_to_anchor=(1, 1.075), borderaxespad=0,
-            handlelength=1.4,
-        )
+        feature_axis.set(ylabel="Features (%)", ylim=(0, 100))
 
         for axis, title in zip(
-            (mse_axis, feature_axis), ("Reconstruction error", "Dead features")
+            (mse_axis, auxk_axis, feature_axis),
+            ("Reconstruction error", "Normalized AuxK", "Dead features"),
         ):
             axis.set_title(title, loc="left", pad=14)
             axis.set_xlabel("Training tokens (M)")
             axis.margins(x=0.02)
             axis.grid(axis="x", visible=False)
             axis.tick_params(length=0)
+        if dead_window:
+            auxk_axis.set_xlim(left=dead_window / 1_000_000)
         sns.despine(fig=figure)
 
     figure.savefig(
