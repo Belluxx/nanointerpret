@@ -1,0 +1,3 @@
+- [ ] Separate normalized AuxK plot
+- [ ] Dead features plot always 0 - 100 Y range
+- [ ] Make a interpretability script anthropic monosemanticity style, excluding obvious strong features like BOS, etc...
