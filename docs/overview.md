@@ -1,3 +1,6 @@
+# Overview
+
+## Hyperparams
 - `activation layer`: At which point of the LLM we extract the residual-stream vector.
     - Early layers are about lexical/syntactic features
     - Middle layers often give useful conceptual features
