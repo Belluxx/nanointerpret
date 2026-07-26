@@ -12,3 +12,5 @@ Minimal training and feature interpretability analysis of LLMs with sparse autoe
 - `src/sae.py`: Top-K SAE and running metrics.
 
 NOTE: avoid over-engineering, choose simplicity over complexity and avoid trying to cover every single edge case. Be precise where it matters, and keep the rest simple.
+
+NOTE: run MPS-enabled scripts with the project interpreter outside the sandbox via approved host execution, e.g. `.venv/bin/python train.py --device mps`.
