@@ -7,6 +7,9 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 
 
+FIRING_THRESHOLD = 1e-3
+
+
 class TopKSAE(nn.Module):
     def __init__(self, d_model: int, d_sae: int, k: int, device: torch.device):
         super().__init__()
@@ -22,15 +25,38 @@ class TopKSAE(nn.Module):
         self.d_model = d_model
         self.d_sae = d_sae
 
-    def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-        pre_activations = x @ self.encoder_weight + self.encoder_bias
+    def encode_pre_activations(self, x: Tensor) -> Tensor:
+        return x @ self.encoder_weight + self.encoder_bias
+
+    def select_topk(self, pre_activations: Tensor) -> tuple[Tensor, Tensor]:
         values, indices = torch.topk(F.relu(pre_activations), self.k, dim=-1, sorted=False)
+        return indices, values
+
+    def decode(
+        self, indices: Tensor, values: Tensor, *, include_bias: bool = True
+    ) -> Tensor:
         reconstruction = F.embedding_bag(
             indices,
             self.decoder_weight,
             mode="sum",
             per_sample_weights=values,
-        ) + self.decoder_bias
+        )
+        if include_bias:
+            reconstruction = reconstruction + self.decoder_bias
+        return reconstruction
+
+    def forward_with_pre_activations(
+        self, x: Tensor
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        pre_activations = self.encode_pre_activations(x)
+        indices, values = self.select_topk(pre_activations)
+        reconstruction = self.decode(indices, values)
+        return reconstruction, indices, values, pre_activations
+
+    def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+        reconstruction, indices, values, _pre_activations = (
+            self.forward_with_pre_activations(x)
+        )
         return reconstruction, indices, values
 
     @torch.no_grad()
@@ -44,6 +70,53 @@ class TopKSAE(nn.Module):
     def normalize_decoder(self) -> None:
         norms = self.decoder_weight.norm(dim=1, keepdim=True).clamp_min_(1e-12)
         self.decoder_weight.div_(norms)
+
+
+def select_auxk_latents(
+    pre_activations: Tensor, dead_mask: Tensor, aux_k: int
+) -> tuple[Tensor, Tensor]:
+    """Select the strongest dead latents for each token."""
+    if pre_activations.ndim != 2:
+        raise ValueError("pre_activations must have shape [tokens, features]")
+    if dead_mask.shape != (pre_activations.shape[1],):
+        raise ValueError("dead_mask must have one entry per SAE feature")
+    if dead_mask.dtype != torch.bool:
+        raise ValueError("dead_mask must be boolean")
+    if aux_k <= 0:
+        raise ValueError("aux_k must be positive")
+
+    dead_count = int(dead_mask.sum().item())
+    if dead_count == 0:
+        empty_shape = (pre_activations.shape[0], 0)
+        return (
+            torch.empty(empty_shape, dtype=torch.int64, device=pre_activations.device),
+            pre_activations.new_empty(empty_shape),
+        )
+
+    selected_k = min(aux_k, dead_count)
+    masked = pre_activations.masked_fill(~dead_mask.unsqueeze(0), float("-inf"))
+    values, indices = torch.topk(masked, selected_k, dim=-1, sorted=False)
+    return indices, F.relu(values)
+
+
+def normalized_auxk_loss(
+    sae: TopKSAE,
+    pre_activations: Tensor,
+    residual_error: Tensor,
+    dead_mask: Tensor,
+    aux_k: int,
+) -> Tensor:
+    """Reconstruct detached primary error with dead latents and normalized MSE."""
+    indices, values = select_auxk_latents(pre_activations, dead_mask, aux_k)
+    if indices.shape[1] == 0:
+        return pre_activations.sum() * 0.0
+
+    auxiliary_reconstruction = sae.decode(indices, values, include_bias=False)
+    target = residual_error.detach()
+    numerator = F.mse_loss(auxiliary_reconstruction, target)
+    target_mean = target.mean(dim=0, keepdim=True)
+    denominator = F.mse_loss(target_mean.expand_as(target), target)
+    return torch.nan_to_num(numerator / denominator, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 class RunningMetrics:
@@ -62,23 +135,34 @@ class RunningMetrics:
         self.x_sq_sum = torch.zeros(self.d_model, device=self.device)
         self.error_sq_sum = torch.zeros(self.d_model, device=self.device)
         self.feature_fire_counts = torch.zeros(self.d_sae, device=self.device)
+        self.auxk_loss_sum = torch.zeros((), device=self.device)
+        self.auxk_token_count = 0
 
     @torch.no_grad()
     def update(
-        self, x: Tensor, reconstruction: Tensor, indices: Tensor, values: Tensor
+        self,
+        x: Tensor,
+        reconstruction: Tensor,
+        indices: Tensor,
+        values: Tensor,
+        auxk_loss: Tensor | None = None,
     ) -> Tensor:
         error = x - reconstruction
         self.count += x.shape[0]
-        self.l0_sum += (values > 0).sum()
+        firing = values > FIRING_THRESHOLD
+        self.l0_sum += firing.sum()
         self.x_sum += x.sum(dim=0)
         self.x_sq_sum += x.square().sum(dim=0)
         self.error_sq_sum += error.square().sum(dim=0)
-        positive_indices = indices[values > 0]
+        positive_indices = indices[firing]
         batch_fire_counts = torch.zeros_like(self.feature_fire_counts)
         batch_fire_counts.scatter_add_(
             0, positive_indices, torch.ones_like(positive_indices, dtype=torch.float32)
         )
         self.feature_fire_counts += batch_fire_counts
+        if auxk_loss is not None:
+            self.auxk_loss_sum += auxk_loss.detach() * x.shape[0]
+            self.auxk_token_count += x.shape[0]
         return batch_fire_counts
 
     @torch.no_grad()
@@ -95,8 +179,10 @@ class RunningMetrics:
         sse = self.error_sq_sum.sum()
         x_energy = self.x_sq_sum.sum().clamp_min(1e-12)
         x_variance = (self.x_sq_sum - self.x_sum.square() / n).sum().clamp_min(1e-12)
-        return {
-            "mse": float((sse / (n * self.d_model)).item()),
+        mse = float((sse / (n * self.d_model)).item())
+        result = {
+            "mse": mse,
+            "reconstruction_loss": mse,
             "normalized_mse": float((sse / x_energy).item()),
             "explained_variance": float((1.0 - sse / x_variance).item()),
             "l0": float((self.l0_sum / n).item()),
@@ -104,3 +190,8 @@ class RunningMetrics:
                 100.0 * (self.feature_fire_counts == 0).float().mean().item()
             ),
         }
+        if self.auxk_token_count:
+            result["auxk_loss"] = float(
+                (self.auxk_loss_sum / self.auxk_token_count).item()
+            )
+        return result

@@ -15,7 +15,19 @@ from torch import Tensor, nn
 from tqdm.auto import tqdm
 
 from .data import iter_context_batches
-from .sae import RunningMetrics, TopKSAE
+from .sae import (
+    FIRING_THRESHOLD,
+    RunningMetrics,
+    TopKSAE,
+    normalized_auxk_loss,
+)
+
+
+def default_aux_k(d_model: int) -> int:
+    """Return a power of two close to half the residual-stream width."""
+    if d_model <= 0:
+        raise ValueError("d_model must be positive")
+    return 1 << round(math.log2(max(1.0, d_model / 2)))
 
 
 @dataclass(frozen=True)
@@ -41,6 +53,19 @@ class ExperimentConfig:
     model_dtype: str
     normalization_tokens: int = 0
     activation_scale: float = 1.0
+    aux_k: int | None = None
+    aux_k_coef: float = 1 / 32
+    dead_window: int = 10_000_000
+
+    def __post_init__(self) -> None:
+        aux_k = default_aux_k(self.d_model) if self.aux_k is None else self.aux_k
+        if not 0 < aux_k <= self.d_sae:
+            raise ValueError(f"aux_k must be in [1, {self.d_sae}], got {aux_k}")
+        if self.aux_k_coef < 0:
+            raise ValueError("aux_k_coef must be non-negative")
+        if self.dead_window <= 0:
+            raise ValueError("dead_window must be positive")
+        object.__setattr__(self, "aux_k", aux_k)
 
 
 @dataclass
@@ -211,10 +236,16 @@ def format_metrics(record: dict) -> str:
         if record["dead_feature_pct"] is None
         else f"{record['dead_feature_pct']:.2f}%"
     )
-    return (
-        f"EV {record['explained_variance']:.2%} | MSE {record['mse']:,.4f} | "
-        f"NMSE {record['normalized_mse']:.4f} | dead {dead}"
+    parts = [
+        f"EV {record['explained_variance']:.2%}",
+        f"recon {record['reconstruction_loss']:,.4f}",
+    ]
+    if "auxk_loss" in record:
+        parts.append(f"AuxK {record['auxk_loss']:,.4f}")
+    parts.extend(
+        (f"NMSE {record['normalized_mse']:.4f}", f"dead {dead}")
     )
+    return " | ".join(parts)
 
 
 def format_metrics_line(record: dict) -> str:
@@ -312,6 +343,18 @@ def feature_density_histogram(fire_counts: Tensor, token_count: int) -> dict:
     }
 
 
+@torch.no_grad()
+def update_last_fired(
+    last_fired: Tensor,
+    indices: Tensor,
+    values: Tensor,
+    token_position: int,
+) -> None:
+    """Record primary TopK firings before dead latents are selected for AuxK."""
+    fired = indices[values > FIRING_THRESHOLD].unique()
+    last_fired[fired] = token_position
+
+
 def optimize_residual_batch(
     sae: TopKSAE,
     optimizer: torch.optim.Optimizer,
@@ -323,6 +366,9 @@ def optimize_residual_batch(
     sae_batch_size: int,
     learning_rate: float,
     gradient_clip: float,
+    aux_k: int,
+    aux_k_coef: float,
+    dead_window: int,
 ) -> float:
     """Optimize the SAE over one captured model batch."""
     current_learning_rate = optimizer.param_groups[0]["lr"]
@@ -334,8 +380,22 @@ def optimize_residual_batch(
         for parameter_group in optimizer.param_groups:
             parameter_group["lr"] = current_learning_rate
 
-        reconstruction, indices, values = sae(x)
-        loss = F.mse_loss(reconstruction, x)
+        reconstruction, indices, values, pre_activations = (
+            sae.forward_with_pre_activations(x)
+        )
+        token_position = processed_tokens + start + len(x)
+        update_last_fired(last_fired, indices, values, token_position)
+        dead_mask = last_fired < token_position - dead_window
+
+        reconstruction_loss = F.mse_loss(reconstruction, x)
+        auxk_loss = normalized_auxk_loss(
+            sae,
+            pre_activations,
+            x - reconstruction,
+            dead_mask,
+            aux_k,
+        )
+        loss = reconstruction_loss + aux_k_coef * auxk_loss
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         sae.constrain_decoder_gradient()
@@ -344,11 +404,13 @@ def optimize_residual_batch(
         optimizer.step()
         sae.normalize_decoder()
 
-        batch_fire_counts = metrics.update(
-            x.detach(), reconstruction.detach(), indices.detach(), values.detach()
+        metrics.update(
+            x.detach(),
+            reconstruction.detach(),
+            indices.detach(),
+            values.detach(),
+            auxk_loss.detach(),
         )
-        fired = torch.nonzero(batch_fire_counts, as_tuple=False).flatten()
-        last_fired[fired] = processed_tokens + start + len(x)
     return current_learning_rate
 
 
@@ -544,6 +606,9 @@ def train_sae(
             config.sae_batch_size,
             config.learning_rate,
             args.gradient_clip,
+            int(config.aux_k),
+            config.aux_k_coef,
+            config.dead_window,
         )
         state.processed_tokens += batch_tokens
         state.processed_contexts += len(context_ids)
@@ -557,7 +622,7 @@ def train_sae(
                 metrics,
                 state.last_fired,
                 state.processed_tokens,
-                args.dead_window,
+                config.dead_window,
                 current_learning_rate,
                 start_tokens,
                 time.monotonic() - start_time - evaluation_seconds,

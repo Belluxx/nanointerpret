@@ -2,7 +2,8 @@
 Train a Top-K sparse autoencoder on Gemma's midpoint residual stream.
 
 Defaults: Gemma 3 270M, FineWeb-Edu sample-10BT, 100M train tokens,
-10M validation tokens, context length 256, 16x expansion, and K=32.
+10M validation tokens, context length 256, 16x expansion, K=32, and AuxK
+dead-feature prevention with coefficient 1/32.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from src.data import TokenCacheSpec, build_token_cache
 from src.experiment import (
     ExperimentConfig,
     ResidualStreamCapture,
+    default_aux_k,
     estimate_activation_normalization,
     evaluate_sae,
     find_transformer_layers,
@@ -45,6 +47,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--context-size", type=int, default=256)
     parser.add_argument("--width-multiplier", type=int, default=16)
     parser.add_argument("--k", type=int, default=32)
+    parser.add_argument("--aux-k", type=int, default=None, help="Dead latents used by AuxK. Default: nearest power of two to d_model / 2.")
+    parser.add_argument("--aux-k-coef", type=float, default=1 / 32)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--model-batch-size", type=int, default=32, help="Contexts processed together; lower this if memory is limited.")
     parser.add_argument("--sae-batch-size", type=int, default=4096, help="SAE token microbatch; lower this if memory is limited.")
@@ -83,6 +87,10 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("counts, sizes, intervals, and learning rate must be positive")
     if args.gradient_clip < 0:
         raise ValueError("gradient clip cannot be negative")
+    if args.aux_k is not None and args.aux_k <= 0:
+        raise ValueError("aux-k must be positive")
+    if args.aux_k_coef < 0:
+        raise ValueError("aux-k-coef must be non-negative")
 
 
 def seed_everything(seed: int) -> None:
@@ -177,9 +185,13 @@ def main() -> None:
 
     d_model = int(model.config.hidden_size)
     d_sae = args.width_multiplier * d_model
+    aux_k = default_aux_k(d_model) if args.aux_k is None else args.aux_k
+    if aux_k > d_sae:
+        raise ValueError(f"aux-k must be at most the SAE width ({d_sae}), got {aux_k}")
     print(
         f"capturing input to {layer_path}[{layer_index}] "
-        f"({len(layers)} layers, d_model={d_model}); SAE width={d_sae:,}, k={args.k}"
+        f"({len(layers)} layers, d_model={d_model}); SAE width={d_sae:,}, "
+        f"k={args.k}, AuxK={aux_k}"
     )
     with ResidualStreamCapture(layers[layer_index]) as capture:
         activation_scale = prepare_activation_normalization(
@@ -205,6 +217,9 @@ def main() -> None:
             d_sae=d_sae,
             width_multiplier=args.width_multiplier,
             k=args.k,
+            aux_k=aux_k,
+            aux_k_coef=args.aux_k_coef,
+            dead_window=args.dead_window,
             learning_rate=args.learning_rate,
             model_batch_size=args.model_batch_size,
             sae_batch_size=args.sae_batch_size,

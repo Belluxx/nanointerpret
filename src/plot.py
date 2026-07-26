@@ -131,6 +131,18 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
                 errorbar=None,
                 ax=mse_axis,
             )
+        auxk_loss = values("auxk_loss", np.nan)
+        auxk_loss = np.where(auxk_loss > 0, auxk_loss, np.nan)
+        if np.isfinite(auxk_loss).any():
+            sns.lineplot(
+                x=tokens,
+                y=auxk_loss,
+                label="Normalized AuxK",
+                color="#DB2777",
+                linewidth=2.0,
+                errorbar=None,
+                ax=mse_axis,
+            )
         mse_axis.set(ylabel="Error · log scale", yscale="log")
         mse_axis.legend(frameon=False, loc="best")
 
