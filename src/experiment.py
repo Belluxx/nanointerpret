@@ -319,16 +319,6 @@ def capture_residual_batch(
     return residual
 
 
-def learning_rate_multiplier(tokens_seen: int, total_tokens: int) -> float:
-    """Keep LR constant for 80% of training, then linearly decay toward zero."""
-    decay_start = int(0.8 * total_tokens)
-    if tokens_seen < decay_start:
-        return 1.0
-    decay_length = max(1, total_tokens - decay_start)
-    remaining = max(0, total_tokens - tokens_seen)
-    return remaining / decay_length
-
-
 def feature_density_histogram(fire_counts: Tensor, token_count: int) -> dict:
     """Build fixed log10-density bins suitable for comparison across validations."""
     nonzero_counts = fire_counts[fire_counts > 0].cpu().numpy().astype(np.float64)
@@ -362,24 +352,15 @@ def optimize_residual_batch(
     metrics: RunningMetrics,
     last_fired: Tensor,
     processed_tokens: int,
-    total_tokens: int,
     sae_batch_size: int,
-    learning_rate: float,
     gradient_clip: float,
     aux_k: int,
     aux_k_coef: float,
     dead_window: int,
-) -> float:
+) -> None:
     """Optimize the SAE over one captured model batch."""
-    current_learning_rate = optimizer.param_groups[0]["lr"]
     for start in range(0, len(residual), sae_batch_size):
         x = residual[start : start + sae_batch_size]
-        current_learning_rate = learning_rate * learning_rate_multiplier(
-            processed_tokens + start, total_tokens
-        )
-        for parameter_group in optimizer.param_groups:
-            parameter_group["lr"] = current_learning_rate
-
         reconstruction, indices, values, pre_activations = (
             sae.forward_with_pre_activations(x)
         )
@@ -413,7 +394,6 @@ def optimize_residual_batch(
             values.detach(),
             auxk_loss,
         )
-    return current_learning_rate
 
 
 def build_training_record(
@@ -581,8 +561,6 @@ def train_sae(
     start_time = time.monotonic()
     start_tokens = state.processed_tokens
     evaluation_seconds = 0.0
-    current_learning_rate = optimizer.param_groups[0]["lr"]
-
     for input_ids, attention_mask, context_ids in batches:
         batch_tokens = int(attention_mask.sum())
         residual = capture_residual_batch(
@@ -597,16 +575,14 @@ def train_sae(
         permutation = torch.randperm(len(residual), device=residual.device)
         residual = residual[permutation]
 
-        current_learning_rate = optimize_residual_batch(
+        optimize_residual_batch(
             sae,
             optimizer,
             residual,
             metrics,
             state.last_fired,
             state.processed_tokens,
-            len(train_tokens),
             config.sae_batch_size,
-            config.learning_rate,
             args.gradient_clip,
             int(config.aux_k),
             config.aux_k_coef,
@@ -625,7 +601,7 @@ def train_sae(
                 state.last_fired,
                 state.processed_tokens,
                 config.dead_window,
-                current_learning_rate,
+                config.learning_rate,
                 start_tokens,
                 time.monotonic() - start_time - evaluation_seconds,
             )
