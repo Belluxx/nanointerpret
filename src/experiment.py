@@ -25,9 +25,7 @@ from .sae import (
 
 def default_aux_k(d_model: int) -> int:
     """Return a power of two close to half the residual-stream width."""
-    if d_model <= 0:
-        raise ValueError("d_model must be positive")
-    return 1 << round(math.log2(max(1.0, d_model / 2)))
+    return 1 << round(math.log2(d_model / 2))
 
 
 @dataclass(frozen=True)
@@ -45,6 +43,7 @@ class ExperimentConfig:
     d_sae: int
     width_multiplier: int
     k: int
+    aux_k: int
     learning_rate: float
     model_batch_size: int
     sae_batch_size: int
@@ -54,19 +53,8 @@ class ExperimentConfig:
     normalization_tokens: int = 0
     activation_scale: float = 1.0
     subtract_pre_bias: bool = False
-    aux_k: int | None = None
     aux_k_coef: float = 1 / 32
     dead_window: int = 10_000_000
-
-    def __post_init__(self) -> None:
-        aux_k = default_aux_k(self.d_model) if self.aux_k is None else self.aux_k
-        if not 0 < aux_k <= self.d_sae:
-            raise ValueError(f"aux_k must be in [1, {self.d_sae}], got {aux_k}")
-        if self.aux_k_coef < 0:
-            raise ValueError("aux_k_coef must be non-negative")
-        if self.dead_window <= 0:
-            raise ValueError("dead_window must be positive")
-        object.__setattr__(self, "aux_k", aux_k)
 
 
 @dataclass
@@ -162,16 +150,11 @@ def load_training_state(
     device: torch.device,
 ) -> TrainingState:
     checkpoint = torch.load(path, map_location=device, weights_only=False)
-    validate_resume_config(checkpoint.get("config"), config)
+    validate_resume_config(checkpoint["config"], config)
     sae.load_state_dict(checkpoint["sae"])
     optimizer.load_state_dict(checkpoint["optimizer"])
     processed_tokens = int(checkpoint["processed_tokens"])
-    processed_contexts = int(
-        checkpoint.get(
-            "processed_contexts",
-            math.ceil(processed_tokens / config.context_size),
-        )
-    )
+    processed_contexts = int(checkpoint["processed_contexts"])
     return TrainingState(
         processed_tokens=processed_tokens,
         processed_contexts=processed_contexts,
@@ -190,8 +173,6 @@ def initialize_training_state(
     checkpoint_metrics_path: Path,
 ) -> TrainingState:
     if args.resume:
-        if not checkpoint_path.exists():
-            raise FileNotFoundError(f"cannot resume: {checkpoint_path} does not exist")
         state = load_training_state(
             checkpoint_path,
             sae,
@@ -201,11 +182,6 @@ def initialize_training_state(
         )
         print(f"resumed at {state.processed_tokens:,} training tokens")
     else:
-        if checkpoint_path.exists():
-            raise FileExistsError(
-                f"{checkpoint_path} already exists; "
-                "pass --resume or choose another --output-dir"
-            )
         metrics_path.write_text("")
         checkpoint_metrics_path.write_text("")
         state = TrainingState(
@@ -258,15 +234,8 @@ def load_checkpoint_evaluation(path: Path, training_tokens: int) -> dict | None:
     if not path.exists():
         return None
     for line in reversed(path.read_text().splitlines()):
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if (
-            isinstance(record, dict)
-            and record.get("training_tokens") == training_tokens
-            and "feature_density_bin_counts" in record
-        ):
+        record = json.loads(line)
+        if record["training_tokens"] == training_tokens:
             return {
                 key: value
                 for key, value in record.items()
@@ -275,25 +244,9 @@ def load_checkpoint_evaluation(path: Path, training_tokens: int) -> dict | None:
     return None
 
 
-def validate_resume_config(checkpoint_config: object, config: ExperimentConfig) -> None:
-    current_config = asdict(config)
-    if not isinstance(checkpoint_config, dict):
-        raise ValueError("cannot resume: checkpoint has no valid experiment configuration")
-
-    fields = sorted(checkpoint_config.keys() | current_config.keys())
-    mismatches = [
-        field
-        for field in fields
-        if checkpoint_config.get(field) != current_config.get(field)
-        or (field in checkpoint_config) != (field in current_config)
-    ]
-    if mismatches:
-        details = ", ".join(
-            f"{field}: checkpoint={checkpoint_config.get(field)!r}, "
-            f"current={current_config.get(field)!r}"
-            for field in mismatches
-        )
-        raise ValueError(f"cannot resume with a different experiment configuration ({details})")
+def validate_resume_config(checkpoint_config: dict, config: ExperimentConfig) -> None:
+    if checkpoint_config != asdict(config):
+        raise ValueError("cannot resume with a different experiment configuration")
 
 
 def capture_residual_batch(
@@ -323,10 +276,7 @@ def capture_residual_batch(
 def geometric_median(
     points: Tensor, *, max_iterations: int = 100, tolerance: float = 1e-5
 ) -> Tensor:
-    """Estimate the geometric median of a non-empty batch with Weiszfeld's method."""
-    if points.ndim != 2 or len(points) == 0:
-        raise ValueError("points must have shape [samples, dimensions] and be non-empty")
-
+    """Estimate the geometric median with Weiszfeld's method."""
     estimate = points.mean(dim=0)
     for _ in range(max_iterations):
         distances = torch.linalg.vector_norm(points - estimate, dim=1)
@@ -342,7 +292,7 @@ def feature_density_histogram(fire_counts: Tensor, token_count: int) -> dict:
     """Build fixed log10-density bins suitable for comparison across validations."""
     nonzero_counts = fire_counts[fire_counts > 0].cpu().numpy().astype(np.float64)
     nonzero_density = nonzero_counts / token_count
-    minimum_exponent = -max(1, math.ceil(math.log10(token_count)))
+    minimum_exponent = -math.ceil(math.log10(token_count))
     bin_edges = np.linspace(minimum_exponent, 0.0, -minimum_exponent * 10 + 1)
     bin_counts, bin_edges = np.histogram(np.log10(nonzero_density), bins=bin_edges)
     return {
@@ -436,8 +386,7 @@ def build_training_record(
         **metrics.compute(),
         "dead_feature_pct": dead_feature_pct,
         "learning_rate": learning_rate,
-        "tokens_per_second": (processed_tokens - start_tokens)
-        / max(elapsed_seconds, 1e-9),
+        "tokens_per_second": (processed_tokens - start_tokens) / elapsed_seconds,
     }
 
 
@@ -489,11 +438,7 @@ def estimate_activation_normalization(
             break
     progress.close()
 
-    mean_squared_norm = squared_norm_sum / max(tokens_seen, 1)
-    if not math.isfinite(mean_squared_norm) or mean_squared_norm <= 0:
-        raise RuntimeError(
-            f"cannot normalize activations with E[||x||^2]={mean_squared_norm}"
-        )
+    mean_squared_norm = squared_norm_sum / tokens_seen
     scale = math.sqrt(d_model / mean_squared_norm)
     print(
         f"activation normalization: {tokens_seen:,} calibration tokens, "
@@ -614,7 +559,7 @@ def train_sae(
             state.processed_tokens,
             config.sae_batch_size,
             args.gradient_clip,
-            int(config.aux_k),
+            config.aux_k,
             config.aux_k_coef,
             config.dead_window,
         )

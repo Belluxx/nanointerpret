@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import math
-
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
@@ -21,9 +19,6 @@ class TopKSAE(nn.Module):
         subtract_pre_bias: bool = False,
     ):
         super().__init__()
-        if not 0 < k <= d_sae:
-            raise ValueError(f"k must be in [1, {d_sae}], got {k}")
-
         decoder = F.normalize(torch.randn(d_sae, d_model, device=device), dim=1)
         self.encoder_weight = nn.Parameter(decoder.T.contiguous())
         self.encoder_bias = nn.Parameter(torch.zeros(d_sae, device=device))
@@ -72,10 +67,9 @@ class TopKSAE(nn.Module):
 
     @torch.no_grad()
     def constrain_decoder_gradient(self) -> None:
-        if self.decoder_weight.grad is None:
-            return
-        parallel = (self.decoder_weight.grad * self.decoder_weight).sum(dim=1, keepdim=True)
-        self.decoder_weight.grad.sub_(parallel * self.decoder_weight)
+        gradient = self.decoder_weight.grad
+        parallel = (gradient * self.decoder_weight).sum(dim=1, keepdim=True)
+        gradient.sub_(parallel * self.decoder_weight)
 
     @torch.no_grad()
     def normalize_decoder(self) -> None:
@@ -87,15 +81,6 @@ def select_auxk_latents(
     pre_activations: Tensor, dead_mask: Tensor, aux_k: int
 ) -> tuple[Tensor, Tensor]:
     """Select the strongest dead latents for each token."""
-    if pre_activations.ndim != 2:
-        raise ValueError("pre_activations must have shape [tokens, features]")
-    if dead_mask.shape != (pre_activations.shape[1],):
-        raise ValueError("dead_mask must have one entry per SAE feature")
-    if dead_mask.dtype != torch.bool:
-        raise ValueError("dead_mask must be boolean")
-    if aux_k <= 0:
-        raise ValueError("aux_k must be positive")
-
     dead_count = int(dead_mask.sum().item())
     if dead_count == 0:
         empty_shape = (pre_activations.shape[0], 0)
@@ -182,14 +167,6 @@ class RunningMetrics:
 
     @torch.no_grad()
     def compute(self) -> dict[str, float]:
-        if self.count == 0:
-            return {
-                "mse": math.nan,
-                "normalized_mse": math.nan,
-                "explained_variance": math.nan,
-                "l0": math.nan,
-            }
-
         n = float(self.count)
         sse = self.error_sq_sum.sum()
         x_energy = self.x_sq_sum.sum().clamp_min(1e-12)

@@ -24,20 +24,13 @@ STYLE = {
 
 
 def select_spaced_validation_records(records: list[dict]) -> list[dict]:
-    """Select up to three approximately equidistant compatible validations."""
-    compatible = [
-        record
-        for record in records
-        if "feature_density_log10_bin_edges" in record
-        and "feature_density_bin_counts" in record
-        and "training_tokens" in record
-    ]
-    compatible.sort(key=lambda record: record["training_tokens"])
-    if len(compatible) <= 3:
-        return compatible
+    """Select up to three approximately equidistant validations."""
+    records = sorted(records, key=lambda record: record["training_tokens"])
+    if len(records) <= 3:
+        return records
 
-    indices = np.rint(np.linspace(0, len(compatible) - 1, 3)).astype(int)
-    return [compatible[index] for index in indices]
+    indices = np.rint(np.linspace(0, len(records) - 1, 3)).astype(int)
+    return [records[index] for index in indices]
 
 
 def save_feature_density_plot(metrics_path: Path, output_path: Path) -> None:
@@ -61,7 +54,7 @@ def save_feature_density_plot(metrics_path: Path, output_path: Path) -> None:
             edges = np.asarray(record["feature_density_log10_bin_edges"], dtype=float)
             counts = np.asarray(record["feature_density_bin_counts"], dtype=float)
             centers = (edges[:-1] + edges[1:]) / 2
-            total_features = max(int(record["total_features"]), 1)
+            total_features = int(record["total_features"])
             percentages = 100.0 * counts / total_features
             training_tokens = int(record["training_tokens"])
             dead_percentage = float(record["dead_feature_pct"])
@@ -118,20 +111,19 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
         FigureCanvasAgg(figure)
         mse_axis, auxk_axis, feature_axis = figure.subplots(1, 3)
 
-        normalized_mse = values("normalized_mse", np.nan)
-        if np.isfinite(normalized_mse).any():
-            sns.lineplot(
-                x=tokens,
-                y=normalized_mse,
-                color="#7C3AED",
-                linewidth=2.4,
-                errorbar=None,
-                ax=mse_axis,
-            )
+        normalized_mse = values("normalized_mse")
+        sns.lineplot(
+            x=tokens,
+            y=normalized_mse,
+            color="#7C3AED",
+            linewidth=2.4,
+            errorbar=None,
+            ax=mse_axis,
+        )
         auxk_loss = values("auxk_loss", np.nan)
         config_path = metrics_path.with_name("config.json")
-        config = json.loads(config_path.read_text()) if config_path.exists() else {}
-        dead_window = float(config.get("dead_window", 0) or 0)
+        config = json.loads(config_path.read_text())
+        dead_window = float(config["dead_window"])
         previous_token_counts = np.concatenate(([0], token_counts[:-1]))
         after_dead_window = previous_token_counts >= dead_window
         if np.isfinite(auxk_loss[after_dead_window]).any():

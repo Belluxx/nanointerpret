@@ -61,31 +61,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def validate_args(args: argparse.Namespace) -> None:
-    positive = (
-        args.train_tokens,
-        args.validation_tokens,
-        args.context_size,
-        args.width_multiplier,
-        args.k,
-        args.learning_rate,
-        args.model_batch_size,
-        args.sae_batch_size,
-        args.normalization_tokens,
-        args.log_every,
-        args.checkpoint_every,
-        args.dead_window,
-    )
-    if min(positive) <= 0:
-        raise ValueError("counts, sizes, intervals, and learning rate must be positive")
-    if args.gradient_clip < 0:
-        raise ValueError("gradient clip cannot be negative")
-    if args.aux_k is not None and args.aux_k <= 0:
-        raise ValueError("aux-k must be positive")
-    if args.aux_k_coef < 0:
-        raise ValueError("aux-k-coef must be non-negative")
-
-
 def seed_everything(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -103,17 +78,8 @@ def prepare_activation_normalization(
 ) -> tuple[float, torch.Tensor | None]:
     checkpoint_path = args.output_dir / "checkpoint.pt"
     if args.resume:
-        if not checkpoint_path.exists():
-            raise FileNotFoundError(f"cannot resume: {checkpoint_path} does not exist")
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-        saved_config = checkpoint.get("config") if isinstance(checkpoint, dict) else None
-        if not isinstance(saved_config, dict):
-            raise ValueError("cannot resume: checkpoint has no valid experiment configuration")
-        if "activation_scale" not in saved_config:
-            raise ValueError(
-                "cannot resume this checkpoint because it predates activation normalization"
-            )
-        activation_scale = float(saved_config["activation_scale"])
+        activation_scale = float(checkpoint["config"]["activation_scale"])
         print(f"reusing activation scale {activation_scale:.8g} from {checkpoint_path}")
         return activation_scale, None
 
@@ -134,7 +100,6 @@ def prepare_activation_normalization(
 
 def main() -> None:
     args = parse_args()
-    validate_args(args)
     seed_everything(args.seed)
     device = choose_device(args.device)
     dtype = getattr(torch, args.model_dtype)
@@ -179,8 +144,6 @@ def main() -> None:
     d_model = int(model.config.hidden_size)
     d_sae = args.width_multiplier * d_model
     aux_k = default_aux_k(d_model) if args.aux_k is None else args.aux_k
-    if aux_k > d_sae:
-        raise ValueError(f"aux-k must be at most the SAE width ({d_sae}), got {aux_k}")
     print(
         f"capturing input to {layer_path}[{layer_index}] "
         f"({len(layers)} layers, d_model={d_model}); SAE width={d_sae:,}, "

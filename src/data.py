@@ -42,10 +42,7 @@ def cache_is_valid(
 ) -> bool:
     if not (train_path.exists() and validation_path.exists() and metadata_path.exists()):
         return False
-    try:
-        metadata = json.loads(metadata_path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return False
+    metadata = json.loads(metadata_path.read_text())
 
     expected = {
         "model_id": spec.model_id,
@@ -55,14 +52,11 @@ def cache_is_valid(
         "validation_tokens": spec.validation_tokens,
     }
     item_size = np.dtype(np.uint32).itemsize
-    try:
-        return (
-            all(metadata.get(key) == value for key, value in expected.items())
-            and train_path.stat().st_size == spec.train_tokens * item_size
-            and validation_path.stat().st_size == spec.validation_tokens * item_size
-        )
-    except OSError:
-        return False
+    return (
+        all(metadata[key] == value for key, value in expected.items())
+        and train_path.stat().st_size == spec.train_tokens * item_size
+        and validation_path.stat().st_size == spec.validation_tokens * item_size
+    )
 
 
 def build_token_cache(tokenizer, spec: TokenCacheSpec) -> tuple[Path, Path]:
@@ -72,12 +66,7 @@ def build_token_cache(tokenizer, spec: TokenCacheSpec) -> tuple[Path, Path]:
         print(f"using token cache at {spec.cache_dir}")
         return train_path, validation_path
 
-    try:
-        from datasets import load_dataset
-    except ImportError as exc:
-        raise RuntimeError(
-            "The 'datasets' package is required. Run: pip install -r requirements.txt"
-        ) from exc
+    from datasets import load_dataset
 
     train_tmp = train_path.with_suffix(train_path.suffix + ".tmp")
     validation_tmp = validation_path.with_suffix(validation_path.suffix + ".tmp")
@@ -106,8 +95,6 @@ def build_token_cache(tokenizer, spec: TokenCacheSpec) -> tuple[Path, Path]:
                 ids = ([] if bos is None else [bos]) + document + ([] if eos is None else [eos])
                 array = np.asarray(ids, dtype=np.uint32)
                 take = min(len(array), target_total - written)
-                if take == 0:
-                    continue
 
                 split_at = max(0, min(take, spec.train_tokens - written))
                 if split_at:
