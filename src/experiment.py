@@ -142,65 +142,6 @@ def save_checkpoint(
     os.replace(temporary, path)
 
 
-def load_training_state(
-    path: Path,
-    sae: TopKSAE,
-    optimizer: torch.optim.Optimizer,
-    config: ExperimentConfig,
-    device: torch.device,
-) -> TrainingState:
-    checkpoint = torch.load(path, map_location=device, weights_only=False)
-    validate_resume_config(checkpoint["config"], config)
-    sae.load_state_dict(checkpoint["sae"])
-    optimizer.load_state_dict(checkpoint["optimizer"])
-    processed_tokens = int(checkpoint["processed_tokens"])
-    processed_contexts = int(checkpoint["processed_contexts"])
-    return TrainingState(
-        processed_tokens=processed_tokens,
-        processed_contexts=processed_contexts,
-        last_fired=checkpoint["last_fired"].to(device),
-    )
-
-
-def initialize_training_state(
-    sae: TopKSAE,
-    optimizer: torch.optim.Optimizer,
-    config: ExperimentConfig,
-    device: torch.device,
-    args: argparse.Namespace,
-    checkpoint_path: Path,
-    metrics_path: Path,
-    checkpoint_metrics_path: Path,
-) -> TrainingState:
-    if args.resume:
-        state = load_training_state(
-            checkpoint_path,
-            sae,
-            optimizer,
-            config,
-            device,
-        )
-        print(f"resumed at {state.processed_tokens:,} training tokens")
-    else:
-        metrics_path.write_text("")
-        checkpoint_metrics_path.write_text("")
-        state = TrainingState(
-            processed_tokens=0,
-            processed_contexts=0,
-            last_fired=torch.full(
-                (sae.d_sae,),
-                -1,
-                dtype=torch.int64,
-                device=device,
-            ),
-        )
-
-    (args.output_dir / "config.json").write_text(
-        json.dumps(asdict(config), indent=2) + "\n"
-    )
-    return state
-
-
 def append_jsonl(path: Path, record: dict) -> None:
     with path.open("a") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
@@ -242,11 +183,6 @@ def load_checkpoint_evaluation(path: Path, training_tokens: int) -> dict | None:
                 if key != "training_tokens"
             }
     return None
-
-
-def validate_resume_config(checkpoint_config: dict, config: ExperimentConfig) -> None:
-    if checkpoint_config != asdict(config):
-        raise ValueError("cannot resume with a different experiment configuration")
 
 
 def capture_residual_batch(
@@ -302,18 +238,6 @@ def feature_density_histogram(fire_counts: Tensor, token_count: int) -> dict:
     }
 
 
-@torch.no_grad()
-def update_last_fired(
-    last_fired: Tensor,
-    indices: Tensor,
-    values: Tensor,
-    token_position: int,
-) -> None:
-    """Record primary TopK firings before dead latents are selected for AuxK."""
-    fired = indices[values > FIRING_THRESHOLD].unique()
-    last_fired[fired] = token_position
-
-
 def optimize_residual_batch(
     sae: TopKSAE,
     optimizer: torch.optim.Optimizer,
@@ -334,7 +258,8 @@ def optimize_residual_batch(
             sae.forward_with_pre_activations(x)
         )
         token_position = processed_tokens + start + len(x)
-        update_last_fired(last_fired, indices, values, token_position)
+        fired = indices[values > FIRING_THRESHOLD].unique()
+        last_fired[fired] = token_position
         reconstruction_loss = F.mse_loss(reconstruction, x)
         auxk_loss = None
         loss = reconstruction_loss
@@ -363,31 +288,6 @@ def optimize_residual_batch(
             values.detach(),
             auxk_loss,
         )
-
-
-def build_training_record(
-    metrics: RunningMetrics,
-    last_fired: Tensor,
-    processed_tokens: int,
-    dead_window: int,
-    learning_rate: float,
-    start_tokens: int,
-    elapsed_seconds: float,
-) -> dict:
-    dead_feature_pct = (
-        100.0
-        * (last_fired < processed_tokens - dead_window).float().mean().item()
-        if processed_tokens >= dead_window
-        else None
-    )
-    return {
-        "split": "train",
-        "tokens": processed_tokens,
-        **metrics.compute(),
-        "dead_feature_pct": dead_feature_pct,
-        "learning_rate": learning_rate,
-        "tokens_per_second": (processed_tokens - start_tokens) / elapsed_seconds,
-    }
 
 
 @torch.inference_mode()
@@ -468,15 +368,32 @@ def train_sae(
     checkpoint_path = args.output_dir / "checkpoint.pt"
     metrics_path = args.output_dir / "train_metrics.jsonl"
     checkpoint_metrics_path = args.output_dir / "checkpoint_metrics.jsonl"
-    state = initialize_training_state(
-        sae,
-        optimizer,
-        config,
-        device,
-        args,
-        checkpoint_path,
-        metrics_path,
-        checkpoint_metrics_path,
+    if args.resume:
+        checkpoint = torch.load(
+            checkpoint_path, map_location=device, weights_only=False
+        )
+        if checkpoint["config"] != asdict(config):
+            raise ValueError("cannot resume with a different experiment configuration")
+        sae.load_state_dict(checkpoint["sae"])
+        optimizer.load_state_dict(checkpoint["optimizer"])
+        state = TrainingState(
+            processed_tokens=int(checkpoint["processed_tokens"]),
+            processed_contexts=int(checkpoint["processed_contexts"]),
+            last_fired=checkpoint["last_fired"].to(device),
+        )
+        print(f"resumed at {state.processed_tokens:,} training tokens")
+    else:
+        metrics_path.write_text("")
+        checkpoint_metrics_path.write_text("")
+        state = TrainingState(
+            processed_tokens=0,
+            processed_contexts=0,
+            last_fired=torch.full(
+                (sae.d_sae,), -1, dtype=torch.int64, device=device
+            ),
+        )
+    (args.output_dir / "config.json").write_text(
+        json.dumps(asdict(config), indent=2) + "\n"
     )
     latest_evaluation = None
     evaluation_seconds = 0.0
@@ -571,15 +488,23 @@ def train_sae(
             state.processed_tokens >= next_log
             or state.processed_tokens == len(train_tokens)
         ):
-            record = build_training_record(
-                metrics,
-                state.last_fired,
-                state.processed_tokens,
-                config.dead_window,
-                config.learning_rate,
-                start_tokens,
-                time.monotonic() - start_time - evaluation_seconds,
-            )
+            if state.processed_tokens >= config.dead_window:
+                dead_features = (
+                    state.last_fired
+                    < state.processed_tokens - config.dead_window
+                )
+                dead_feature_pct = 100.0 * dead_features.float().mean().item()
+            else:
+                dead_feature_pct = None
+            record = {
+                "split": "train",
+                "tokens": state.processed_tokens,
+                **metrics.compute(),
+                "dead_feature_pct": dead_feature_pct,
+                "learning_rate": config.learning_rate,
+                "tokens_per_second": (state.processed_tokens - start_tokens)
+                / (time.monotonic() - start_time - evaluation_seconds),
+            }
             append_jsonl(metrics_path, record)
             if progress.disable:
                 # Redirected output cannot redraw a line, so emit readable log records.

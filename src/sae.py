@@ -29,15 +29,6 @@ class TopKSAE(nn.Module):
         self.d_sae = d_sae
         self.subtract_pre_bias = subtract_pre_bias
 
-    def encode_pre_activations(self, x: Tensor) -> Tensor:
-        if self.subtract_pre_bias:
-            x = x - self.decoder_bias
-        return x @ self.encoder_weight + self.encoder_bias
-
-    def select_topk(self, pre_activations: Tensor) -> tuple[Tensor, Tensor]:
-        values, indices = torch.topk(F.relu(pre_activations), self.k, dim=-1, sorted=False)
-        return indices, values
-
     def decode(
         self, indices: Tensor, values: Tensor, *, include_bias: bool = True
     ) -> Tensor:
@@ -54,8 +45,12 @@ class TopKSAE(nn.Module):
     def forward_with_pre_activations(
         self, x: Tensor
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-        pre_activations = self.encode_pre_activations(x)
-        indices, values = self.select_topk(pre_activations)
+        if self.subtract_pre_bias:
+            x = x - self.decoder_bias
+        pre_activations = x @ self.encoder_weight + self.encoder_bias
+        values, indices = torch.topk(
+            F.relu(pre_activations), self.k, dim=-1, sorted=False
+        )
         reconstruction = self.decode(indices, values)
         return reconstruction, indices, values, pre_activations
 
@@ -77,24 +72,6 @@ class TopKSAE(nn.Module):
         self.decoder_weight.div_(norms)
 
 
-def select_auxk_latents(
-    pre_activations: Tensor, dead_mask: Tensor, aux_k: int
-) -> tuple[Tensor, Tensor]:
-    """Select the strongest dead latents for each token."""
-    dead_count = int(dead_mask.sum().item())
-    if dead_count == 0:
-        empty_shape = (pre_activations.shape[0], 0)
-        return (
-            torch.empty(empty_shape, dtype=torch.int64, device=pre_activations.device),
-            pre_activations.new_empty(empty_shape),
-        )
-
-    selected_k = min(aux_k, dead_count)
-    masked = pre_activations.masked_fill(~dead_mask.unsqueeze(0), float("-inf"))
-    values, indices = torch.topk(masked, selected_k, dim=-1, sorted=False)
-    return indices, F.relu(values)
-
-
 def normalized_auxk_loss(
     sae: TopKSAE,
     pre_activations: Tensor,
@@ -103,12 +80,16 @@ def normalized_auxk_loss(
     aux_k: int,
 ) -> Tensor:
     """Reconstruct detached primary error with dead latents and normalized MSE."""
-    indices, values = select_auxk_latents(pre_activations, dead_mask, aux_k)
-    if indices.shape[1] == 0:
+    dead_count = int(dead_mask.sum().item())
+    if dead_count == 0:
         return pre_activations.sum() * 0.0
 
+    masked = pre_activations.masked_fill(~dead_mask.unsqueeze(0), float("-inf"))
+    values, indices = torch.topk(
+        masked, min(aux_k, dead_count), dim=-1, sorted=False
+    )
     auxiliary_reconstruction = sae.decode(
-        indices, values, include_bias=sae.subtract_pre_bias
+        indices, F.relu(values), include_bias=sae.subtract_pre_bias
     )
     target = residual_error.detach()
     if sae.subtract_pre_bias:

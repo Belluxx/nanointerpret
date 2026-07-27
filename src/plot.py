@@ -10,9 +10,6 @@ from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter, LogLocator
 
 
-FEATURES = (
-    ("Dead", "dead_feature_pct", "#64748B"),
-)
 STYLE = {
     "axes.facecolor": "#FFFFFF",
     "axes.labelcolor": "#64748B",
@@ -23,16 +20,6 @@ STYLE = {
 }
 
 
-def select_spaced_validation_records(records: list[dict]) -> list[dict]:
-    """Select up to three approximately equidistant validations."""
-    records = sorted(records, key=lambda record: record["training_tokens"])
-    if len(records) <= 3:
-        return records
-
-    indices = np.rint(np.linspace(0, len(records) - 1, 3)).astype(int)
-    return [records[index] for index in indices]
-
-
 def save_feature_density_plot(metrics_path: Path, output_path: Path) -> None:
     """Overlay up to three spaced validation feature-density distributions."""
     records = [
@@ -40,17 +27,20 @@ def save_feature_density_plot(metrics_path: Path, output_path: Path) -> None:
         for line in metrics_path.read_text().splitlines()
         if line.strip()
     ]
-    selected = select_spaced_validation_records(records)
-    if not selected:
+    records.sort(key=lambda record: record["training_tokens"])
+    if len(records) > 3:
+        indices = np.rint(np.linspace(0, len(records) - 1, 3)).astype(int)
+        records = [records[index] for index in indices]
+    if not records:
         return
 
-    colors = sns.color_palette("viridis", n_colors=len(selected))
+    colors = sns.color_palette("viridis", n_colors=len(records))
     with sns.axes_style("whitegrid", rc=STYLE), sns.plotting_context("notebook"):
         figure = Figure(figsize=(8.5, 5.2), constrained_layout=True, facecolor="#F8FAFC")
         FigureCanvasAgg(figure)
         axis = figure.subplots()
 
-        for record, color in zip(selected, colors):
+        for record, color in zip(records, colors):
             edges = np.asarray(record["feature_density_log10_bin_edges"], dtype=float)
             counts = np.asarray(record["feature_density_bin_counts"], dtype=float)
             centers = (edges[:-1] + edges[1:]) / 2
@@ -140,11 +130,14 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
         mse_axis.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:g}"))
         auxk_axis.set_ylabel("Normalized error")
 
-        for _, field, color in FEATURES:
-            sns.lineplot(
-                x=tokens, y=values(field), color=color,
-                linewidth=2.2, errorbar=None, ax=feature_axis,
-            )
+        sns.lineplot(
+            x=tokens,
+            y=values("dead_feature_pct"),
+            color="#64748B",
+            linewidth=2.2,
+            errorbar=None,
+            ax=feature_axis,
+        )
         feature_axis.set(ylabel="Features (%)", ylim=(0, 100))
 
         for axis, title in zip(

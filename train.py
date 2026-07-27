@@ -67,37 +67,6 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
 
 
-def prepare_activation_normalization(
-    args: argparse.Namespace,
-    model: torch.nn.Module,
-    capture: ResidualStreamCapture,
-    train_tokens: np.memmap,
-    pad_token_id: int,
-    device: torch.device,
-    d_model: int,
-) -> tuple[float, torch.Tensor | None]:
-    checkpoint_path = args.output_dir / "checkpoint.pt"
-    if args.resume:
-        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-        activation_scale = float(checkpoint["config"]["activation_scale"])
-        print(f"reusing activation scale {activation_scale:.8g} from {checkpoint_path}")
-        return activation_scale, None
-
-    if checkpoint_path.exists():
-        raise FileExistsError(
-            f"{checkpoint_path} already exists; pass --resume or choose another --output-dir"
-        )
-    return estimate_activation_normalization(
-        model,
-        capture,
-        train_tokens,
-        pad_token_id,
-        device,
-        args,
-        d_model,
-    )
-
-
 def main() -> None:
     args = parse_args()
     seed_everything(args.seed)
@@ -151,15 +120,32 @@ def main() -> None:
         f"pre-bias subtraction={'on' if args.subtract_pre_bias else 'off'}"
     )
     with ResidualStreamCapture(layers[layer_index]) as capture:
-        activation_scale, initial_pre_bias = prepare_activation_normalization(
-            args,
-            model,
-            capture,
-            train_tokens,
-            tokenizer.pad_token_id,
-            device,
-            d_model,
-        )
+        checkpoint_path = args.output_dir / "checkpoint.pt"
+        if args.resume:
+            checkpoint = torch.load(
+                checkpoint_path, map_location="cpu", weights_only=False
+            )
+            activation_scale = float(checkpoint["config"]["activation_scale"])
+            initial_pre_bias = None
+            print(
+                f"reusing activation scale {activation_scale:.8g} "
+                f"from {checkpoint_path}"
+            )
+        else:
+            if checkpoint_path.exists():
+                raise FileExistsError(
+                    f"{checkpoint_path} already exists; pass --resume or choose "
+                    "another --output-dir"
+                )
+            activation_scale, initial_pre_bias = estimate_activation_normalization(
+                model,
+                capture,
+                train_tokens,
+                tokenizer.pad_token_id,
+                device,
+                args,
+                d_model,
+            )
         config = ExperimentConfig(
             model_id=args.model_id,
             dataset_id=args.dataset_id,
