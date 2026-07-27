@@ -15,9 +15,7 @@
     - Larger values put more optimization pressure on dead features to explain the primary reconstruction error; smaller values make AuxK less influential. `0` removes its gradient contribution. [1]
 - `dead_window`: Number of tokens a feature can go without firing before it becomes dead and eligible for AuxK. The default is 10M tokens.
     - `10M` is used in both OpenAI TopK work and Anthropic SAE work. [1, 2]
-- `sae_batch_size`: residual-stream token vectors count. The default is `4096`; this is an optimization batch, not just a data-loading setting.
-    - Anthropic commonly used `2048` / `4096` tokens. OpenAI used much larger batches for parallelism but the converged loss was not strongly batch-dependent. [1, 2]
-    - Larger batches reduce gradient noise and improve hardware parallelism but use more memory; smaller batches are cheaper in memory. If this changes substantially, re-sweep `learning_rate` rather than assuming the same value transfers.
+- `sae_batch_size`: residual-stream token vectors count. The default is `4096`; this is an optimization batch, not just a data-loading setting. Anthropic commonly used `2048` / `4096` tokens. OpenAI used much larger batches for parallelism but the converged loss was not strongly batch-dependent. [1, 2]
 - `learning_rate`: The default is `3e-4`. OpenAI found that changing the width multiplier should generally trigger a new learning-rate sweep. [1]
 
 ## Methodology
