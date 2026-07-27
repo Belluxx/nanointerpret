@@ -46,7 +46,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--validation-tokens", type=int, default=10_000_000)
     parser.add_argument("--context-size", type=int, default=256)
     parser.add_argument("--width-multiplier", type=int, default=16)
-    parser.add_argument("--k", type=int, default=32)
+    parser.add_argument("--k", type=int, default=16)
     parser.add_argument("--aux-k", type=int, default=None, help="Dead latents used by AuxK. Default: nearest power of two to d_model / 2.")
     parser.add_argument("--aux-k-coef", type=float, default=1 / 32)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
