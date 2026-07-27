@@ -191,7 +191,7 @@ def main() -> None:
     print(
         f"capturing input to {layer_path}[{layer_index}] "
         f"({len(layers)} layers, d_model={d_model}); SAE width={d_sae:,}, "
-        f"k={args.k}, AuxK={aux_k}"
+        f"k={args.k}, AuxK={'off' if args.aux_k_coef == 0 else aux_k}"
     )
     with ResidualStreamCapture(layers[layer_index]) as capture:
         activation_scale = prepare_activation_normalization(

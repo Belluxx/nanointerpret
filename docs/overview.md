@@ -12,7 +12,7 @@
 - `AuxK`: Number of dead features used to reconstruct the error left by the primary TopK representation. It defaults to a power of 2 close to half the residual width (`256` for the default `d_model=640`).
     - A feature is considered to fire above activation `1e-3`.
 - `aux_k_coef`: Weight on the normalized AuxK reconstruction loss. The default `1/32` is the value used by OpenAI for TopK SAEs. [1]
-    - Larger values put more optimization pressure on dead features to explain the primary reconstruction error; smaller values make AuxK less influential. `0` removes its gradient contribution. [1]
+    - Larger values put more optimization pressure on dead features to explain the primary reconstruction error; smaller values make AuxK less influential. `0` disables AuxK. [1]
 - `dead_window`: Number of tokens a feature can go without firing before it becomes dead and eligible for AuxK. The default is 10M tokens.
     - `10M` is used in both OpenAI TopK work and Anthropic SAE work. [1, 2]
 - `sae_batch_size`: residual-stream token vectors count. The default is `4096`; this is an optimization batch, not just a data-loading setting. Anthropic commonly used `2048` / `4096` tokens. OpenAI used much larger batches for parallelism but the converged loss was not strongly batch-dependent. [1, 2]

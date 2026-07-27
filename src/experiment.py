@@ -385,17 +385,19 @@ def optimize_residual_batch(
         )
         token_position = processed_tokens + start + len(x)
         update_last_fired(last_fired, indices, values, token_position)
-        dead_mask = last_fired < token_position - dead_window
-
         reconstruction_loss = F.mse_loss(reconstruction, x)
-        auxk_loss = normalized_auxk_loss(
-            sae,
-            pre_activations,
-            x - reconstruction,
-            dead_mask,
-            aux_k,
-        )
-        loss = reconstruction_loss + aux_k_coef * auxk_loss
+        auxk_loss = None
+        loss = reconstruction_loss
+        if aux_k_coef > 0:
+            dead_mask = last_fired < token_position - dead_window
+            auxk_loss = normalized_auxk_loss(
+                sae,
+                pre_activations,
+                x - reconstruction,
+                dead_mask,
+                aux_k,
+            )
+            loss = loss + aux_k_coef * auxk_loss
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         sae.constrain_decoder_gradient()
@@ -409,7 +411,7 @@ def optimize_residual_batch(
             reconstruction.detach(),
             indices.detach(),
             values.detach(),
-            auxk_loss.detach(),
+            auxk_loss,
         )
     return current_learning_rate
 
