@@ -16,7 +16,7 @@ class TopKSAE(nn.Module):
         k: int,
         device: torch.device,
         *,
-        subtract_pre_bias: bool = False,
+        subtract_pre_bias: bool = True,
     ):
         super().__init__()
         decoder = F.normalize(torch.randn(d_sae, d_model, device=device), dim=1)

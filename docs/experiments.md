@@ -9,10 +9,10 @@ All runs used a Top-K SAE with `K=16`, width multiplier `16`, 100M training toke
 
 ```sh
 #!/bin/sh
-.venv/bin/python train.py --train-tokens 100000000 --output-dir artifacts/no_sub_auxk
-.venv/bin/python train.py --train-tokens 100000000 --output-dir artifacts/sub_auxk --subtract-pre-bias
-.venv/bin/python train.py --train-tokens 100000000 --output-dir artifacts/no_sub_no_auxk --aux-k-coef 0
-.venv/bin/python train.py --train-tokens 100000000 --output-dir artifacts/sub_no_auxk --subtract-pre-bias --aux-k-coef 0
+.venv/bin/python train.py --train-tokens 100000000 --output-dir artifacts/no_sub_auxk --no-subtract-pre-bias
+.venv/bin/python train.py --train-tokens 100000000 --output-dir artifacts/sub_auxk
+.venv/bin/python train.py --train-tokens 100000000 --output-dir artifacts/no_sub_no_auxk --no-subtract-pre-bias --aux-k-coef 0
+.venv/bin/python train.py --train-tokens 100000000 --output-dir artifacts/sub_no_auxk --aux-k-coef 0
 ```
 
 </details>

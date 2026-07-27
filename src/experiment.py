@@ -52,7 +52,7 @@ class ExperimentConfig:
     model_dtype: str
     normalization_tokens: int = 0
     activation_scale: float = 1.0
-    subtract_pre_bias: bool = False
+    subtract_pre_bias: bool = True
     aux_k_coef: float = 1 / 32
     dead_window: int = 10_000_000
 

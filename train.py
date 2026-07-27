@@ -51,7 +51,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gradient-clip", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--activation-layer", type=int, default=None, help="Layer whose input is captured. Default: len(transformer.layers) // 2.")
-    parser.add_argument("--subtract-pre-bias", action="store_true", help="Subtract the learned decoder bias from activations before encoding.")
+    parser.add_argument(
+        "--no-subtract-pre-bias",
+        action="store_false",
+        dest="subtract_pre_bias",
+        help="Do not subtract the learned decoder bias from activations before encoding.",
+    )
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
     parser.add_argument("--model-dtype", choices=("float32", "float16", "bfloat16"), default="float32")
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/sae_gemma_3_270m"))
