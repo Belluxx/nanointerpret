@@ -59,6 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gradient-clip", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--activation-layer", type=int, default=None, help="Layer whose input is captured. Default: len(transformer.layers) // 2.")
+    parser.add_argument("--subtract-pre-bias", action="store_true", help="Subtract the learned decoder bias from activations before encoding.")
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
     parser.add_argument("--model-dtype", choices=("float32", "float16", "bfloat16"), default="float32")
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/sae_gemma_3_270m"))
@@ -191,7 +192,8 @@ def main() -> None:
     print(
         f"capturing input to {layer_path}[{layer_index}] "
         f"({len(layers)} layers, d_model={d_model}); SAE width={d_sae:,}, "
-        f"k={args.k}, AuxK={'off' if args.aux_k_coef == 0 else aux_k}"
+        f"k={args.k}, AuxK={'off' if args.aux_k_coef == 0 else aux_k}, "
+        f"pre-bias subtraction={'on' if args.subtract_pre_bias else 'off'}"
     )
     with ResidualStreamCapture(layers[layer_index]) as capture:
         activation_scale = prepare_activation_normalization(
@@ -225,11 +227,18 @@ def main() -> None:
             sae_batch_size=args.sae_batch_size,
             normalization_tokens=args.normalization_tokens,
             activation_scale=activation_scale,
+            subtract_pre_bias=args.subtract_pre_bias,
             seed=args.seed,
             device=str(device),
             model_dtype=args.model_dtype,
         )
-        sae = TopKSAE(d_model, d_sae, args.k, device)
+        sae = TopKSAE(
+            d_model,
+            d_sae,
+            args.k,
+            device,
+            subtract_pre_bias=args.subtract_pre_bias,
+        )
         processed, evaluation = train_sae(
             model,
             capture,

@@ -11,7 +11,15 @@ FIRING_THRESHOLD = 1e-3
 
 
 class TopKSAE(nn.Module):
-    def __init__(self, d_model: int, d_sae: int, k: int, device: torch.device):
+    def __init__(
+        self,
+        d_model: int,
+        d_sae: int,
+        k: int,
+        device: torch.device,
+        *,
+        subtract_pre_bias: bool = False,
+    ):
         super().__init__()
         if not 0 < k <= d_sae:
             raise ValueError(f"k must be in [1, {d_sae}], got {k}")
@@ -24,8 +32,11 @@ class TopKSAE(nn.Module):
         self.k = k
         self.d_model = d_model
         self.d_sae = d_sae
+        self.subtract_pre_bias = subtract_pre_bias
 
     def encode_pre_activations(self, x: Tensor) -> Tensor:
+        if self.subtract_pre_bias:
+            x = x - self.decoder_bias
         return x @ self.encoder_weight + self.encoder_bias
 
     def select_topk(self, pre_activations: Tensor) -> tuple[Tensor, Tensor]:
