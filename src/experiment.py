@@ -320,6 +320,24 @@ def capture_residual_batch(
     return residual
 
 
+def geometric_median(
+    points: Tensor, *, max_iterations: int = 100, tolerance: float = 1e-5
+) -> Tensor:
+    """Estimate the geometric median of a non-empty batch with Weiszfeld's method."""
+    if points.ndim != 2 or len(points) == 0:
+        raise ValueError("points must have shape [samples, dimensions] and be non-empty")
+
+    estimate = points.mean(dim=0)
+    for _ in range(max_iterations):
+        distances = torch.linalg.vector_norm(points - estimate, dim=1)
+        weights = distances.clamp_min(1e-7).reciprocal()
+        updated = (points * weights.unsqueeze(1)).sum(dim=0) / weights.sum()
+        if torch.linalg.vector_norm(updated - estimate) <= tolerance:
+            return updated
+        estimate = updated
+    return estimate
+
+
 def feature_density_histogram(fire_counts: Tensor, token_count: int) -> dict:
     """Build fixed log10-density bins suitable for comparison across validations."""
     nonzero_counts = fire_counts[fire_counts > 0].cpu().numpy().astype(np.float64)
@@ -432,8 +450,8 @@ def estimate_activation_normalization(
     device: torch.device,
     args: argparse.Namespace,
     d_model: int,
-) -> float:
-    """Estimate one global activation scale from a training calibration sample."""
+) -> tuple[float, Tensor | None]:
+    """Estimate the global scale and optional pre-bias initialization."""
     target_tokens = min(args.normalization_tokens, len(train_tokens))
     batches = iter_context_batches(
         train_tokens,
@@ -445,6 +463,8 @@ def estimate_activation_normalization(
     )
     tokens_seen = 0
     squared_norm_sum = 0.0
+    pre_bias = None
+    pre_bias_sample_tokens = 0
     progress = tqdm(
         total=target_tokens,
         unit="tok",
@@ -459,6 +479,9 @@ def estimate_activation_normalization(
         )
         take = min(len(residual), target_tokens - tokens_seen)
         calibration_residual = residual[:take]
+        if args.subtract_pre_bias and pre_bias is None:
+            pre_bias = geometric_median(calibration_residual)
+            pre_bias_sample_tokens = take
         squared_norm_sum += calibration_residual.square().sum().item()
         tokens_seen += take
         progress.update(take)
@@ -476,7 +499,13 @@ def estimate_activation_normalization(
         f"activation normalization: {tokens_seen:,} calibration tokens, "
         f"E[||x||^2]={mean_squared_norm:,.4g}, scale={scale:.8g}"
     )
-    return scale
+    if pre_bias is not None:
+        pre_bias.mul_(scale)
+        print(
+            f"pre-bias initialization: geometric median of "
+            f"{pre_bias_sample_tokens:,} scaled calibration activations"
+        )
+    return scale, pre_bias
 
 
 def train_sae(

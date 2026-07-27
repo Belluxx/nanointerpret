@@ -20,7 +20,7 @@
 
 ## Methodology
 
-- Architecture: Top-K sparsification follows OpenAI [1], while the encoder/bias formulation follows Anthropic's updated SAE recipe [2]. By default, the globally scaled activation is passed directly to the encoder; `--subtract-pre-bias` instead encodes `x - decoder_bias`. Both biases are initialized to zero.
+- Architecture: Top-K sparsification follows OpenAI [1], while the encoder/bias formulation follows Anthropic's updated SAE recipe [2]. By default, the globally scaled activation is passed directly to the encoder and both biases start at zero. `--subtract-pre-bias` instead encodes `x - decoder_bias` and initializes that shared pre-encoder/decoder bias to the geometric median of a calibration activation batch after global scaling.
 - Dead-feature prevention: AuxK selects dead latents after updating firing timestamps from the primary TopK activations. These latents reconstruct a detached copy of the primary residual error with per-batch normalized MSE. AuxK never contributes to primary sparsity or feature-density metrics. [1]
 - Input scaling: One dataset-level scalar is estimated from a sample of training activations so that their average squared L2 norm equals the residual stream dimension. The same scalar is used for training and validation. Activations are not normalized independently per token. [3]
 

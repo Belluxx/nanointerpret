@@ -108,7 +108,7 @@ def prepare_activation_normalization(
     pad_token_id: int,
     device: torch.device,
     d_model: int,
-) -> float:
+) -> tuple[float, torch.Tensor | None]:
     checkpoint_path = args.output_dir / "checkpoint.pt"
     if args.resume:
         if not checkpoint_path.exists():
@@ -123,7 +123,7 @@ def prepare_activation_normalization(
             )
         activation_scale = float(saved_config["activation_scale"])
         print(f"reusing activation scale {activation_scale:.8g} from {checkpoint_path}")
-        return activation_scale
+        return activation_scale, None
 
     if checkpoint_path.exists():
         raise FileExistsError(
@@ -196,7 +196,7 @@ def main() -> None:
         f"pre-bias subtraction={'on' if args.subtract_pre_bias else 'off'}"
     )
     with ResidualStreamCapture(layers[layer_index]) as capture:
-        activation_scale = prepare_activation_normalization(
+        activation_scale, initial_pre_bias = prepare_activation_normalization(
             args,
             model,
             capture,
@@ -239,6 +239,9 @@ def main() -> None:
             device,
             subtract_pre_bias=args.subtract_pre_bias,
         )
+        if initial_pre_bias is not None:
+            with torch.no_grad():
+                sae.decoder_bias.copy_(initial_pre_bias)
         processed, evaluation = train_sae(
             model,
             capture,
