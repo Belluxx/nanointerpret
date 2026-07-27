@@ -122,8 +122,12 @@ def normalized_auxk_loss(
     if indices.shape[1] == 0:
         return pre_activations.sum() * 0.0
 
-    auxiliary_reconstruction = sae.decode(indices, values, include_bias=False)
+    auxiliary_reconstruction = sae.decode(
+        indices, values, include_bias=sae.subtract_pre_bias
+    )
     target = residual_error.detach()
+    if sae.subtract_pre_bias:
+        target = target + sae.decoder_bias.detach()
     numerator = F.mse_loss(auxiliary_reconstruction, target)
     target_mean = target.mean(dim=0, keepdim=True)
     denominator = F.mse_loss(target_mean.expand_as(target), target)
