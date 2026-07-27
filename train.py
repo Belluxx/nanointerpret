@@ -1,11 +1,3 @@
-"""
-Train a Top-K sparse autoencoder on Gemma's midpoint residual stream.
-
-Defaults: Gemma 3 270M, FineWeb-Edu sample-10BT, 100M train tokens,
-10M validation tokens, context length 256, 16x expansion, K=32, and AuxK
-dead-feature prevention with coefficient 1/32.
-"""
-
 from __future__ import annotations
 
 import argparse
