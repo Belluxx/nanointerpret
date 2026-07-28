@@ -2,24 +2,23 @@
 
 ## Pre-bias subtraction and AuxK are both useful
 
-All runs used a Top-K SAE with `K=16`, width multiplier `16`, 100M training tokens, and 10M validation tokens.
+All runs used a Top-K SAE with `K=16`, width multiplier `16`, 300M training tokens, and 10M validation tokens.
 
 <details>
 <summary>Commands</summary>
 
 ```sh
-#!/bin/sh
-.venv/bin/python train.py --train-tokens 100000000 --output-dir artifacts/no_sub_auxk --no-subtract-pre-bias
-.venv/bin/python train.py --train-tokens 100000000 --output-dir artifacts/sub_auxk
-.venv/bin/python train.py --train-tokens 100000000 --output-dir artifacts/no_sub_no_auxk --no-subtract-pre-bias --aux-k-coef 0
-.venv/bin/python train.py --train-tokens 100000000 --output-dir artifacts/sub_no_auxk --aux-k-coef 0
+python3 train.py --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_aux_sub
+python3 train.py --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_sub --aux-k-coef 0
+python3 train.py --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_aux --no-subtract-pre-bias
+python3 train.py --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_plain --no-subtract-pre-bias --aux-k-coef 0
 ```
 
 </details>
 
-| Configuration | Validation MSE ↓ | Explained variance ↑ | Dead features ↓ | Active / 10,240 |
-|---|---:|---:|---:|---:|
-| **Subtract pre-bias + AuxK** | **0.002716** | **99.337%** | **0.99%** | **10,139** |
-| Subtract pre-bias, no AuxK | 0.002791 | 99.319% | 6.07% | 9,618 |
-| No subtraction + AuxK | 0.003097 | 99.244% | 21.23% | 8,066 |
-| Neither | 0.004622 | 98.872% | 88.17% | 1,211 |
+| Pre-bias subtraction | AuxK | Validation MSE ↓ | Explained variance ↑ | Dead features ↓ | Active / 10,240 |
+|:---:|:---:|---:|---:|---:|---:|
+| ✓ | ✓ | **0.002392** | **99.429%** | **0.10%** | **10,230** |
+| ✓ | ✗ | 0.002506 | 99.402% | 2.10% | 10,025 |
+| ✗ | ✓ | 0.002483 | 99.408% | 14.82% | 8,722 |
+| ✗ | ✗ | 0.004031 | 99.038% | 91.88% | 831 |
