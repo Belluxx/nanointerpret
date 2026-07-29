@@ -19,10 +19,12 @@
 
 ## Methodology
 
-- Training has two phases. The first runs the LLM once over the train and validation token caches and stores the selected layer-input residuals as memory-mapped files. The second estimates normalization, trains the SAE, and evaluates checkpoints from those files without loading the LLM. Run `python3 train.py --cache-only` to perform only the capture phase; subsequent `python3 train.py` runs reuse the cache. Residuals use `float16` storage by default; use `--residual-dtype float32` when storage cost is less important than preserving the model output precision.
-- Architecture: Top-K sparsification and the encoder/bias formulation follow OpenAI [1]. By default, the SAE encodes `x - decoder_bias` and initializes that shared pre-encoder/decoder bias to the geometric median of a calibration activation batch after global scaling. `--no-subtract-pre-bias` instead passes the globally scaled activation directly to the encoder and starts both biases at zero.
-- Dead-feature prevention: AuxK selects dead latents after updating firing timestamps from the primary TopK activations. These latents reconstruct a detached copy of the primary residual error with per-batch normalized MSE. AuxK never contributes to primary sparsity or feature-density metrics. [1]
-- Input scaling: One dataset-level scalar is estimated from a sample of training activations so that their average squared L2 norm equals the residual stream dimension. The same scalar is used for training and validation. Activations are not normalized independently per token. [2]
+- This project combines Anthropic's activation setup [2] with Gao et al.'s Top-K SAE [1].
+- Training has two phases: cache the selected residual-stream activations, then train and evaluate the SAE without the LLM loaded.
+- By default, activations come from the input to the middle transformer layer. A single scale is applied so their average squared L2 norm equals the residual width. [2]
+- The SAE uses Top-K sparsification, tied encoder/decoder initialization, a shared geometric-median bias, unit-norm decoder directions, and AuxK. AuxK helps revive features that have not fired in the last 10M tokens. [1]
+- Gradient clipping is disabled by default after [experiments found no benefit](experiments.md#gradient-clipping-is-unnecessary).
+- Validation reports MSE, explained variance, L0, inactive features, and feature-density distributions.
 
 Sources:
 - [1] [Scaling and evaluating sparse autoencoders](https://arxiv.org/abs/2406.04093)
