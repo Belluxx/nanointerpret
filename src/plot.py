@@ -4,20 +4,37 @@ import json
 from pathlib import Path
 
 import numpy as np
-import seaborn as sns
+from matplotlib import colormaps, rc_context
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter, LogLocator
 
 
 STYLE = {
+    "axes.axisbelow": True,
+    "axes.edgecolor": "#CCCCCC",
     "axes.facecolor": "#FFFFFF",
+    "axes.grid": True,
     "axes.labelcolor": "#64748B",
+    "axes.labelsize": 12.0,
+    "axes.linewidth": 1.25,
     "axes.titlecolor": "#0F172A",
+    "axes.titlesize": 12.0,
+    "font.size": 12.0,
     "grid.color": "#E2E8F0",
+    "grid.linewidth": 1.0,
+    "legend.fontsize": 11.0,
     "xtick.color": "#475569",
+    "xtick.labelsize": 11.0,
     "ytick.color": "#475569",
+    "ytick.labelsize": 11.0,
 }
+
+
+def _despine(axis, *, left: bool = True, right: bool = False) -> None:
+    axis.spines["top"].set_visible(False)
+    axis.spines["left"].set_visible(left)
+    axis.spines["right"].set_visible(right)
 
 
 def save_feature_density_plot(metrics_path: Path, output_path: Path) -> None:
@@ -34,8 +51,9 @@ def save_feature_density_plot(metrics_path: Path, output_path: Path) -> None:
     if not records:
         return
 
-    colors = sns.color_palette("viridis", n_colors=len(records))
-    with sns.axes_style("whitegrid", rc=STYLE), sns.plotting_context("notebook"):
+    color_positions = np.linspace(0.0, 1.0, len(records) + 2)[1:-1]
+    colors = colormaps["viridis"](color_positions)
+    with rc_context(STYLE):
         figure = Figure(figsize=(8.5, 5.2), constrained_layout=True, facecolor="#F8FAFC")
         FigureCanvasAgg(figure)
         axis = figure.subplots()
@@ -70,9 +88,9 @@ def save_feature_density_plot(metrics_path: Path, output_path: Path) -> None:
             )
         )
         axis.grid(axis="x", visible=False)
-        axis.tick_params(length=0)
+        axis.tick_params(which="both", length=0)
         axis.legend(frameon=False, loc="best")
-        sns.despine(fig=figure)
+        _despine(axis)
 
     figure.savefig(
         output_path,
@@ -100,7 +118,7 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
 
     token_counts = values("tokens")
     tokens = token_counts / 1_000_000
-    with sns.axes_style("whitegrid", rc=STYLE), sns.plotting_context("notebook"):
+    with rc_context(STYLE):
         figure = Figure(figsize=(10.5, 4.4), constrained_layout=True, facecolor="#F8FAFC")
         figure.set_constrained_layout_pads(w_pad=0.12, h_pad=0.12, wspace=0.08)
         FigureCanvasAgg(figure)
@@ -108,13 +126,11 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
         auxk_axis = feature_axis.twinx()
 
         mse = values("mse")
-        sns.lineplot(
-            x=tokens,
-            y=mse,
+        mse_axis.plot(
+            tokens,
+            mse,
             color="#7C3AED",
             linewidth=1.5,
-            errorbar=None,
-            ax=mse_axis,
         )
         auxk_loss = values("auxk_loss", np.nan)
         config_path = metrics_path.with_name("config.json")
@@ -125,39 +141,37 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
         has_auxk = np.isfinite(auxk_loss[after_dead_window]).any()
         auxk_line = None
         if has_auxk:
-            sns.lineplot(
-                x=tokens[after_dead_window],
-                y=auxk_loss[after_dead_window],
+            auxk_line = auxk_axis.plot(
+                tokens[after_dead_window],
+                auxk_loss[after_dead_window],
                 color="#DB2777",
                 linewidth=1.5,
-                errorbar=None,
-                ax=auxk_axis,
-            )
-            auxk_line = auxk_axis.lines[-1]
-            auxk_line.set_label("AuxK NMSE")
+                label="AuxK NMSE",
+            )[0]
         mse_axis.set(ylabel="MSE", yscale="log")
         mse_axis.yaxis.set_major_locator(LogLocator(base=10, subs=(1, 2, 5)))
         mse_axis.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:g}"))
         auxk_axis.set_ylabel("AuxK NMSE")
-        auxk_axis.tick_params(axis="y", colors=STYLE["ytick.color"], length=0)
+        auxk_axis.tick_params(
+            axis="y", which="both", colors=STYLE["ytick.color"], length=0
+        )
         auxk_axis.grid(False)
         auxk_axis.set_visible(has_auxk)
 
-        sns.lineplot(
-            x=tokens,
-            y=values("dead_feature_pct"),
+        dead_feature_line = feature_axis.plot(
+            tokens,
+            values("dead_feature_pct"),
             color="#64748B",
             linewidth=1.5,
-            errorbar=None,
-            ax=feature_axis,
-        )
-        dead_feature_line = feature_axis.lines[-1]
-        dead_feature_line.set_label("Dead features")
+            label="Dead features",
+        )[0]
         feature_axis.set(ylabel="Dead features (%)", ylim=(0, 100))
-        legend_lines = [dead_feature_line]
         if auxk_line is not None:
-            legend_lines.append(auxk_line)
-        feature_axis.legend(handles=legend_lines, frameon=False, loc="center right")
+            feature_axis.legend(
+                handles=[dead_feature_line, auxk_line],
+                frameon=False,
+                loc="center right",
+            )
 
         for axis, title in zip(
             (mse_axis, feature_axis),
@@ -170,10 +184,10 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
             axis.set_xlabel("Training tokens (M)")
             axis.margins(x=0.02)
             axis.grid(axis="x", visible=False)
-            axis.tick_params(length=0)
-        sns.despine(ax=mse_axis)
-        sns.despine(ax=feature_axis)
-        sns.despine(ax=auxk_axis, left=True, right=False)
+            axis.tick_params(which="both", length=0)
+        _despine(mse_axis)
+        _despine(feature_axis)
+        _despine(auxk_axis, left=False, right=True)
 
     figure.savefig(
         output_path, dpi=160, facecolor=figure.get_facecolor(),
