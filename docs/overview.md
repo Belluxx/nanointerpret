@@ -19,6 +19,7 @@
 
 ## Methodology
 
+- Training has two phases. The first runs the LLM once over the train and validation token caches and stores the selected layer-input residuals as memory-mapped files. The second estimates normalization, trains the SAE, and evaluates checkpoints from those files without loading the LLM. Run `python3 train.py --cache-only` to perform only the capture phase; subsequent `python3 train.py` runs reuse the cache. Residuals use `float16` storage by default; use `--residual-dtype float32` when storage cost is less important than preserving the model output precision.
 - Architecture: Top-K sparsification and the encoder/bias formulation follow OpenAI [1]. By default, the SAE encodes `x - decoder_bias` and initializes that shared pre-encoder/decoder bias to the geometric median of a calibration activation batch after global scaling. `--no-subtract-pre-bias` instead passes the globally scaled activation directly to the encoder and starts both biases at zero.
 - Dead-feature prevention: AuxK selects dead latents after updating firing timestamps from the primary TopK activations. These latents reconstruct a detached copy of the primary residual error with per-batch normalized MSE. AuxK never contributes to primary sparsity or feature-density metrics. [1]
 - Input scaling: One dataset-level scalar is estimated from a sample of training activations so that their average squared L2 norm equals the residual stream dimension. The same scalar is used for training and validation. Activations are not normalized independently per token. [2]

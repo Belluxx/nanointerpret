@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterator
 
@@ -23,7 +23,62 @@ class TokenCacheSpec:
     validation_tokens: int
 
 
-def cache_is_valid(
+@dataclass(frozen=True)
+class ResidualCacheSpec:
+    cache_dir: Path
+    model_id: str
+    dataset_id: str
+    dataset_config: str
+    train_tokens: int
+    validation_tokens: int
+    context_size: int
+    activation_layer: int | None
+    model_dtype: str
+    residual_dtype: str
+
+
+def residual_cache_paths(spec: ResidualCacheSpec) -> tuple[Path, Path, Path]:
+    safe_model = spec.model_id.replace("/", "--")
+    safe_dataset = spec.dataset_id.replace("/", "--")
+    safe_config = spec.dataset_config.replace("/", "--")
+    layer = "middle" if spec.activation_layer is None else str(spec.activation_layer)
+    stem = (
+        f"{safe_model}_{safe_dataset}_{safe_config}_"
+        f"{spec.train_tokens}_{spec.validation_tokens}_ctx{spec.context_size}_"
+        f"layer{layer}_{spec.model_dtype}_{spec.residual_dtype}"
+    )
+    return (
+        spec.cache_dir / f"{stem}_train.bin",
+        spec.cache_dir / f"{stem}_validation.bin",
+        spec.cache_dir / f"{stem}_metadata.json",
+    )
+
+
+def load_residual_cache_metadata(spec: ResidualCacheSpec) -> dict | None:
+    train_path, validation_path, metadata_path = residual_cache_paths(spec)
+    if not (train_path.exists() and validation_path.exists() and metadata_path.exists()):
+        return None
+
+    metadata = json.loads(metadata_path.read_text())
+    expected = asdict(spec)
+    expected.pop("cache_dir")
+    if not all(metadata.get(key) == value for key, value in expected.items()):
+        return None
+
+    d_model = metadata.get("d_model")
+    if not isinstance(d_model, int) or d_model <= 0:
+        return None
+    item_size = np.dtype(spec.residual_dtype).itemsize
+    if (
+        train_path.stat().st_size != spec.train_tokens * d_model * item_size
+        or validation_path.stat().st_size
+        != spec.validation_tokens * d_model * item_size
+    ):
+        return None
+    return metadata
+
+
+def token_cache_is_valid(
     train_path: Path,
     validation_path: Path,
     metadata_path: Path,
@@ -33,16 +88,11 @@ def cache_is_valid(
         return False
     metadata = json.loads(metadata_path.read_text())
 
-    expected = {
-        "model_id": spec.model_id,
-        "dataset_id": spec.dataset_id,
-        "dataset_config": spec.dataset_config,
-        "train_tokens": spec.train_tokens,
-        "validation_tokens": spec.validation_tokens,
-    }
+    expected = asdict(spec)
+    expected.pop("cache_dir")
     item_size = np.dtype(np.uint32).itemsize
     return (
-        all(metadata[key] == value for key, value in expected.items())
+        all(metadata.get(key) == value for key, value in expected.items())
         and train_path.stat().st_size == spec.train_tokens * item_size
         and validation_path.stat().st_size == spec.validation_tokens * item_size
     )
@@ -58,7 +108,7 @@ def build_token_cache(tokenizer, spec: TokenCacheSpec) -> tuple[Path, Path]:
     validation_path = spec.cache_dir / f"{stem}_validation.uint32"
     metadata_path = spec.cache_dir / f"{stem}_metadata.json"
     spec.cache_dir.mkdir(parents=True, exist_ok=True)
-    if cache_is_valid(train_path, validation_path, metadata_path, spec):
+    if token_cache_is_valid(train_path, validation_path, metadata_path, spec):
         print(f"using token cache at {spec.cache_dir}")
         return train_path, validation_path
 
@@ -157,3 +207,21 @@ def iter_context_batches(
             input_ids[row, :length] = tokens[start:end]
             attention_mask[row, :length] = 1
         yield torch.from_numpy(input_ids), torch.from_numpy(attention_mask), context_ids
+
+
+def iter_residual_batches(
+    residuals: np.memmap,
+    batch_size: int,
+    shuffle: bool,
+    seed: int,
+    skip_batches: int = 0,
+) -> Iterator[Tensor]:
+    batch_count = math.ceil(len(residuals) / batch_size)
+    order = np.arange(batch_count)
+    if shuffle:
+        np.random.default_rng(seed).shuffle(order)
+
+    for batch_id in order[skip_batches:]:
+        start = int(batch_id) * batch_size
+        batch = np.asarray(residuals[start : start + batch_size]).copy()
+        yield torch.from_numpy(batch)
