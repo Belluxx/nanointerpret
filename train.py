@@ -72,7 +72,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--residual-cache-dir", type=Path, default=Path("artifacts/residual_cache"))
     parser.add_argument("--resume", action="store_true")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--streaming-mode", action="store_true", help="Capture residuals during SAE training without writing a residual cache.")
+    mode.add_argument("--cache-activations", action="store_true", help="Cache residual activations before training instead of streaming them.")
     mode.add_argument("--cache-only", action="store_true", help="Capture the residual cache, then exit before SAE training.")
     return parser.parse_args()
 
@@ -166,7 +166,7 @@ def run_training(
     d_sae = args.width_multiplier * d_model
     aux_k = default_aux_k(d_model) if args.aux_k is None else args.aux_k
     print(
-        f"Device: {device} | Mode: {'streaming' if args.streaming_mode else 'cached'} | "
+        f"Device: {device} | Mode: {'cached' if args.cache_activations else 'streaming'} | "
         f"Model batch: {args.model_batch_size} | SAE batch: {args.sae_batch_size} | "
         f"Layer: {metadata['layer_index']} | Model width: {d_model} | "
         f"SAE width: {d_sae:,} | k: {args.k} | "
@@ -276,7 +276,7 @@ def main() -> None:
     device = choose_device(args.device)
     model_dtype = getattr(torch, args.model_dtype)
 
-    if args.streaming_mode:
+    if not args.cache_activations and not args.cache_only:
         tokenizer, model, layer, train_data, validation_data, metadata = (
             load_capture_inputs(args, device, model_dtype)
         )
