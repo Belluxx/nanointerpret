@@ -87,19 +87,6 @@ def build_residual_cache(
     tokenizer = AutoTokenizer.from_pretrained(args.model_id)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
-
-    token_spec = TokenCacheSpec(
-        cache_dir=args.cache_dir,
-        model_id=args.model_id,
-        dataset_id=args.dataset_id,
-        dataset_config=args.dataset_config,
-        train_tokens=args.train_tokens,
-        validation_tokens=args.validation_tokens,
-    )
-    train_path, validation_path = build_token_cache(tokenizer, token_spec)
-    train_tokens = np.memmap(train_path, mode="r", dtype=np.uint32)
-    validation_tokens = np.memmap(validation_path, mode="r", dtype=np.uint32)
-
     model = AutoModelForCausalLM.from_pretrained(
         args.model_id,
         dtype=model_dtype,
@@ -128,10 +115,18 @@ def build_residual_cache(
             "d_model": d_model,
         }
     )
-    print(
-        f"capturing input to {layer_path}[{layer_index}] "
-        f"({len(layers)} layers, d_model={d_model})"
+    token_spec = TokenCacheSpec(
+        cache_dir=args.cache_dir,
+        model_id=args.model_id,
+        dataset_id=args.dataset_id,
+        dataset_config=args.dataset_config,
+        train_tokens=args.train_tokens,
+        validation_tokens=args.validation_tokens,
     )
+    train_path, validation_path = build_token_cache(tokenizer, token_spec)
+    train_tokens = np.memmap(train_path, mode="r", dtype=np.uint32)
+    validation_tokens = np.memmap(validation_path, mode="r", dtype=np.uint32)
+
     with ResidualStreamCapture(layers[layer_index]) as capture:
         capture_residual_cache(
             model,
@@ -151,12 +146,6 @@ def main() -> None:
     seed_everything(args.seed)
     device = choose_device(args.device)
     model_dtype = getattr(torch, args.model_dtype)
-
-    print(
-        f"device={device}, model dtype={model_dtype}, "
-        f"model batch={args.model_batch_size}, "
-        f"SAE batch={args.sae_batch_size}"
-    )
     residual_cache_spec = ResidualCacheSpec(
         cache_dir=args.residual_cache_dir,
         model_id=args.model_id,
@@ -172,7 +161,6 @@ def main() -> None:
     residual_train_path, residual_validation_path, _ = cache_paths
     cache_metadata = load_residual_cache_metadata(residual_cache_spec)
     if cache_metadata is None:
-        print("phase 1/2: capturing residual cache")
         build_residual_cache(
             args, device, model_dtype, residual_cache_spec, cache_paths
         )
@@ -183,19 +171,23 @@ def main() -> None:
         cache_metadata = load_residual_cache_metadata(residual_cache_spec)
         if cache_metadata is None:
             raise RuntimeError("the residual cache failed validation after capture")
-    else:
-        print(f"using residual cache at {args.residual_cache_dir}")
 
-    print(f"cached train residuals: {residual_train_path}")
-    print(f"cached validation residuals: {residual_validation_path}")
+    d_model = int(cache_metadata["d_model"])
+    d_sae = args.width_multiplier * d_model
+    aux_k = default_aux_k(d_model) if args.aux_k is None else args.aux_k
+    print(
+        f"Device: {device} | Model batch: {args.model_batch_size} | "
+        f"SAE batch: {args.sae_batch_size} | Layer: {cache_metadata['layer_index']} | "
+        f"Model width: {d_model} | SAE width: {d_sae:,} | k: {args.k} | "
+        f"AuxK: {'off' if args.aux_k_coef == 0 else aux_k}"
+    )
+
     if args.cache_only:
         return
     if args.normalization_tokens <= 0:
         raise ValueError("--normalization-tokens must be positive")
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    print("phase 2/2: training SAE from cached residuals (LLM not loaded)")
-    d_model = int(cache_metadata["d_model"])
     train_residuals = np.memmap(
         residual_train_path,
         mode="r",
@@ -209,15 +201,6 @@ def main() -> None:
         shape=(args.validation_tokens, d_model),
     )
 
-    d_sae = args.width_multiplier * d_model
-    aux_k = default_aux_k(d_model) if args.aux_k is None else args.aux_k
-    print(
-        f"cached input to {cache_metadata['layer_path']}"
-        f"[{cache_metadata['layer_index']}] (d_model={d_model}); "
-        f"SAE width={d_sae:,}, "
-        f"k={args.k}, AuxK={'off' if args.aux_k_coef == 0 else aux_k}, "
-        f"pre-bias subtraction={'on' if args.subtract_pre_bias else 'off'}"
-    )
     checkpoint_path = args.output_dir / "checkpoint.pt"
     if args.resume:
         checkpoint = torch.load(
@@ -277,7 +260,7 @@ def main() -> None:
     if initial_pre_bias is not None:
         with torch.no_grad():
             sae.decoder_bias.copy_(initial_pre_bias)
-    processed, evaluation = train_sae(
+    _, evaluation = train_sae(
         sae,
         train_residuals,
         validation_residuals,
@@ -285,8 +268,6 @@ def main() -> None:
         args,
         config,
     )
-    print(f"trained on {processed:,} tokens")
-
     from src.plot import save_feature_density_plot, save_training_plot
 
     save_training_plot(

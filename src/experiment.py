@@ -159,6 +159,8 @@ def format_metrics(record: dict) -> str:
 
 
 def format_metrics_line(record: dict) -> str:
+    if record["split"] == "validation":
+        return f"Validation: {record['tokens']:,} tok | {format_metrics(record)}"
     return f"{record['split']:<10} {record['tokens']:>12,} tok | {format_metrics(record)}"
 
 
@@ -350,7 +352,6 @@ def estimate_activation_normalization(
     tokens_seen = 0
     squared_norm_sum = 0.0
     pre_bias = None
-    pre_bias_sample_tokens = 0
     progress = tqdm(
         total=target_tokens,
         unit="tok",
@@ -364,7 +365,6 @@ def estimate_activation_normalization(
         calibration_residual = residual[:take]
         if args.subtract_pre_bias and pre_bias is None:
             pre_bias = geometric_median(calibration_residual)
-            pre_bias_sample_tokens = take
         squared_norm_sum += calibration_residual.square().sum().item()
         tokens_seen += take
         progress.update(take)
@@ -374,16 +374,8 @@ def estimate_activation_normalization(
 
     mean_squared_norm = squared_norm_sum / tokens_seen
     scale = math.sqrt(train_residuals.shape[1] / mean_squared_norm)
-    print(
-        f"activation normalization: {tokens_seen:,} calibration tokens, "
-        f"E[||x||^2]={mean_squared_norm:,.4g}, scale={scale:.8g}"
-    )
     if pre_bias is not None:
         pre_bias.mul_(scale)
-        print(
-            f"pre-bias initialization: geometric median of "
-            f"{pre_bias_sample_tokens:,} scaled calibration activations"
-        )
     return scale, pre_bias
 
 

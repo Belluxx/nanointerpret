@@ -121,7 +121,6 @@ def build_token_cache(tokenizer, spec: TokenCacheSpec) -> tuple[Path, Path]:
     validation_tmp = validation_path.with_suffix(validation_path.suffix + ".tmp")
     target_total = spec.train_tokens + spec.validation_tokens
     written = 0
-    print(f"streaming {target_total:,} tokens from {spec.dataset_id}/{spec.dataset_config}")
     dataset = load_dataset(
         spec.dataset_id,
         name=spec.dataset_config,
@@ -132,7 +131,7 @@ def build_token_cache(tokenizer, spec: TokenCacheSpec) -> tuple[Path, Path]:
     eos = tokenizer.eos_token_id
 
     with train_tmp.open("wb") as train_file, validation_tmp.open("wb") as validation_file:
-        progress = tqdm(total=target_total, unit="tok", desc="token cache")
+        progress = tqdm(total=target_total, unit="tok", desc="Token cache")
         text_batch: list[str] = []
 
         def write_documents(texts: list[str]) -> None:
