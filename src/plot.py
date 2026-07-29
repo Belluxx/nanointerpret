@@ -107,10 +107,10 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
         mse_axis, feature_axis = figure.subplots(1, 2)
         auxk_axis = feature_axis.twinx()
 
-        normalized_mse = values("normalized_mse")
+        mse = values("mse")
         sns.lineplot(
             x=tokens,
-            y=normalized_mse,
+            y=mse,
             color="#7C3AED",
             linewidth=1.5,
             errorbar=None,
@@ -135,7 +135,7 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
             )
             auxk_line = auxk_axis.lines[-1]
             auxk_line.set_label("AuxK NMSE")
-        mse_axis.set(ylabel="NMSE", yscale="log")
+        mse_axis.set(ylabel="MSE", yscale="log")
         mse_axis.yaxis.set_major_locator(LogLocator(base=10, subs=(1, 2, 5)))
         mse_axis.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:g}"))
         auxk_axis.set_ylabel("AuxK NMSE")

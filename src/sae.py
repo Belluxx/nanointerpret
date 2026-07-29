@@ -150,13 +150,10 @@ class RunningMetrics:
     def compute(self) -> dict[str, float]:
         n = float(self.count)
         sse = self.error_sq_sum.sum()
-        x_energy = self.x_sq_sum.sum().clamp_min(1e-12)
         x_variance = (self.x_sq_sum - self.x_sum.square() / n).sum().clamp_min(1e-12)
         mse = float((sse / (n * self.d_model)).item())
         result = {
             "mse": mse,
-            "reconstruction_loss": mse,
-            "normalized_mse": float((sse / x_energy).item()),
             "explained_variance": float((1.0 - sse / x_variance).item()),
             "l0": float((self.l0_sum / n).item()),
             "window_dead_feature_pct": float(

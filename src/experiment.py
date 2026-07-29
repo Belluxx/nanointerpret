@@ -155,13 +155,11 @@ def format_metrics(record: dict) -> str:
     )
     parts = [
         f"EV {record['explained_variance']:.2%}",
-        f"recon {record['reconstruction_loss']:,.4f}",
+        f"MSE {record['mse']:,.4f}",
     ]
     if "auxk_loss" in record:
-        parts.append(f"AuxK {record['auxk_loss']:,.4f}")
-    parts.extend(
-        (f"NMSE {record['normalized_mse']:.4f}", f"dead {dead}")
-    )
+        parts.append(f"AuxK NMSE {record['auxk_loss']:,.4f}")
+    parts.append(f"dead {dead}")
     return " | ".join(parts)
 
 
@@ -316,9 +314,9 @@ def optimize_residual_batch(
         token_position = processed_tokens + start + len(x)
         fired = indices[values > FIRING_THRESHOLD].unique()
         last_fired[fired] = token_position
-        reconstruction_loss = F.mse_loss(reconstruction, x)
+        mse_loss = F.mse_loss(reconstruction, x)
         auxk_loss = None
-        loss = reconstruction_loss
+        loss = mse_loss
         if aux_k_coef > 0:
             dead_mask = last_fired < token_position - dead_window
             auxk_loss = normalized_auxk_loss(
