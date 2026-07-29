@@ -25,7 +25,7 @@ python3 train.py --train-tokens 300000000 --checkpoint-every 150000000 --gradien
 
 ## Gradient clipping is unnecessary
 
-Disabling gradient clipping had no downsides and training throughput by 17%.
+Disabling gradient clipping had no downsides and improved training throughput by 17%.
 
 <details>
 <summary>Commands</summary>
