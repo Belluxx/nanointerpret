@@ -79,7 +79,6 @@ def normalized_auxk_loss(
     dead_mask: Tensor,
     aux_k: int,
 ) -> Tensor:
-    """Reconstruct detached primary error with dead latents and normalized MSE."""
     dead_count = int(dead_mask.sum().item())
     if dead_count == 0:
         return pre_activations.sum() * 0.0
@@ -101,8 +100,6 @@ def normalized_auxk_loss(
 
 
 class RunningMetrics:
-    """Accumulate reconstruction and feature-use metrics for one logging window."""
-
     def __init__(self, d_model: int, d_sae: int, device: torch.device):
         self.device = device
         self.d_model = d_model

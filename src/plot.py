@@ -38,7 +38,6 @@ def _despine(axis, *, left: bool = True, right: bool = False) -> None:
 
 
 def save_feature_density_plot(metrics_path: Path, output_path: Path) -> None:
-    """Overlay up to three spaced validation feature-density distributions."""
     records = [
         json.loads(line)
         for line in metrics_path.read_text().splitlines()
@@ -102,7 +101,6 @@ def save_feature_density_plot(metrics_path: Path, output_path: Path) -> None:
 
 
 def save_training_plot(metrics_path: Path, output_path: Path) -> None:
-    """Save training metrics as a two-panel PNG."""
     records = [
         json.loads(line)
         for line in metrics_path.read_text().splitlines()

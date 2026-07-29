@@ -24,7 +24,6 @@ from .sae import (
 
 
 def default_aux_k(d_model: int) -> int:
-    """Return a power of two close to half the residual-stream width."""
     return 1 << round(math.log2(d_model / 2))
 
 
@@ -84,8 +83,6 @@ class _ActivationCaptured(Exception):
 
 
 class ResidualStreamCapture:
-    """Capture a layer's input residual and stop the rest of the model forward."""
-
     def __init__(self, layer: nn.Module):
         self.activation: Tensor | None = None
 
@@ -147,7 +144,6 @@ def append_jsonl(path: Path, record: dict) -> None:
 
 
 def format_metrics(record: dict) -> str:
-    """Format the useful metrics for terminal output."""
     dead = (
         "n/a"
         if record["dead_feature_pct"] is None
@@ -168,7 +164,6 @@ def format_metrics_line(record: dict) -> str:
 
 
 def load_checkpoint_evaluation(path: Path, training_tokens: int) -> dict | None:
-    """Return the latest validation for a training checkpoint, if present."""
     if not path.exists():
         return None
     for line in reversed(path.read_text().splitlines()):
@@ -190,7 +185,6 @@ def capture_residual_batch(
     batch_tokens: int,
     device: torch.device,
 ) -> Tensor:
-    """Capture the packed residual vectors for a batch of token contexts."""
     full_batch = batch_tokens == input_ids.numel()
     input_ids = input_ids.to(device, non_blocking=True)
     if full_batch:
@@ -213,7 +207,6 @@ def capture_residual_cache(
     cache_paths: tuple[Path, Path, Path],
     metadata: dict,
 ) -> None:
-    """Run the LLM once per token and persist its residual-stream vectors."""
     train_path, validation_path, metadata_path = cache_paths
     train_path.parent.mkdir(parents=True, exist_ok=True)
     d_model = int(metadata["d_model"])
@@ -266,7 +259,6 @@ def capture_residual_cache(
 def geometric_median(
     points: Tensor, *, max_iterations: int = 100, tolerance: float = 1e-5
 ) -> Tensor:
-    """Estimate the geometric median with Weiszfeld's method."""
     estimate = points.mean(dim=0)
     for _ in range(max_iterations):
         distances = torch.linalg.vector_norm(points - estimate, dim=1)
@@ -279,7 +271,6 @@ def geometric_median(
 
 
 def feature_density_histogram(fire_counts: Tensor, token_count: int) -> dict:
-    """Build fixed log10-density bins suitable for comparison across validations."""
     nonzero_counts = fire_counts[fire_counts > 0].cpu().numpy().astype(np.float64)
     nonzero_density = nonzero_counts / token_count
     minimum_exponent = -math.ceil(math.log10(token_count))
@@ -305,7 +296,6 @@ def optimize_residual_batch(
     aux_k_coef: float,
     dead_window: int,
 ) -> None:
-    """Optimize the SAE over one cached residual batch."""
     for start in range(0, len(residual), sae_batch_size):
         x = residual[start : start + sae_batch_size]
         reconstruction, indices, values, pre_activations = (
@@ -351,7 +341,6 @@ def estimate_activation_normalization(
     device: torch.device,
     args: argparse.Namespace,
 ) -> tuple[float, Tensor | None]:
-    """Estimate the global scale and optional pre-bias initialization."""
     target_tokens = min(args.normalization_tokens, len(train_residuals))
     batches = iter_residual_batches(
         train_residuals,
@@ -539,7 +528,6 @@ def train_sae(
             }
             append_jsonl(metrics_path, record)
             if progress.disable:
-                # Redirected output cannot redraw a line, so emit readable log records.
                 print(format_metrics_line(record))
             else:
                 metric_status.set_description_str(

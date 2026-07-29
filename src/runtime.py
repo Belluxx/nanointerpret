@@ -6,7 +6,6 @@ import torch
 
 
 def choose_device(requested: str) -> torch.device:
-    """Resolve an explicit or automatic PyTorch device selection."""
     if requested == "auto":
         if torch.backends.mps.is_available():
             requested = "mps"
