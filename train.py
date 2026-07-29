@@ -4,6 +4,7 @@ import argparse
 import json
 import random
 from dataclasses import asdict
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -15,11 +16,13 @@ from src.data import (
     ResidualCacheSpec,
     TokenCacheSpec,
     build_token_cache,
+    iter_residual_batches,
     load_residual_cache_metadata,
     residual_cache_paths,
 )
 from src.experiment import (
     ExperimentConfig,
+    ResidualBatchFactory,
     ResidualStreamCapture,
     capture_residual_cache,
     default_aux_k,
@@ -27,6 +30,7 @@ from src.experiment import (
     evaluate_sae,
     find_transformer_layers,
     format_metrics_line,
+    iter_captured_residual_batches,
     train_sae,
 )
 from src.runtime import choose_device
@@ -67,7 +71,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"))
     parser.add_argument("--residual-cache-dir", type=Path, default=Path("artifacts/residual_cache"))
     parser.add_argument("--resume", action="store_true")
-    parser.add_argument("--cache-only", action="store_true", help="Capture the residual cache, then exit before SAE training.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--streaming-mode", action="store_true", help="Capture residuals during SAE training without writing a residual cache.")
+    mode.add_argument("--cache-only", action="store_true", help="Capture the residual cache, then exit before SAE training.")
     return parser.parse_args()
 
 
@@ -77,44 +83,14 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
 
 
-def build_residual_cache(
+def load_capture_inputs(
     args: argparse.Namespace,
     device: torch.device,
     model_dtype: torch.dtype,
-    spec: ResidualCacheSpec,
-    cache_paths: tuple[Path, Path, Path],
-) -> None:
+) -> tuple:
     tokenizer = AutoTokenizer.from_pretrained(args.model_id)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model_id,
-        dtype=model_dtype,
-        attn_implementation="eager",
-    ).to(device)
-    model.eval().requires_grad_(False)
-
-    layer_path, layers = find_transformer_layers(model)
-    layer_index = (
-        len(layers) // 2 if args.activation_layer is None else args.activation_layer
-    )
-    if not 0 <= layer_index < len(layers):
-        raise ValueError(
-            f"activation layer must be in [0, {len(layers) - 1}], got {layer_index}"
-        )
-
-    d_model = int(model.config.hidden_size)
-    metadata = asdict(spec)
-    metadata.pop("cache_dir")
-    metadata.update(
-        {
-            "layer_index": layer_index,
-            "layer_path": layer_path,
-            "layer_count": len(layers),
-            "residual_location": "layer_input",
-            "d_model": d_model,
-        }
-    )
     token_spec = TokenCacheSpec(
         cache_dir=args.cache_dir,
         model_id=args.model_id,
@@ -127,7 +103,45 @@ def build_residual_cache(
     train_tokens = np.memmap(train_path, mode="r", dtype=np.uint32)
     validation_tokens = np.memmap(validation_path, mode="r", dtype=np.uint32)
 
-    with ResidualStreamCapture(layers[layer_index]) as capture:
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_id,
+        dtype=model_dtype,
+        attn_implementation="eager",
+    ).to(device)
+    model.eval().requires_grad_(False)
+    layer_path, layers = find_transformer_layers(model)
+    layer_index = (
+        len(layers) // 2 if args.activation_layer is None else args.activation_layer
+    )
+    if not 0 <= layer_index < len(layers):
+        raise ValueError(
+            f"activation layer must be in [0, {len(layers) - 1}], got {layer_index}"
+        )
+    metadata = {
+        "layer_index": layer_index,
+        "layer_path": layer_path,
+        "layer_count": len(layers),
+        "residual_location": "layer_input",
+        "d_model": int(model.config.hidden_size),
+    }
+    return tokenizer, model, layers[layer_index], train_tokens, validation_tokens, metadata
+
+
+def build_residual_cache(
+    args: argparse.Namespace,
+    device: torch.device,
+    model_dtype: torch.dtype,
+    spec: ResidualCacheSpec,
+    cache_paths: tuple[Path, Path, Path],
+) -> None:
+    tokenizer, model, layer, train_tokens, validation_tokens, layer_metadata = (
+        load_capture_inputs(args, device, model_dtype)
+    )
+    metadata = asdict(spec)
+    metadata.pop("cache_dir")
+    metadata.update(layer_metadata)
+
+    with ResidualStreamCapture(layer) as capture:
         capture_residual_cache(
             model,
             capture,
@@ -141,65 +155,27 @@ def build_residual_cache(
         )
 
 
-def main() -> None:
-    args = parse_args()
-    seed_everything(args.seed)
-    device = choose_device(args.device)
-    model_dtype = getattr(torch, args.model_dtype)
-    residual_cache_spec = ResidualCacheSpec(
-        cache_dir=args.residual_cache_dir,
-        model_id=args.model_id,
-        dataset_id=args.dataset_id,
-        dataset_config=args.dataset_config,
-        train_tokens=args.train_tokens,
-        validation_tokens=args.validation_tokens,
-        context_size=args.context_size,
-        activation_layer=args.activation_layer,
-        model_dtype=args.model_dtype,
-    )
-    cache_paths = residual_cache_paths(residual_cache_spec)
-    residual_train_path, residual_validation_path, _ = cache_paths
-    cache_metadata = load_residual_cache_metadata(residual_cache_spec)
-    if cache_metadata is None:
-        build_residual_cache(
-            args, device, model_dtype, residual_cache_spec, cache_paths
-        )
-        if device.type == "cuda":
-            torch.cuda.empty_cache()
-        elif device.type == "mps":
-            torch.mps.empty_cache()
-        cache_metadata = load_residual_cache_metadata(residual_cache_spec)
-        if cache_metadata is None:
-            raise RuntimeError("the residual cache failed validation after capture")
-
-    d_model = int(cache_metadata["d_model"])
+def run_training(
+    args: argparse.Namespace,
+    device: torch.device,
+    metadata: dict,
+    train_batches: ResidualBatchFactory,
+    validation_batches: ResidualBatchFactory,
+) -> None:
+    d_model = int(metadata["d_model"])
     d_sae = args.width_multiplier * d_model
     aux_k = default_aux_k(d_model) if args.aux_k is None else args.aux_k
     print(
-        f"Device: {device} | Model batch: {args.model_batch_size} | "
-        f"SAE batch: {args.sae_batch_size} | Layer: {cache_metadata['layer_index']} | "
-        f"Model width: {d_model} | SAE width: {d_sae:,} | k: {args.k} | "
+        f"Device: {device} | Mode: {'streaming' if args.streaming_mode else 'cached'} | "
+        f"Model batch: {args.model_batch_size} | SAE batch: {args.sae_batch_size} | "
+        f"Layer: {metadata['layer_index']} | Model width: {d_model} | "
+        f"SAE width: {d_sae:,} | k: {args.k} | "
         f"AuxK: {'off' if args.aux_k_coef == 0 else aux_k}"
     )
 
-    if args.cache_only:
-        return
     if args.normalization_tokens <= 0:
         raise ValueError("--normalization-tokens must be positive")
     args.output_dir.mkdir(parents=True, exist_ok=True)
-
-    train_residuals = np.memmap(
-        residual_train_path,
-        mode="r",
-        dtype=RESIDUAL_DTYPE,
-        shape=(args.train_tokens, d_model),
-    )
-    validation_residuals = np.memmap(
-        residual_validation_path,
-        mode="r",
-        dtype=RESIDUAL_DTYPE,
-        shape=(args.validation_tokens, d_model),
-    )
 
     checkpoint_path = args.output_dir / "checkpoint.pt"
     if args.resume:
@@ -219,7 +195,9 @@ def main() -> None:
                 "another --output-dir"
             )
         activation_scale, initial_pre_bias = estimate_activation_normalization(
-            train_residuals,
+            train_batches,
+            args.train_tokens,
+            d_model,
             device,
             args,
         )
@@ -230,8 +208,8 @@ def main() -> None:
         train_tokens=args.train_tokens,
         validation_tokens=args.validation_tokens,
         context_size=args.context_size,
-        layer_index=int(cache_metadata["layer_index"]),
-        layer_path=str(cache_metadata["layer_path"]),
+        layer_index=int(metadata["layer_index"]),
+        layer_path=str(metadata["layer_path"]),
         residual_location="layer_input",
         d_model=d_model,
         d_sae=d_sae,
@@ -262,8 +240,8 @@ def main() -> None:
             sae.decoder_bias.copy_(initial_pre_bias)
     _, evaluation = train_sae(
         sae,
-        train_residuals,
-        validation_residuals,
+        train_batches,
+        validation_batches,
         device,
         args,
         config,
@@ -282,15 +260,98 @@ def main() -> None:
     if evaluation is None:
         evaluation = evaluate_sae(
             sae,
-            validation_residuals,
+            validation_batches,
             device,
             config,
         )
-    validation = evaluation
     (args.output_dir / "validation_metrics.json").write_text(
-        json.dumps(validation, indent=2, sort_keys=True) + "\n"
+        json.dumps(evaluation, indent=2, sort_keys=True) + "\n"
     )
-    print(format_metrics_line(validation))
+    print(format_metrics_line(evaluation))
+
+
+def main() -> None:
+    args = parse_args()
+    seed_everything(args.seed)
+    device = choose_device(args.device)
+    model_dtype = getattr(torch, args.model_dtype)
+
+    if args.streaming_mode:
+        tokenizer, model, layer, train_data, validation_data, metadata = (
+            load_capture_inputs(args, device, model_dtype)
+        )
+        with ResidualStreamCapture(layer) as capture:
+            batch_function = partial(
+                iter_captured_residual_batches,
+                model,
+                capture,
+                pad_token_id=tokenizer.pad_token_id,
+                device=device,
+                context_size=args.context_size,
+                model_batch_size=args.model_batch_size,
+                seed=args.seed,
+            )
+            run_training(
+                args,
+                device,
+                metadata,
+                partial(batch_function, train_data, shuffle=True),
+                partial(batch_function, validation_data, shuffle=False),
+            )
+        return
+
+    spec = ResidualCacheSpec(
+        cache_dir=args.residual_cache_dir,
+        model_id=args.model_id,
+        dataset_id=args.dataset_id,
+        dataset_config=args.dataset_config,
+        train_tokens=args.train_tokens,
+        validation_tokens=args.validation_tokens,
+        context_size=args.context_size,
+        activation_layer=args.activation_layer,
+        model_dtype=args.model_dtype,
+    )
+    cache_paths = residual_cache_paths(spec)
+    train_path, validation_path, _ = cache_paths
+    metadata = load_residual_cache_metadata(spec)
+    if metadata is None:
+        build_residual_cache(args, device, model_dtype, spec, cache_paths)
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+        elif device.type == "mps":
+            torch.mps.empty_cache()
+        metadata = load_residual_cache_metadata(spec)
+        if metadata is None:
+            raise RuntimeError("the residual cache failed validation after capture")
+    if args.cache_only:
+        print(f"Residual cache: {args.residual_cache_dir}")
+        return
+
+    d_model = int(metadata["d_model"])
+    train_data = np.memmap(
+        train_path,
+        mode="r",
+        dtype=RESIDUAL_DTYPE,
+        shape=(args.train_tokens, d_model),
+    )
+    validation_data = np.memmap(
+        validation_path,
+        mode="r",
+        dtype=RESIDUAL_DTYPE,
+        shape=(args.validation_tokens, d_model),
+    )
+    batch_function = partial(
+        iter_residual_batches,
+        batch_size=args.context_size * args.model_batch_size,
+        seed=args.seed,
+    )
+    run_training(
+        args,
+        device,
+        metadata,
+        partial(batch_function, train_data, shuffle=True),
+        partial(batch_function, validation_data, shuffle=False),
+    )
 
 
 if __name__ == "__main__":
