@@ -319,14 +319,15 @@ def optimize_residual_batch(
         loss = mse_loss
         if aux_k_coef > 0:
             dead_mask = last_fired < token_position - dead_window
-            auxk_loss = normalized_auxk_loss(
-                sae,
-                pre_activations,
-                x - reconstruction,
-                dead_mask,
-                aux_k,
-            )
-            loss = loss + aux_k_coef * auxk_loss
+            if dead_mask.any():
+                auxk_loss = normalized_auxk_loss(
+                    sae,
+                    pre_activations,
+                    x - reconstruction,
+                    dead_mask,
+                    aux_k,
+                )
+                loss = loss + aux_k_coef * auxk_loss
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         sae.constrain_decoder_gradient()
