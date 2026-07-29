@@ -20,7 +20,7 @@
 ## Methodology
 
 - This project combines Anthropic's activation setup [2] with Gao et al.'s Top-K SAE [1].
-- By default, training streams activations into the SAE without writing a residual cache and keeps the LLM loaded. `--cache-activations` instead caches the selected residual-stream activations as float32, then trains and evaluates the SAE without the LLM loaded.
+- By default, training streams activations into the SAE without writing a residual cache and keeps the LLM loaded. If you use `--cache-activations` the residual-stream activations are stored, making things faster. However note that thet are quite heavy on the disk.
 - By default, activations come from the input to the middle transformer layer. A single scale is applied so their average squared L2 norm equals the residual width. [2]
 - The SAE uses Top-K sparsification, tied encoder/decoder initialization, a shared geometric-median bias, unit-norm decoder directions, and AuxK. AuxK helps revive features that have not fired in the last 10M tokens. [1]
 - Gradient clipping is disabled by default after [experiments found no benefit](experiments.md#gradient-clipping-is-unnecessary).
