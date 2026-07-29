@@ -13,6 +13,9 @@ from torch import Tensor
 from tqdm.auto import tqdm
 
 
+RESIDUAL_DTYPE = np.float32
+
+
 @dataclass(frozen=True)
 class TokenCacheSpec:
     cache_dir: Path
@@ -34,7 +37,6 @@ class ResidualCacheSpec:
     context_size: int
     activation_layer: int | None
     model_dtype: str
-    residual_dtype: str
 
 
 def residual_cache_paths(spec: ResidualCacheSpec) -> tuple[Path, Path, Path]:
@@ -45,11 +47,12 @@ def residual_cache_paths(spec: ResidualCacheSpec) -> tuple[Path, Path, Path]:
     stem = (
         f"{safe_model}_{safe_dataset}_{safe_config}_"
         f"{spec.train_tokens}_{spec.validation_tokens}_ctx{spec.context_size}_"
-        f"layer{layer}_{spec.model_dtype}_{spec.residual_dtype}"
+        f"layer{layer}_{spec.model_dtype}"
     )
+    dtype_name = np.dtype(RESIDUAL_DTYPE).name
     return (
-        spec.cache_dir / f"{stem}_train.bin",
-        spec.cache_dir / f"{stem}_validation.bin",
+        spec.cache_dir / f"{stem}_train.{dtype_name}",
+        spec.cache_dir / f"{stem}_validation.{dtype_name}",
         spec.cache_dir / f"{stem}_metadata.json",
     )
 
@@ -68,7 +71,7 @@ def load_residual_cache_metadata(spec: ResidualCacheSpec) -> dict | None:
     d_model = metadata.get("d_model")
     if not isinstance(d_model, int) or d_model <= 0:
         return None
-    item_size = np.dtype(spec.residual_dtype).itemsize
+    item_size = np.dtype(RESIDUAL_DTYPE).itemsize
     if (
         train_path.stat().st_size != spec.train_tokens * d_model * item_size
         or validation_path.stat().st_size

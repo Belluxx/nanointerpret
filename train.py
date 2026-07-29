@@ -11,6 +11,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src.data import (
+    RESIDUAL_DTYPE,
     ResidualCacheSpec,
     TokenCacheSpec,
     build_token_cache,
@@ -62,7 +63,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-subtract-pre-bias", action="store_false", dest="subtract_pre_bias", help="Do not subtract the learned decoder bias from activations before encoding.")
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
     parser.add_argument("--model-dtype", choices=("float32", "float16", "bfloat16"), default="float32")
-    parser.add_argument("--residual-dtype", choices=("float16", "float32"), default="float16", help="On-disk residual dtype. float16 halves cache size.")
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/sae_gemma_3_270m"))
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"))
     parser.add_argument("--residual-cache-dir", type=Path, default=Path("artifacts/residual_cache"))
@@ -167,7 +167,6 @@ def main() -> None:
         context_size=args.context_size,
         activation_layer=args.activation_layer,
         model_dtype=args.model_dtype,
-        residual_dtype=args.residual_dtype,
     )
     cache_paths = residual_cache_paths(residual_cache_spec)
     residual_train_path, residual_validation_path, _ = cache_paths
@@ -200,13 +199,13 @@ def main() -> None:
     train_residuals = np.memmap(
         residual_train_path,
         mode="r",
-        dtype=args.residual_dtype,
+        dtype=RESIDUAL_DTYPE,
         shape=(args.train_tokens, d_model),
     )
     validation_residuals = np.memmap(
         residual_validation_path,
         mode="r",
-        dtype=args.residual_dtype,
+        dtype=RESIDUAL_DTYPE,
         shape=(args.validation_tokens, d_model),
     )
 
@@ -267,7 +266,6 @@ def main() -> None:
         seed=args.seed,
         device=str(device),
         model_dtype=args.model_dtype,
-        residual_dtype=args.residual_dtype,
     )
     sae = TopKSAE(
         d_model,

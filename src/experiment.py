@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 from tqdm.auto import tqdm
 
-from .data import iter_context_batches, iter_residual_batches
+from .data import RESIDUAL_DTYPE, iter_context_batches, iter_residual_batches
 from .sae import (
     FIRING_THRESHOLD,
     RunningMetrics,
@@ -49,7 +49,6 @@ class ExperimentConfig:
     seed: int
     device: str
     model_dtype: str
-    residual_dtype: str
     normalization_tokens: int = 0
     activation_scale: float = 1.0
     subtract_pre_bias: bool = True
@@ -223,7 +222,7 @@ def capture_residual_cache(
         output = np.memmap(
             temporary,
             mode="w+",
-            dtype=args.residual_dtype,
+            dtype=RESIDUAL_DTYPE,
             shape=(len(tokens), d_model),
         )
         written = 0
