@@ -246,7 +246,7 @@ def optimize_residual_batch(
     last_fired: Tensor,
     processed_tokens: int,
     sae_batch_size: int,
-    gradient_clip: float,
+    gradient_clip: float | None,
     aux_k: int,
     aux_k_coef: float,
     dead_window: int,
@@ -276,7 +276,7 @@ def optimize_residual_batch(
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         sae.constrain_decoder_gradient()
-        if gradient_clip > 0:
+        if gradient_clip is not None:
             torch.nn.utils.clip_grad_norm_(sae.parameters(), gradient_clip)
         optimizer.step()
         sae.normalize_decoder()
