@@ -13,7 +13,8 @@ from torch import Tensor
 from tqdm.auto import tqdm
 
 
-RESIDUAL_DTYPE = np.float32
+RESIDUAL_DTYPE = np.float16
+RESIDUAL_STORAGE_SCALE = 1 / 256
 
 
 @dataclass(frozen=True)
@@ -225,5 +226,6 @@ def iter_residual_batches(
 
     for batch_id in order[skip_batches:]:
         start = int(batch_id) * batch_size
-        batch = np.asarray(residuals[start : start + batch_size]).copy()
+        batch = np.asarray(residuals[start : start + batch_size]).astype(np.float32)
+        batch /= RESIDUAL_STORAGE_SCALE
         yield torch.from_numpy(batch)

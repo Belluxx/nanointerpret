@@ -15,7 +15,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 from tqdm.auto import tqdm
 
-from .data import RESIDUAL_DTYPE, iter_context_batches
+from .data import RESIDUAL_DTYPE, RESIDUAL_STORAGE_SCALE, iter_context_batches
 from .sae import (
     FIRING_THRESHOLD,
     RunningMetrics,
@@ -243,6 +243,10 @@ def capture_residual_cache(
     train_path, validation_path, metadata_path = cache_paths
     train_path.parent.mkdir(parents=True, exist_ok=True)
     d_model = int(metadata["d_model"])
+    float16_max = torch.finfo(torch.float16).max
+    raw_storage_limit = float16_max / RESIDUAL_STORAGE_SCALE
+    saturated_values = 0
+    maximum_activation = 0.0
     total_tokens = len(train_tokens) + len(validation_tokens)
     progress = tqdm(
         total=total_tokens,
@@ -252,6 +256,7 @@ def capture_residual_cache(
     )
 
     def capture_split(tokens: np.memmap, path: Path) -> None:
+        nonlocal maximum_activation, saturated_values
         temporary = path.with_suffix(path.suffix + ".tmp")
         output = np.memmap(
             temporary,
@@ -273,7 +278,16 @@ def capture_residual_cache(
             residual = capture_residual_batch(
                 model, capture, input_ids, attention_mask, batch_tokens, device
             )
-            stored = residual.float().cpu().numpy()
+            residual = residual.float()
+            batch_maximum = float(residual.abs().max().item())
+            maximum_activation = max(maximum_activation, batch_maximum)
+            stored = residual.mul(RESIDUAL_STORAGE_SCALE)
+            if batch_maximum > raw_storage_limit:
+                saturated_values += int(
+                    (residual.abs() > raw_storage_limit).sum().item()
+                )
+                stored.clamp_(-float16_max, float16_max)
+            stored = stored.cpu().numpy()
             output[written : written + batch_tokens] = stored
             written += batch_tokens
             progress.update(batch_tokens)
@@ -284,6 +298,12 @@ def capture_residual_cache(
     capture_split(train_tokens, train_path)
     capture_split(validation_tokens, validation_path)
     progress.close()
+    metadata.update(
+        {
+            "maximum_activation": maximum_activation,
+            "saturated_values": saturated_values,
+        }
+    )
     metadata_temporary = metadata_path.with_suffix(metadata_path.suffix + ".tmp")
     metadata_temporary.write_text(json.dumps(metadata, indent=2) + "\n")
     os.replace(metadata_temporary, metadata_path)
