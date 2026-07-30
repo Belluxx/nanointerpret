@@ -10,5 +10,6 @@ The main objectives are:
 - [x] Optimize SAE training for Apple Silicon (MPS)
 - [x] Cache LLM activations on disk for quick ablation experiments (avoid recomputing activations)
 - [x] Do some ablation experiments on different SAE training approaches to see what works best (see [experiments.md](docs/experiments.md))
+- [x] Use GGUF / llama.cpp to capture acivations
 - [ ] Check differences for a SAE trained on Gemma3-270M base version and Gemma3-270M instruct (chat version)
 - [ ] Train a 1B tokens SAE
