@@ -20,7 +20,7 @@
 ## Methodology
 
 - This project combines Anthropic's activation setup [2] with Gao et al.'s Top-K SAE [1].
-- By default, training streams activations into the SAE without writing a residual cache and keeps the LLM loaded. If you enable `--cache-activations`, they will be stored as float16 after scaling by `1/256`.
+- By default, training streams activations into the SAE without writing a residual cache and keeps the LLM loaded. If you enable `--cache-activations`, they will be stored as float16 after scaling by `1/256`. Caching activations is extremely useful when doing ablation tests, as you avoid recalculating the same activations for each test.
 - By default, activations come from the input to the middle transformer layer. A single scale is applied so their average squared L2 norm equals the residual width. [2]
 - The SAE uses Top-K sparsification, tied encoder/decoder initialization, a shared geometric-median bias, unit-norm decoder directions, and AuxK. AuxK helps revive features that have not fired in the last 10M tokens. [1]
 - Gradient clipping is disabled by default after [experiments found no benefit](experiments.md#gradient-clipping-is-unnecessary).
