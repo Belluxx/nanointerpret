@@ -44,9 +44,6 @@ def save_feature_density_plot(metrics_path: Path, output_path: Path) -> None:
         if line.strip()
     ]
     records.sort(key=lambda record: record["training_tokens"])
-    if len(records) > 3:
-        indices = np.rint(np.linspace(0, len(records) - 1, 3)).astype(int)
-        records = [records[index] for index in indices]
     if not records:
         return
 
@@ -144,6 +141,7 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
                 auxk_loss[after_dead_window],
                 color="#DB2777",
                 linewidth=1.5,
+                alpha=0.3,
                 label="AuxK NMSE",
             )[0]
         mse_axis.set(ylabel="MSE", yscale="log")
@@ -156,14 +154,19 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
         auxk_axis.grid(False)
         auxk_axis.set_visible(has_auxk)
 
+        dead_feature_pct = values("dead_feature_pct")
         dead_feature_line = feature_axis.plot(
             tokens,
-            values("dead_feature_pct"),
+            dead_feature_pct,
             color="#64748B",
             linewidth=1.5,
             label="Dead features",
         )[0]
-        feature_axis.set(ylabel="Dead features (%)", ylim=(0, 100))
+        dead_feature_limit = 10 if np.nanmax(dead_feature_pct) <= 10 else 100
+        feature_axis.set(
+            ylabel="Dead features (%)",
+            ylim=(0, dead_feature_limit),
+        )
         if auxk_line is not None:
             feature_axis.legend(
                 handles=[dead_feature_line, auxk_line],
