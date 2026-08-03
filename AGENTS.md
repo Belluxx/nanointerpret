@@ -4,7 +4,8 @@ Minimal training and feature interpretability analysis of LLMs with sparse autoe
 
 
 - `train.py`: build token/residual caches, train/evaluate the SAE without the LLM loaded, save checkpoints, and plot metrics.
-- `analysis.py` record and save activations, ready for visualization.
+- `analysis.py` record and save activations.
+- `interpret_features.py` asks an LLM to give a name/title to the features in the SAE.
 - `docs/overview.md`: brief notes on activation layer, width multiplier, and K.
 - `src/data.py`: token/residual-cache validation and batching.
 - `src/experiment.py`: residual-cache capture, normalization, training, evaluation, metrics, and checkpoints.
