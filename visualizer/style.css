@@ -4,9 +4,12 @@
   --text: #24231f;
   --muted: #73716a;
   --line: #deddd7;
+  --soft-line: #ebeae5;
+  --subtle: #faf9f6;
   --accent: #de4b2f;
   --accent-soft: #fff0eb;
   --focus: #2858d8;
+  --mono: "SFMono-Regular", Consolas, monospace;
   color: var(--text);
   background: var(--background);
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -74,7 +77,7 @@ main {
 
 .dataset-meta dd {
   margin: 0;
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: var(--mono);
   font-size: 11px;
 }
 
@@ -100,7 +103,7 @@ main {
   border-radius: 6px;
   outline: none;
   color: var(--text);
-  background: #faf9f6;
+  background: var(--subtle);
   font-size: 13px;
 }
 
@@ -135,7 +138,7 @@ main {
   padding: 0 50px 0 16px;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
-  background: #faf9f6;
+  background: var(--subtle);
   font-size: 9px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -148,7 +151,7 @@ main {
 }
 
 .feature {
-  border-bottom: 1px solid #ebeae5;
+  border-bottom: 1px solid var(--soft-line);
 }
 
 .feature:last-child {
@@ -170,7 +173,7 @@ main {
 }
 
 .feature > summary:hover {
-  background: #faf9f6;
+  background: var(--subtle);
 }
 
 .feature > summary:focus-visible {
@@ -186,7 +189,7 @@ main {
 .feature-stat,
 .context-stats,
 .token-percentile {
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: var(--mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -242,7 +245,7 @@ main {
   margin: 0;
   padding: 0;
   color: var(--muted);
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: var(--mono);
   font-size: 11px;
   list-style: none;
 }
@@ -288,7 +291,7 @@ main {
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--surface);
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: var(--mono);
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: pre;
@@ -330,16 +333,9 @@ main {
   box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
 }
 
-.view-button:focus-visible,
-.load-more:focus-visible {
+.view-button:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
-}
-
-.view-button:disabled,
-.load-more:disabled {
-  cursor: wait;
-  opacity: 0.6;
 }
 
 .legend {
@@ -394,9 +390,9 @@ main {
   gap: 16px;
   min-height: 34px;
   padding: 7px 11px;
-  border-bottom: 1px solid #ebeae5;
+  border-bottom: 1px solid var(--soft-line);
   color: var(--muted);
-  background: #faf9f6;
+  background: var(--subtle);
   font-size: 9px;
   letter-spacing: 0.03em;
   text-transform: uppercase;
@@ -410,7 +406,7 @@ main {
   margin: 0;
   padding: 14px;
   color: #302f2b;
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: var(--mono);
   font-size: 11px;
   line-height: 1.8;
   overflow-wrap: anywhere;
@@ -446,22 +442,6 @@ main {
   border-radius: 50%;
   vertical-align: -1px;
   animation: spin 700ms linear infinite;
-}
-
-.load-more {
-  width: 100%;
-  margin-top: 10px;
-  padding: 9px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  color: var(--text);
-  background: var(--surface);
-  cursor: pointer;
-  font-size: 11px;
-}
-
-.load-more:hover:not(:disabled) {
-  background: #faf9f6;
 }
 
 .error-message {

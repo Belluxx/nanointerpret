@@ -3,10 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 import re
-from functools import lru_cache
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from functools import lru_cache, partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
 import numpy as np
 from transformers import AutoTokenizer
@@ -14,11 +14,9 @@ from transformers import AutoTokenizer
 from src.feature_examples import choose_activation_examples
 
 
-ANALYSIS_PATH = Path("artifacts/sae_gemma_3_270m/analysis.npz")
 STATIC_DIR = Path(__file__).with_name("visualizer")
-CONTEXT_ROUTE = re.compile(r"^/api/features/(\d+)/contexts$")
-PAGE_SIZE = 20
-MAX_PAGE_SIZE = 100
+FEATURE_ROUTE = re.compile(r"^/api/features/(\d+)$")
+CONTEXT_LIMIT = 20
 TOKENS_PER_PERCENTILE = 4
 TOKEN_PERCENTILES = (95, 50, 25)
 SUMMARY_METADATA = (
@@ -33,12 +31,6 @@ SUMMARY_METADATA = (
     "k",
     "created_at",
 )
-STATIC_FILES = {
-    "/": ("index.html", "text/html; charset=utf-8"),
-    "/index.html": ("index.html", "text/html; charset=utf-8"),
-    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-    "/style.css": ("style.css", "text/css; charset=utf-8"),
-}
 
 
 def positive_int(value: str) -> int:
@@ -52,7 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Browse SAE feature activations in a local web UI."
     )
-    parser.add_argument("--analysis", type=Path, default=ANALYSIS_PATH)
+    parser.add_argument("--analysis", type=Path, required=True)
     parser.add_argument(
         "--names",
         type=Path,
@@ -138,20 +130,9 @@ class AnalysisData:
             return text
         return str(self.tokenizer.convert_ids_to_tokens(token_id))
 
-    def feature_contexts(
-        self,
-        feature_id: int,
-        offset: int = 0,
-        limit: int = PAGE_SIZE,
-        view: str = "strongest",
-    ) -> dict:
+    def feature(self, feature_id: int) -> dict:
         if not 0 <= feature_id < self.d_sae:
             raise KeyError(feature_id)
-        if offset < 0 or limit <= 0:
-            raise ValueError("offset must be nonnegative and limit must be positive")
-        if view not in ("strongest", "stratified"):
-            raise ValueError("view must be 'strongest' or 'stratified'")
-        limit = min(limit, MAX_PAGE_SIZE)
 
         activation_indices = np.flatnonzero(self.feature_ids == feature_id)
         if not len(activation_indices):
@@ -257,41 +238,42 @@ class AnalysisData:
                 }
             return context
 
-        if view == "strongest":
-            ranked_groups = np.argsort(-peaks, kind="stable")
-            selected_groups = ranked_groups[offset : offset + limit]
-            contexts = [
-                render_context(int(group_index)) for group_index in selected_groups
-            ]
-        else:
-            samples = choose_activation_examples(
-                feature_id,
-                activation_indices,
-                self.values,
-                self.context_ptr,
-                self.row_ptr,
+        strongest = [
+            render_context(int(group_index))
+            for group_index in np.argsort(-peaks, kind="stable")[:CONTEXT_LIMIT]
+        ]
+        stratified = []
+        samples = choose_activation_examples(
+            feature_id,
+            activation_indices,
+            self.values,
+            self.context_ptr,
+            self.row_ptr,
+        )
+        for sample in samples or []:
+            local_index = int(
+                np.searchsorted(activation_indices, sample.activation_index)
             )
-            contexts = []
-            for sample in samples or []:
-                local_index = int(
-                    np.searchsorted(activation_indices, sample.activation_index)
-                )
-                group_index = int(
-                    np.searchsorted(grouped_context_ids, context_ids[local_index])
-                )
-                contexts.append(render_context(group_index, sample))
+            group_index = int(
+                np.searchsorted(grouped_context_ids, context_ids[local_index])
+            )
+            stratified.append(render_context(group_index, sample))
 
         return {
             "activation_count": int(len(activation_indices)),
             "context_count": int(len(grouped_context_ids)),
             "token_groups": token_summaries,
-            "offset": offset,
-            "contexts": contexts,
+            "contexts": {
+                "strongest": strongest,
+                "stratified": stratified,
+            },
         }
 
 
-class VisualizerHandler(BaseHTTPRequestHandler):
-    data: AnalysisData
+class VisualizerHandler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, data: AnalysisData, **kwargs):
+        self.data = data
+        super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
 
     def do_GET(self) -> None:
         request = urlsplit(self.path)
@@ -299,37 +281,17 @@ class VisualizerHandler(BaseHTTPRequestHandler):
             self.send_json(self.data.summary())
             return
 
-        match = CONTEXT_ROUTE.fullmatch(request.path)
+        match = FEATURE_ROUTE.fullmatch(request.path)
         if match:
-            query = parse_qs(request.query)
             try:
-                offset = int(query.get("offset", [0])[0])
-                limit = int(query.get("limit", [PAGE_SIZE])[0])
-                view = query.get("view", ["strongest"])[0]
-                payload = self.data.feature_contexts(
-                    int(match.group(1)), offset=offset, limit=limit, view=view
-                )
-            except ValueError as error:
-                self.send_json({"error": str(error)}, status=400)
+                payload = self.data.feature(int(match.group(1)))
             except KeyError:
                 self.send_json({"error": "feature not found"}, status=404)
             else:
                 self.send_json(payload)
             return
 
-        static_file = STATIC_FILES.get(request.path)
-        if static_file is None:
-            self.send_error(404)
-            return
-
-        filename, content_type = static_file
-        content = (STATIC_DIR / filename).read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(content)))
-        self.send_header("Cache-Control", "no-cache")
-        self.end_headers()
-        self.wfile.write(content)
+        super().do_GET()
 
     def send_json(self, payload: dict, status: int = 200) -> None:
         content = json.dumps(
@@ -352,20 +314,18 @@ def main() -> None:
 
     print(f"Loading {args.analysis} ...")
     data = AnalysisData(args.analysis, names_path)
-    handler = type("Handler", (VisualizerHandler,), {"data": data})
-    server = ThreadingHTTPServer((args.host, args.port), handler)
-    url = f"http://{args.host}:{server.server_address[1]}"
-    print(
-        f"Loaded {len(data.features):,} active features across "
-        f"{len(data.token_ids):,} tokens."
-    )
-    print(f"Open {url} (Ctrl+C to stop)")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nStopping visualizer.")
-    finally:
-        server.server_close()
+    handler = partial(VisualizerHandler, data=data)
+    with ThreadingHTTPServer((args.host, args.port), handler) as server:
+        url = f"http://{args.host}:{server.server_address[1]}"
+        print(
+            f"Loaded {len(data.features):,} active features across "
+            f"{len(data.token_ids):,} tokens."
+        )
+        print(f"Open {url} (Ctrl+C to stop)")
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            print("\nStopping visualizer.")
 
 
 if __name__ == "__main__":

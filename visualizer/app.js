@@ -1,5 +1,3 @@
-const PAGE_SIZE = 20;
-
 const ui = {
   list: document.querySelector("#feature-list"),
   count: document.querySelector("#result-count"),
@@ -10,7 +8,6 @@ const ui = {
 };
 
 let features = [];
-let metadata = {};
 
 function element(tag, className, text) {
   const result = document.createElement(tag);
@@ -40,12 +37,7 @@ async function fetchJson(url) {
   return payload;
 }
 
-function showError(message) {
-  ui.error.textContent = message;
-  ui.error.hidden = false;
-}
-
-function renderMetadata() {
+function renderMetadata(metadata) {
   const items = [
     ["Model", metadata.model_id || "—"],
     ["Tokens", metadata.processed_tokens ? compactNumber.format(metadata.processed_tokens) : "—"],
@@ -169,23 +161,6 @@ function renderOverview(feature, payload) {
   return overview;
 }
 
-function contextUrl(feature, view, offset = 0) {
-  return `/api/features/${feature.id}/contexts?view=${view}&offset=${offset}&limit=${PAGE_SIZE}`;
-}
-
-function updateViewControls(details, loading = false) {
-  const view = details.dataset.view;
-  details.querySelector(".context-title").textContent = view === "stratified"
-    ? "Stratified contexts"
-    : "Strongest contexts";
-  for (const button of details.querySelectorAll(".view-button")) {
-    const selected = button.dataset.view === view;
-    button.classList.toggle("selected", selected);
-    button.setAttribute("aria-pressed", String(selected));
-    button.disabled = loading;
-  }
-}
-
 function renderContextList(contexts, feature) {
   const list = element("div", "contexts");
   for (const context of contexts) list.append(renderContext(context, feature));
@@ -198,90 +173,49 @@ const sampleGroups = [
   ["Random positives", "5 random activating examples", ["Random positive"]],
 ];
 
-function renderView(details, feature, payload, view) {
-  const content = details.querySelector(".context-content");
+function renderView(content, feature, contexts, view) {
   if (view === "strongest") {
-    content.replaceChildren(renderContextList(payload.contexts, feature));
-    appendLoadMore(details, feature, payload);
+    content.replaceChildren(renderContextList(contexts, feature));
     return;
   }
 
-  if (!payload.contexts.length) {
+  if (!contexts.length) {
     content.replaceChildren(element("p", "empty-state", "Not enough activation data for a stratified sample."));
     return;
   }
 
   const fragment = document.createDocumentFragment();
   for (const [title, description, buckets] of sampleGroups) {
-    const contexts = payload.contexts.filter((context) => buckets.includes(context.sample.bucket));
+    const groupContexts = contexts.filter((context) => buckets.includes(context.sample.bucket));
     const section = element("section", "sample-group");
     const heading = element("header", "sample-heading");
     heading.append(element("h3", "", title), element("p", "", description));
-    section.append(heading, renderContextList(contexts, feature));
+    section.append(heading, renderContextList(groupContexts, feature));
     fragment.append(section);
   }
   content.replaceChildren(fragment);
 }
 
-function appendLoadMore(details, feature, payload) {
-  const nextOffset = payload.offset + payload.contexts.length;
-  if (nextOffset >= payload.context_count) return;
-
-  const button = element(
-    "button",
-    "load-more",
-    `Load ${Math.min(PAGE_SIZE, payload.context_count - nextOffset)} more`,
-  );
-  button.type = "button";
-  button.addEventListener("click", async () => {
-    button.disabled = true;
-    button.textContent = "Loading…";
-    try {
-      const next = await fetchJson(contextUrl(feature, "strongest", nextOffset));
-      if (details.dataset.view !== "strongest") return;
-      button.remove();
-      const list = details.querySelector(".context-content > .contexts");
-      for (const context of next.contexts) list.append(renderContext(context, feature));
-      appendLoadMore(details, feature, next);
-    } catch (error) {
-      button.disabled = false;
-      button.textContent = "Try again";
-      button.title = error.message;
-    }
-  });
-  details.querySelector(".context-content").append(button);
-}
-
-async function loadView(details, feature, view) {
-  if (details.dataset.view === view) return;
-  details.dataset.view = view;
-  updateViewControls(details, true);
-  const content = details.querySelector(".context-content");
-  content.replaceChildren(element("p", "loading", "Loading contexts…"));
-
-  try {
-    const payload = await fetchJson(contextUrl(feature, view));
-    if (details.dataset.view === view) renderView(details, feature, payload, view);
-  } catch (error) {
-    if (details.dataset.view === view) {
-      content.replaceChildren(element("p", "empty-state", `Could not load contexts: ${error.message}`));
-    }
-  } finally {
-    updateViewControls(details);
-  }
-}
-
-function renderContextBrowser(details, feature) {
-  const browser = element("section", "context-browser");
+function renderContextBrowser(feature, payload) {
+  const browser = element("section");
   const toolbar = element("header", "context-toolbar");
+  const title = element("h3");
   const switcher = element("div", "view-switch");
+  const content = element("div");
   switcher.setAttribute("role", "group");
   switcher.setAttribute("aria-label", "Context view");
   for (const [view, label] of [["strongest", "Strongest"], ["stratified", "Stratified"]]) {
     const button = element("button", "view-button", label);
     button.type = "button";
-    button.dataset.view = view;
-    button.addEventListener("click", () => loadView(details, feature, view));
+    button.addEventListener("click", () => {
+      title.textContent = `${label} contexts`;
+      for (const viewButton of switcher.children) {
+        const selected = viewButton === button;
+        viewButton.classList.toggle("selected", selected);
+        viewButton.setAttribute("aria-pressed", String(selected));
+      }
+      renderView(content, feature, payload.contexts[view], view);
+    });
     switcher.append(button);
   }
 
@@ -289,8 +223,9 @@ function renderContextBrowser(details, feature) {
   const legend = element("span", "legend", `0 — ${formatActivation(feature.max_activation)}`);
   legend.prepend(element("span", "legend-ramp"));
   controls.append(switcher, legend);
-  toolbar.append(element("h3", "context-title"), controls);
-  browser.append(toolbar, element("div", "context-content"));
+  toolbar.append(title, controls);
+  browser.append(toolbar, content);
+  switcher.firstElementChild.click();
   return browser;
 }
 
@@ -298,11 +233,8 @@ async function loadFeature(details, feature) {
   const body = details.querySelector(".feature-body");
   body.replaceChildren(element("p", "loading", "Loading feature…"));
   try {
-    const payload = await fetchJson(contextUrl(feature, "strongest"));
-    body.replaceChildren(renderOverview(feature, payload), renderContextBrowser(details, feature));
-    details.dataset.view = "strongest";
-    updateViewControls(details);
-    renderView(details, feature, payload, "strongest");
+    const payload = await fetchJson(`/api/features/${feature.id}`);
+    body.replaceChildren(renderOverview(feature, payload), renderContextBrowser(feature, payload));
     details.dataset.loaded = "true";
   } catch (error) {
     body.replaceChildren(element("p", "empty-state", `Could not load feature: ${error.message}`));
@@ -327,12 +259,12 @@ async function initialize() {
   try {
     const payload = await fetchJson("/api/summary");
     features = payload.features;
-    metadata = payload.metadata;
-    renderMetadata();
+    renderMetadata(payload.metadata);
     renderFeatureList();
   } catch (error) {
     ui.count.textContent = "Could not load analysis";
-    showError(error.message);
+    ui.error.textContent = error.message;
+    ui.error.hidden = false;
   }
 }
 
