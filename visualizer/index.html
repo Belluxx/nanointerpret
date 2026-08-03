@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>MechBox — Feature visualizer</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="wordmark" href="/" aria-label="MechBox feature visualizer">
+        <span class="mark" aria-hidden="true"></span>
+        <span>MechBox</span>
+      </a>
+      <span class="product-name">Feature visualizer</span>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">Sparse autoencoder analysis</p>
+          <h1 id="page-title">Features</h1>
+        </div>
+        <dl class="dataset-meta" id="dataset-meta" aria-label="Analysis metadata">
+          <div><dt>Model</dt><dd>Loading…</dd></div>
+        </dl>
+      </section>
+
+      <section class="browser" aria-label="Feature browser">
+        <div class="controls">
+          <label class="search">
+            <span class="visually-hidden">Search features</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="6.5"></circle>
+              <path d="m16 16 4 4"></path>
+            </svg>
+            <input
+              id="search-input"
+              type="search"
+              placeholder="Search by title or feature ID"
+              autocomplete="off"
+            />
+          </label>
+
+          <label class="sort-control">
+            <span>Sort</span>
+            <select id="sort-select">
+              <option value="id">Feature ID</option>
+              <option value="max">Peak activation</option>
+              <option value="count">Activation count</option>
+              <option value="title">Title</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="list-heading">
+          <span id="result-count" role="status">Loading analysis…</span>
+          <span class="column-labels" aria-hidden="true">
+            <span>Activations</span><span>Peak</span>
+          </span>
+        </div>
+
+        <div id="error-message" class="error-message" hidden></div>
+        <div id="feature-list" class="feature-list" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

@@ -35,3 +35,12 @@ python3 analysis.py --sae-dir artifacts/1B
 
 python3 interpret_features.py --analysis artifacts/1B/analysis.npz --base-url https://openrouter.ai/api/v1 --api-key [API_KEY] --model openai/gpt-5.6-luna --no-reasoning --concurrent 8
 ```
+
+4. Browse the features and their strongest activation contexts:
+
+```py
+python3 visualize.py --analysis artifacts/1B/analysis.npz
+```
+
+Then open `http://127.0.0.1:8000`. The visualizer automatically loads
+`feature_names.jsonl` from the analysis directory when it is available.
