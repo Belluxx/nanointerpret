@@ -36,8 +36,8 @@ python3 analysis.py --sae-dir artifacts/1B
 python3 interpret_features.py --analysis artifacts/1B/analysis.npz --base-url https://openrouter.ai/api/v1 --api-key [API_KEY] --model openai/gpt-5.6-luna --no-reasoning --concurrent 8
 ```
 
-> [!NOTE]
-> If you want you can run it without `--no-reasoning` and it will produce higher quality feature titles but at a MUCH higher API cost (100$ to 2k$ depending on how hard the model thinks, instead of 5$)
+> [!TIP]
+> If you want you can run it without `--no-reasoning` and it will produce higher quality feature titles but at a **MUCH** higher API cost (100$ to 2k$ depending on how hard the model thinks, instead of 5$)
 
 4. Browse the features and their strongest activation contexts:
 
