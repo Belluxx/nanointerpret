@@ -145,16 +145,20 @@ def feature_prompt(examples: list[Example]) -> str:
         "Infer the feature's core concept from the examples below.\n"
         "Focus primarily on high-activation examples, but use weaker examples to "
         "detect broader meanings or polysemanticity.\n"
-        "The token inside << >> is the token whose activation is reported."
+        "The token inside << >> is the token that activates the feature."
     ]
-    for index, example in enumerate(examples, start=1):
-        sections.append(
-            f"Example {index}\n"
-            f"Bucket: {example.bucket}\n"
-            f"Activation: {example.activation:.6g}\n"
-            f"Percentile: {example.percentile:.1f}\n"
-            f"Text: {example.text}"
-        )
+    categories = (
+        ("Top activations", "Top"),
+        ("Very high activations", "90-99"),
+        ("High activations", "75-90"),
+        ("Medium activations", "50-75"),
+        ("Low activations", "25-50"),
+        ("Random activations", "Random positive"),
+    )
+    for heading, bucket in categories:
+        texts = [example.text for example in examples if example.bucket == bucket]
+        if texts:
+            sections.append(f"{heading}:\n" + "\n".join(f"- {text}" for text in texts))
     sections.append(
         "Give this feature a very concise, specific title. "
         "Return only the plain title, with no quotes, label or explanation."

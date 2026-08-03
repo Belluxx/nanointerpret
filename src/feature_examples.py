@@ -7,6 +7,7 @@ import numpy as np
 
 
 DEFAULT_EXAMPLE_SEED = 42
+STRATIFIED_EXAMPLES_PER_BUCKET = 4
 STRATIFIED_BUCKETS = (
     (25, 50, "25-50"),
     (50, 75, "50-75"),
@@ -104,10 +105,13 @@ def choose_activation_examples(
     for lower, upper, label in STRATIFIED_BUCKETS:
         start = int(np.searchsorted(rank_percentiles, lower, side="left"))
         stop = int(np.searchsorted(rank_percentiles, upper, side="left"))
-        if stop - start < 2:
+        if stop - start < STRATIFIED_EXAMPLES_PER_BUCKET:
             return None
         bucket_examples = select_examples(
-            range(start, stop), 2, label, randomize=True
+            range(start, stop),
+            STRATIFIED_EXAMPLES_PER_BUCKET,
+            label,
+            randomize=True,
         )
         if bucket_examples is None:
             return None
