@@ -183,7 +183,7 @@ def feature_prompt(examples: list[Example]) -> str:
             f"Text: {example.text}"
         )
     sections.append(
-        "Give this feature a concise, specific title. "
+        "Give this feature a very concise, specific title. "
         "Return only the plain title, with no quotes, label or explanation."
     )
     return "\n\n".join(sections)
