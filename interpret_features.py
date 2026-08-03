@@ -174,7 +174,7 @@ def request_title(
     max_tokens: int | None = None,
 ) -> str:
     reasoning_options = {} if reasoning else {"reasoning_effort": "none"}
-    max_tokens = max_tokens or (32_768 if reasoning else 32)
+    max_tokens = max_tokens or (32_768 if reasoning else 64)
     for retry in range(MAX_RETRIES + 1):
         try:
             completion = client.chat.completions.create(
