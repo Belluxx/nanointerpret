@@ -5,6 +5,8 @@ import json
 import os
 import random
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,6 +17,8 @@ from transformers import AutoTokenizer
 
 
 ANALYSIS_PATH = Path("artifacts/sae_gemma_3_270m/analysis.npz")
+MAX_RETRIES = 3
+RETRY_DELAY_SECONDS = 3
 
 
 @dataclass(frozen=True)
@@ -49,6 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--feature-ids", type=nonnegative_int, nargs="+", default=None, help="Interpret only these features. Default: every SAE feature.")
     parser.add_argument("--no-reasoning", action="store_true", help="Disable model reasoning. Reasoning is enabled by default.")
     parser.add_argument("--max-tokens", type=positive_int, default=None, help="Completion-token budget. Default: 32768, or 32 with --no-reasoning.")
+    parser.add_argument("--concurrent", type=positive_int, default=1, help="Number of concurrent interpretation requests. Default: 1.")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -212,6 +217,24 @@ def request_title(
     return title
 
 
+def request_title_with_retries(
+    client: OpenAI,
+    model: str,
+    prompt: str,
+    reasoning: bool = True,
+    max_tokens: int | None = None,
+) -> str:
+    for retry in range(MAX_RETRIES + 1):
+        try:
+            return request_title(client, model, prompt, reasoning, max_tokens)
+        except Exception:
+            if retry == MAX_RETRIES:
+                raise
+            time.sleep(RETRY_DELAY_SECONDS)
+
+    raise RuntimeError("unreachable")
+
+
 def main() -> None:
     args = parse_args()
     output_path = args.output or args.analysis.with_name("feature_names.jsonl")
@@ -243,42 +266,51 @@ def main() -> None:
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = output_path.with_suffix(output_path.suffix + ".tmp")
+
+        def interpret_feature(feature_id: int) -> tuple[int, str, bool]:
+            start, stop = offsets[feature_id : feature_id + 2]
+            activation_indices = feature_order[start:stop]
+            examples = choose_examples(
+                feature_id,
+                activation_indices,
+                values,
+                token_ids,
+                context_ptr,
+                row_ptr,
+                tokenizer,
+                args.seed,
+            )
+            if examples is None:
+                return feature_id, "Insufficient activation data", True
+            title = request_title_with_retries(
+                client,
+                args.model,
+                feature_prompt(examples),
+                reasoning=not args.no_reasoning,
+                max_tokens=args.max_tokens,
+            )
+            return feature_id, title, False
+
         insufficient = 0
         with temporary.open("w", encoding="utf-8") as output:
-            for feature_id in tqdm(
-                requested, unit="feature", desc="Interpret", dynamic_ncols=True
-            ):
-                start, stop = offsets[feature_id : feature_id + 2]
-                activation_indices = feature_order[start:stop]
-                examples = choose_examples(
-                    feature_id,
-                    activation_indices,
-                    values,
-                    token_ids,
-                    context_ptr,
-                    row_ptr,
-                    tokenizer,
-                    args.seed,
-                )
-                if examples is None:
-                    title = "Insufficient activation data"
-                    insufficient += 1
-                else:
-                    title = request_title(
-                        client,
-                        args.model,
-                        feature_prompt(examples),
-                        reasoning=not args.no_reasoning,
-                        max_tokens=args.max_tokens,
+            with ThreadPoolExecutor(max_workers=args.concurrent) as executor:
+                results = executor.map(interpret_feature, requested)
+                for feature_id, title, was_insufficient in tqdm(
+                    results,
+                    total=len(requested),
+                    unit="feature",
+                    desc="Interpret",
+                    dynamic_ncols=True,
+                ):
+                    insufficient += was_insufficient
+                    output.write(
+                        json.dumps(
+                            {"feature_id": feature_id, "title": title},
+                            ensure_ascii=False,
+                        )
+                        + "\n"
                     )
-                output.write(
-                    json.dumps(
-                        {"feature_id": feature_id, "title": title},
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-                output.flush()
+                    output.flush()
         os.replace(temporary, output_path)
 
     print(f"Saved {len(requested):,} feature names to {output_path}")
