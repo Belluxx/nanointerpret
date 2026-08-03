@@ -40,6 +40,19 @@ class ResidualCacheSpec:
     model_dtype: str
 
 
+def token_cache_paths(spec: TokenCacheSpec) -> tuple[Path, Path, Path]:
+    safe_model = spec.model_id.replace("/", "--")
+    stem = (
+        f"{safe_model}_{spec.dataset_config}_{spec.train_tokens}_"
+        f"{spec.validation_tokens}"
+    )
+    return (
+        spec.cache_dir / f"{stem}_train.uint32",
+        spec.cache_dir / f"{stem}_validation.uint32",
+        spec.cache_dir / f"{stem}_metadata.json",
+    )
+
+
 def residual_cache_paths(spec: ResidualCacheSpec) -> tuple[Path, Path, Path]:
     safe_model = spec.model_id.replace("/", "--")
     safe_dataset = spec.dataset_id.replace("/", "--")
@@ -103,14 +116,7 @@ def token_cache_is_valid(
 
 
 def build_token_cache(tokenizer, spec: TokenCacheSpec) -> tuple[Path, Path]:
-    safe_model = spec.model_id.replace("/", "--")
-    stem = (
-        f"{safe_model}_{spec.dataset_config}_{spec.train_tokens}_"
-        f"{spec.validation_tokens}"
-    )
-    train_path = spec.cache_dir / f"{stem}_train.uint32"
-    validation_path = spec.cache_dir / f"{stem}_validation.uint32"
-    metadata_path = spec.cache_dir / f"{stem}_metadata.json"
+    train_path, validation_path, metadata_path = token_cache_paths(spec)
     spec.cache_dir.mkdir(parents=True, exist_ok=True)
     if token_cache_is_valid(train_path, validation_path, metadata_path, spec):
         print(f"using token cache at {spec.cache_dir}")
