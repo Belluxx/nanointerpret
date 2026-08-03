@@ -56,7 +56,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, help="Output JSONL path. Default: next to the analysis artifact.")
     parser.add_argument("--feature-ids", type=nonnegative_int, nargs="+", help="Interpret only these features. Default: every SAE feature.")
     parser.add_argument("--no-reasoning", action="store_true", help="Disable model reasoning. Reasoning is enabled by default.")
-    parser.add_argument("--max-tokens", type=positive_int, help="Completion-token budget. Default: 32768, or 32 with --no-reasoning.")
+    parser.add_argument("--max-tokens", type=positive_int, help="Completion-token budget. Default: 32768, or 64 with --no-reasoning.")
     parser.add_argument("--concurrent", type=positive_int, default=1, help="Number of concurrent interpretation requests. Default: 1.")
     parser.add_argument("--seed", type=int, default=DEFAULT_EXAMPLE_SEED)
     return parser.parse_args()
