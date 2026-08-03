@@ -22,7 +22,7 @@ from src.feature_examples import (
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 3
 INSUFFICIENT_TITLE = "Insufficient activation data"
-MAX_PREFIX_TOKENS = 96
+MAX_PREFIX_TOKENS = 64
 
 
 @dataclass(frozen=True)
