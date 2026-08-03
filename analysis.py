@@ -141,6 +141,29 @@ def context_activations(indices: Tensor, values: Tensor) -> list[list[int | floa
     return result
 
 
+def display_context(
+    tokenizer, token_ids: list[int]
+) -> tuple[str, list[str], list[list[int]], list[int]]:
+    special_tokens_mask = tokenizer.get_special_tokens_mask(
+        token_ids, already_has_special_tokens=True
+    )
+    tokens = [
+        tokenizer.decode(
+            [token_id],
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+        for token_id in token_ids
+    ]
+    offsets = []
+    cursor = 0
+    for token in tokens:
+        start = cursor
+        cursor += len(token)
+        offsets.append([start, cursor])
+    return "".join(tokens), tokens, offsets, special_tokens_mask
+
+
 @torch.inference_mode()
 def write_analysis(
     output_path: Path,
@@ -160,7 +183,6 @@ def write_analysis(
     token_count = len(evaluation_tokens)
     metadata = {
         "type": "metadata",
-        "schema_version": 1,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "model_id": config["model_id"],
         "sae_checkpoint": str(checkpoint_path),
@@ -223,15 +245,21 @@ def write_analysis(
                 for row, context_id in enumerate(context_ids):
                     length = lengths[row]
                     token_ids = input_ids[row, :length].tolist()
+                    text, tokens, offsets, special_tokens_mask = display_context(
+                        tokenizer, token_ids
+                    )
                     record = {
                         "type": "context",
                         "context_id": int(context_id),
-                        "text": tokenizer.decode(
-                            token_ids,
-                            skip_special_tokens=False,
-                            clean_up_tokenization_spaces=False,
+                        "source_id": (
+                            f"{config['dataset_id']}/{config['dataset_config']}/"
+                            f"validation/context-{context_id}"
                         ),
+                        "text": text,
                         "token_ids": token_ids,
+                        "tokens": tokens,
+                        "offsets": offsets,
+                        "special_tokens_mask": special_tokens_mask,
                         "activations": context_activations(
                             indices[residual_offset : residual_offset + length],
                             values[residual_offset : residual_offset + length],
