@@ -1,5 +1,8 @@
 # Experiments
 
+> [!CAUTION]
+> Using the `--cache-activation` flag makes it possible to save the LLM activations and reuse them during ablation tests, however they get saved to disk and take up a LOT of space (~1.3GB for each 1M tokens), be careful with it. If you don't have a lot of space, remove the flag.
+
 ## Pre-bias subtraction and AuxK are both useful
 
 All runs used a Top-K SAE with `K=16`, width multiplier `16`, 300M training tokens, and 10M validation tokens. Gradient clipping was disabled unless stated otherwise.
