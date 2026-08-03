@@ -318,6 +318,146 @@ h1 {
   background: #fffaf8;
 }
 
+.feature-introduction {
+  margin-bottom: 24px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #f0d9d1;
+}
+
+.feature-introduction-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+}
+
+.feature-introduction-eyebrow {
+  margin: 0 0 5px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.feature-introduction-title {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(24px, 3vw, 34px);
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  line-height: 1.08;
+}
+
+.feature-facts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 22px;
+  margin: 0;
+  padding: 0;
+  color: var(--muted);
+  list-style: none;
+  font-size: 12px;
+}
+
+.feature-facts strong {
+  color: var(--ink);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+}
+
+.feature-facts small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.characteristic-tokens {
+  margin-top: 18px;
+}
+
+.characteristic-tokens-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 10px;
+}
+
+.characteristic-tokens-heading h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.characteristic-tokens-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.activation-token-groups {
+  display: grid;
+  gap: 10px;
+}
+
+.activation-token-group {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.activation-token-group-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+}
+
+.activation-token-group-heading h4 {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.activation-token-group-heading span {
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 9px;
+}
+
+.characteristic-token-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.characteristic-token {
+  max-width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  cursor: help;
+}
+
+.characteristic-token-name {
+  display: block;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
 .context-summary {
   display: flex;
   flex-wrap: wrap;
@@ -327,6 +467,11 @@ h1 {
   margin-bottom: 16px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.context-summary-title {
+  color: var(--ink);
+  font-weight: 650;
 }
 
 .legend {
@@ -526,6 +671,35 @@ h1 {
 
   .feature-body {
     padding: 18px 12px 22px;
+  }
+
+  .feature-introduction-heading {
+    display: block;
+  }
+
+  .feature-facts {
+    justify-content: flex-start;
+    margin-top: 12px;
+  }
+
+  .characteristic-tokens-heading {
+    display: block;
+  }
+
+  .characteristic-tokens-heading p {
+    margin-top: 4px;
+  }
+
+  .activation-token-groups {
+    gap: 12px;
+  }
+
+  .activation-token-group {
+    display: block;
+  }
+
+  .activation-token-group-heading {
+    margin-bottom: 6px;
   }
 
   .context-header {

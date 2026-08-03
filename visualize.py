@@ -17,6 +17,8 @@ STATIC_DIR = Path(__file__).with_name("visualizer")
 CONTEXT_ROUTE = re.compile(r"^/api/features/(\d+)/contexts$")
 PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
+TOKENS_PER_PERCENTILE = 4
+TOKEN_PERCENTILES = (("high", 95), ("med", 50), ("low", 25))
 
 
 def positive_int(value: str) -> int:
@@ -145,6 +147,58 @@ class AnalysisData:
             self.row_ptr, activation_indices, side="right"
         ) - 1
         activation_values = self.values[activation_indices]
+        activating_token_ids = self.token_ids[token_positions]
+        unique_token_ids, token_groups, token_counts = np.unique(
+            activating_token_ids, return_inverse=True, return_counts=True
+        )
+        token_maxima = np.zeros(len(unique_token_ids), dtype=np.float32)
+        np.maximum.at(token_maxima, token_groups, activation_values)
+        token_sums = np.bincount(token_groups, weights=activation_values)
+        token_means = token_sums / token_counts
+
+        activation_token_groups = []
+        used_token_groups = set()
+        for level, percentile in TOKEN_PERCENTILES:
+            percentile_activation = float(
+                np.percentile(activation_values, percentile)
+            )
+            nearby_activations = np.argsort(
+                np.abs(activation_values - percentile_activation), kind="stable"
+            )
+            selected_token_groups = []
+            for allow_reuse in (False, True):
+                for activation_index in nearby_activations:
+                    token_group = int(token_groups[activation_index])
+                    if token_group in selected_token_groups:
+                        continue
+                    if not allow_reuse and token_group in used_token_groups:
+                        continue
+                    selected_token_groups.append(token_group)
+                    if len(selected_token_groups) == TOKENS_PER_PERCENTILE:
+                        break
+                if len(selected_token_groups) == TOKENS_PER_PERCENTILE:
+                    break
+            used_token_groups.update(selected_token_groups)
+
+            activation_token_groups.append(
+                {
+                    "level": level,
+                    "percentile": percentile,
+                    "tokens": [
+                        {
+                            "token_id": int(unique_token_ids[index]),
+                            "token": self.decode_token(
+                                int(unique_token_ids[index])
+                            ),
+                            "activation_count": int(token_counts[index]),
+                            "mean_activation": float(token_means[index]),
+                            "max_activation": float(token_maxima[index]),
+                        }
+                        for index in selected_token_groups
+                    ],
+                }
+            )
+
         context_ids = np.searchsorted(
             self.context_ptr, token_positions, side="right"
         ) - 1
@@ -194,7 +248,10 @@ class AnalysisData:
         return {
             "feature_id": feature_id,
             "activation_count": int(len(activation_indices)),
+            "mean_activation": float(np.mean(activation_values)),
             "context_count": int(len(grouped_context_ids)),
+            "unique_token_count": int(len(unique_token_ids)),
+            "activation_token_groups": activation_token_groups,
             "offset": offset,
             "contexts": contexts,
         }

@@ -30,6 +30,18 @@ function formatActivation(value) {
   return value.toPrecision(3);
 }
 
+function formatPercent(numerator, denominator) {
+  if (!denominator) return "—";
+  const percent = (100 * numerator) / denominator;
+  if (percent > 0 && percent < 0.01) return "<0.01%";
+  if (percent >= 10) return `${percent.toFixed(1)}%`;
+  return `${percent.toFixed(2)}%`;
+}
+
+function formatToken(token) {
+  return token;
+}
+
 async function getJson(url) {
   const response = await fetch(url);
   const payload = await response.json();
@@ -146,6 +158,68 @@ function renderContext(context, feature) {
   return card;
 }
 
+function renderFeatureIntroduction(feature, payload) {
+  const section = el("section", "feature-introduction");
+  const heading = el("div", "feature-introduction-heading");
+  const headingText = el("div");
+  headingText.append(
+    el("p", "feature-introduction-eyebrow", `Feature #${feature.id}`),
+    el("h2", "feature-introduction-title", feature.title || `Feature ${feature.id}`),
+  );
+  const facts = el("ul", "feature-facts");
+  const factItems = [
+    [
+      payload.activation_count.toLocaleString(),
+      "activating tokens",
+      `(${formatPercent(payload.activation_count, state.metadata.processed_tokens)})`,
+    ],
+    [
+      payload.context_count.toLocaleString(),
+      "contexts",
+      `(${formatPercent(payload.context_count, state.metadata.context_count)})`,
+    ],
+    [formatActivation(feature.max_activation), "peak activation", ""],
+  ];
+  for (const [value, label, note] of factItems) {
+    const item = el("li");
+    item.append(el("strong", "", value), ` ${label}`);
+    if (note) item.append(el("small", "", ` ${note}`));
+    facts.append(item);
+  }
+  heading.append(headingText, facts);
+
+  const tokensSection = el("section", "characteristic-tokens");
+  const tokensHeading = el("div", "characteristic-tokens-heading");
+  tokensHeading.append(
+    el("h3", "", "Activating tokens"),
+    el("p", "", "Hover for details"),
+  );
+  const tokenGroups = el("div", "activation-token-groups");
+  const levelNames = { high: "High", med: "Med", low: "Low" };
+  for (const group of payload.activation_token_groups) {
+    const groupSection = el("section", "activation-token-group");
+    const groupHeading = el("div", "activation-token-group-heading");
+    groupHeading.append(
+      el("h4", "", `${levelNames[group.level]} activation tokens`),
+      el("span", "", `P${group.percentile}`),
+    );
+    const tokenList = el("ul", "characteristic-token-list");
+    for (const token of group.tokens) {
+      const item = el("li", "characteristic-token");
+      const tokenName = el("code", "characteristic-token-name", formatToken(token.token));
+      const hits = `${token.activation_count.toLocaleString()} ${token.activation_count === 1 ? "hit" : "hits"}`;
+      item.title = `${hits} · mean ${formatActivation(token.mean_activation)} · peak ${formatActivation(token.max_activation)}`;
+      item.append(tokenName);
+      tokenList.append(item);
+    }
+    groupSection.append(groupHeading, tokenList);
+    tokenGroups.append(groupSection);
+  }
+  tokensSection.append(tokensHeading, tokenGroups);
+  section.append(heading, tokensSection);
+  return section;
+}
+
 async function loadContextPage(details, feature, offset, button) {
   if (button) {
     button.disabled = true;
@@ -162,13 +236,7 @@ async function loadContextPage(details, feature, offset, button) {
     body.replaceChildren();
     const summary = el("div", "context-summary");
     summary.append(
-      el(
-        "span",
-        "",
-        `${payload.context_count.toLocaleString()} contexts · `
-          + `${payload.activation_count.toLocaleString()} active tokens · `
-          + "sorted by peak activation",
-      ),
+      el("span", "context-summary-title", "Strongest activation contexts"),
     );
     const legend = el("span", "legend");
     legend.append(
@@ -178,7 +246,7 @@ async function loadContextPage(details, feature, offset, button) {
     );
     summary.append(legend);
     contexts = el("div", "contexts");
-    body.append(summary, contexts);
+    body.append(renderFeatureIntroduction(feature, payload), summary, contexts);
   }
 
   for (const context of payload.contexts) {

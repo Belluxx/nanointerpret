@@ -38,7 +38,7 @@ class AnalysisDataTest(unittest.TestCase):
         np.savez_compressed(
             self.analysis_path,
             metadata=json.dumps(metadata),
-            token_ids=np.arange(10, 18, dtype=np.uint32),
+            token_ids=np.array([10, 11, 10, 13, 14, 10, 16, 17], dtype=np.uint32),
             context_ptr=np.array([0, 4, 8], dtype=np.uint32),
             row_ptr=np.array([0, 1, 2, 4, 4, 5, 6, 7, 8], dtype=np.uint32),
             feature_ids=np.array([1, 2, 1, 2, 1, 1, 2, 1], dtype=np.uint32),
@@ -72,10 +72,37 @@ class AnalysisDataTest(unittest.TestCase):
         )
         self.assertAlmostEqual(result["contexts"][0]["peak_activation"], 0.9)
         self.assertEqual(
-            result["contexts"][0]["tokens"], ["<10>", "<11>", "<12>", "<13>"]
+            result["contexts"][0]["tokens"], ["<10>", "<11>", "<10>", "<13>"]
         )
         np.testing.assert_allclose(
             result["contexts"][0]["activations"], [0.2, 0.0, 0.9, 0.0]
+        )
+
+    def test_contexts_include_feature_intro_statistics(self):
+        result = self.data.feature_contexts(1)
+
+        self.assertEqual(result["unique_token_count"], 3)
+        self.assertAlmostEqual(result["mean_activation"], 0.48)
+        self.assertEqual(
+            [group["level"] for group in result["activation_token_groups"]],
+            ["high", "med", "low"],
+        )
+        self.assertEqual(
+            [group["percentile"] for group in result["activation_token_groups"]],
+            [95, 50, 25],
+        )
+        high_tokens = result["activation_token_groups"][0]["tokens"]
+        self.assertEqual([token["token_id"] for token in high_tokens], [10, 14, 17])
+        self.assertEqual(high_tokens[0]["token"], "<10>")
+        token_10 = next(token for token in high_tokens if token["token_id"] == 10)
+        self.assertEqual(
+            token_10["activation_count"], 3
+        )
+        self.assertAlmostEqual(
+            token_10["mean_activation"], 0.4
+        )
+        self.assertAlmostEqual(
+            token_10["max_activation"], 0.9
         )
 
     def test_context_pagination_preserves_peak_order(self):
