@@ -50,7 +50,7 @@ def parse_args() -> argparse.Namespace:
         "--output",
         type=Path,
         default=None,
-        help="Output JSONL path. Default: <sae-dir>/analysis.jsonl.",
+        help="Output NPZ path. Default: <sae-dir>/analysis.npz.",
     )
     parser.add_argument(
         "--max-tokens",
@@ -127,41 +127,16 @@ def encode_residuals(
     return torch.cat(indices), torch.cat(values)
 
 
-def context_activations(indices: Tensor, values: Tensor) -> list[list[int | float]]:
-    result: list[list[int | float]] = []
-    for token_position, (token_indices, token_values) in enumerate(
-        zip(indices, values, strict=True)
-    ):
-        firing = token_values > FIRING_THRESHOLD
-        pairs = zip(token_indices[firing].tolist(), token_values[firing].tolist())
-        result.extend(
-            [token_position, int(feature_id), float(value)]
-            for feature_id, value in sorted(pairs)
-        )
-    return result
-
-
-def display_context(
-    tokenizer, token_ids: list[int]
-) -> tuple[str, list[str], list[list[int]], list[int]]:
-    special_tokens_mask = tokenizer.get_special_tokens_mask(
-        token_ids, already_has_special_tokens=True
-    )
-    tokens = [
-        tokenizer.decode(
-            [token_id],
-            skip_special_tokens=True,
-            clean_up_tokenization_spaces=False,
-        )
-        for token_id in token_ids
-    ]
-    offsets = []
-    cursor = 0
-    for token in tokens:
-        start = cursor
-        cursor += len(token)
-        offsets.append([start, cursor])
-    return "".join(tokens), tokens, offsets, special_tokens_mask
+def csr_activations(
+    indices: Tensor, values: Tensor
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    sorted_ids, order = indices.sort(dim=1)
+    sorted_values = values.gather(1, order)
+    firing = sorted_values > FIRING_THRESHOLD
+    counts = firing.sum(dim=1).numpy().astype(np.uint32, copy=False)
+    feature_ids = sorted_ids[firing].numpy().astype(np.uint32, copy=False)
+    active_values = sorted_values[firing].numpy().astype(np.float32, copy=False)
+    return counts, feature_ids, active_values
 
 
 @torch.inference_mode()
@@ -182,7 +157,7 @@ def write_analysis(
     context_size = int(config["context_size"])
     token_count = len(evaluation_tokens)
     metadata = {
-        "type": "metadata",
+        "format": "csr",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "model_id": config["model_id"],
         "sae_checkpoint": str(checkpoint_path),
@@ -204,21 +179,32 @@ def write_analysis(
         "activation_scale": float(config["activation_scale"]),
         "firing_threshold": FIRING_THRESHOLD,
         "activation_type": "topk_post_relu",
-        "activation_columns": [
-            "token_position",
-            "feature_id",
-            "raw_activation",
-        ],
         "device": str(device),
         "model_dtype": config["model_dtype"],
     }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = output_path.with_suffix(output_path.suffix + ".tmp")
+    feature_temporary = temporary.with_suffix(temporary.suffix + ".feature_ids")
+    values_temporary = temporary.with_suffix(temporary.suffix + ".values")
+    pointer_dtype = (
+        np.uint32
+        if token_count * int(config["k"]) <= np.iinfo(np.uint32).max
+        else np.uint64
+    )
+    row_ptr = np.empty(token_count + 1, dtype=pointer_dtype)
+    row_ptr[0] = 0
+    context_ptr = np.append(
+        np.arange(0, token_count, context_size, dtype=pointer_dtype),
+        np.array([token_count], dtype=pointer_dtype),
+    )
     progress = tqdm(total=token_count, unit="tok", desc="Analyze", dynamic_ncols=True)
     try:
-        with temporary.open("w") as output:
-            output.write(json.dumps(metadata, separators=(",", ":")) + "\n")
+        processed_tokens = 0
+        active_count = 0
+        with feature_temporary.open("wb") as feature_output, values_temporary.open(
+            "wb"
+        ) as values_output:
             batches = iter_context_batches(
                 evaluation_tokens,
                 context_size,
@@ -227,7 +213,7 @@ def write_analysis(
                 shuffle=False,
                 seed=0,
             )
-            for input_ids, attention_mask, context_ids in batches:
+            for input_ids, attention_mask, _context_ids in batches:
                 device_input_ids = input_ids.to(device, non_blocking=True)
                 device_attention_mask = attention_mask.to(device, non_blocking=True)
                 residuals = capture(
@@ -239,38 +225,59 @@ def write_analysis(
                     float(config["activation_scale"]),
                     int(config["sae_batch_size"]),
                 )
+                counts, feature_ids, active_values = csr_activations(indices, values)
+                batch_tokens = len(counts)
+                cumulative = np.cumsum(counts, dtype=pointer_dtype)
+                row_ptr[
+                    processed_tokens + 1 : processed_tokens + batch_tokens + 1
+                ] = active_count + cumulative
+                feature_ids.tofile(feature_output)
+                active_values.tofile(values_output)
+                processed_tokens += batch_tokens
+                active_count += len(feature_ids)
+                progress.update(batch_tokens)
 
-                lengths = attention_mask.sum(dim=1).tolist()
-                residual_offset = 0
-                for row, context_id in enumerate(context_ids):
-                    length = lengths[row]
-                    token_ids = input_ids[row, :length].tolist()
-                    text, tokens, offsets, special_tokens_mask = display_context(
-                        tokenizer, token_ids
-                    )
-                    record = {
-                        "type": "context",
-                        "context_id": int(context_id),
-                        "source_id": (
-                            f"{config['dataset_id']}/{config['dataset_config']}/"
-                            f"validation/context-{context_id}"
-                        ),
-                        "text": text,
-                        "token_ids": token_ids,
-                        "tokens": tokens,
-                        "offsets": offsets,
-                        "special_tokens_mask": special_tokens_mask,
-                        "activations": context_activations(
-                            indices[residual_offset : residual_offset + length],
-                            values[residual_offset : residual_offset + length],
-                        ),
-                    }
-                    output.write(json.dumps(record, separators=(",", ":")) + "\n")
-                    progress.update(length)
-                    residual_offset += length
+        if processed_tokens != token_count:
+            raise RuntimeError(
+                f"processed {processed_tokens:,} tokens; expected {token_count:,}"
+            )
+
+        feature_ids = (
+            np.memmap(
+                feature_temporary,
+                mode="r",
+                dtype=np.uint32,
+                shape=(active_count,),
+            )
+            if active_count
+            else np.empty(0, dtype=np.uint32)
+        )
+        active_values = (
+            np.memmap(
+                values_temporary,
+                mode="r",
+                dtype=np.float32,
+                shape=(active_count,),
+            )
+            if active_count
+            else np.empty(0, dtype=np.float32)
+        )
+        with temporary.open("wb") as output:
+            np.savez_compressed(
+                output,
+                metadata=json.dumps(metadata, separators=(",", ":")),
+                token_ids=np.asarray(evaluation_tokens, dtype=np.uint32),
+                context_ptr=context_ptr,
+                row_ptr=row_ptr,
+                feature_ids=feature_ids,
+                values=active_values,
+            )
         os.replace(temporary, output_path)
     finally:
         progress.close()
+        temporary.unlink(missing_ok=True)
+        feature_temporary.unlink(missing_ok=True)
+        values_temporary.unlink(missing_ok=True)
 
 
 def main() -> None:
@@ -314,7 +321,7 @@ def main() -> None:
         )
 
     sae = load_sae(args.sae_dir, config, device)
-    output_path = args.output or args.sae_dir / "analysis.jsonl"
+    output_path = args.output or args.sae_dir / "analysis.npz"
     model_batch_size = args.model_batch_size or int(config["model_batch_size"])
     print(
         f"Device: {device} | Evaluation: {token_count:,} tokens | "
