@@ -133,20 +133,19 @@ function renderContext(context, feature) {
 
 function renderOverview(feature, payload) {
   const overview = element("section", "feature-overview");
-  const facts = element("ul", "feature-facts");
-  for (const fact of [
-    `${payload.activation_count.toLocaleString()} activating tokens`,
-    `${payload.context_count.toLocaleString()} contexts`,
-    `${formatActivation(feature.max_activation)} peak activation`,
-  ]) {
-    facts.append(element("li", "", fact));
-  }
-
   const tokenSummary = element("div", "token-summary");
   tokenSummary.append(element("h3", "", "Characteristic tokens"));
   for (const group of payload.token_groups) {
     const row = element("div", "token-group");
-    row.append(element("span", "token-percentile", `P${group.percentile}`));
+    const tier = group.percentile === 95
+      ? "High"
+      : group.percentile === 50 ? "Med" : "Low";
+    const tierLabel = element("div", "token-tier");
+    tierLabel.append(
+      element("strong", "token-tier-name", tier),
+      element("span", "token-percentile", `P${group.percentile}`),
+    );
+    row.append(tierLabel);
     const tokenList = element("div", "token-list");
     for (const token of group.tokens) {
       const tokenName = element("code", "token-name", token.token);
@@ -157,7 +156,21 @@ function renderOverview(feature, payload) {
     tokenSummary.append(row);
   }
 
-  overview.append(facts, tokenSummary);
+  const facts = element("dl", "feature-facts");
+  for (const [label, value] of [
+    ["Activating tokens", payload.activation_count.toLocaleString()],
+    ["Contexts", payload.context_count.toLocaleString()],
+    ["Peak activation", formatActivation(feature.max_activation)],
+  ]) {
+    const fact = element("div", "feature-fact");
+    fact.append(
+      element("dt", "", label),
+      element("dd", "", value),
+    );
+    facts.append(fact);
+  }
+
+  overview.append(tokenSummary, facts);
   return overview;
 }
 
