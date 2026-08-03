@@ -1,27 +1,28 @@
 const PAGE_SIZE = 20;
 
-const state = {
-  features: [],
-  metadata: {},
+const ui = {
+  list: document.querySelector("#feature-list"),
+  count: document.querySelector("#result-count"),
+  search: document.querySelector("#search-input"),
+  sort: document.querySelector("#sort-select"),
+  metadata: document.querySelector("#dataset-meta"),
+  error: document.querySelector("#error-message"),
 };
 
-const featureList = document.querySelector("#feature-list");
-const resultCount = document.querySelector("#result-count");
-const searchInput = document.querySelector("#search-input");
-const sortSelect = document.querySelector("#sort-select");
-const datasetMeta = document.querySelector("#dataset-meta");
-const errorMessage = document.querySelector("#error-message");
+let features = [];
+let metadata = {};
 
-function el(tag, className, text) {
-  const element = document.createElement(tag);
-  if (className) element.className = className;
-  if (text !== undefined) element.textContent = text;
-  return element;
+function element(tag, className, text) {
+  const result = document.createElement(tag);
+  if (className) result.className = className;
+  if (text !== undefined) result.textContent = text;
+  return result;
 }
 
-function formatNumber(value) {
-  return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value);
-}
+const compactNumber = new Intl.NumberFormat("en", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
 
 function formatActivation(value) {
   if (value >= 100) return value.toFixed(0);
@@ -30,222 +31,154 @@ function formatActivation(value) {
   return value.toPrecision(3);
 }
 
-function formatPercent(numerator, denominator) {
-  if (!denominator) return "—";
-  const percent = (100 * numerator) / denominator;
-  if (percent > 0 && percent < 0.01) return "<0.01%";
-  if (percent >= 10) return `${percent.toFixed(1)}%`;
-  return `${percent.toFixed(2)}%`;
-}
-
-function formatToken(token) {
-  return token;
-}
-
-async function getJson(url) {
+async function fetchJson(url) {
   const response = await fetch(url);
   const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
+  if (!response.ok) {
+    throw new Error(payload.error || `Request failed (${response.status})`);
+  }
   return payload;
 }
 
 function showError(message) {
-  errorMessage.textContent = message;
-  errorMessage.hidden = false;
+  ui.error.textContent = message;
+  ui.error.hidden = false;
 }
 
 function renderMetadata() {
-  const metadata = state.metadata;
   const items = [
     ["Model", metadata.model_id || "—"],
-    ["Tokens", metadata.processed_tokens ? formatNumber(metadata.processed_tokens) : "—"],
+    ["Tokens", metadata.processed_tokens ? compactNumber.format(metadata.processed_tokens) : "—"],
     ["Layer", metadata.layer_index ?? "—"],
-    ["SAE width", metadata.d_sae ? formatNumber(metadata.d_sae) : "—"],
+    ["SAE width", metadata.d_sae ? compactNumber.format(metadata.d_sae) : "—"],
   ];
 
-  datasetMeta.replaceChildren();
+  ui.metadata.replaceChildren();
   for (const [label, value] of items) {
-    const item = el("div");
-    item.append(el("dt", "", label), el("dd", "", String(value)));
-    datasetMeta.append(item);
+    const item = element("div");
+    item.append(element("dt", "", label), element("dd", "", String(value)));
+    ui.metadata.append(item);
   }
 }
 
-function filteredFeatures() {
-  const query = searchInput.value.trim().toLocaleLowerCase();
-  const features = query
-    ? state.features.filter((feature) => {
-        const title = feature.title || "";
-        return String(feature.id).includes(query) || title.toLocaleLowerCase().includes(query);
-      })
-    : [...state.features];
+const sorters = {
+  id: (a, b) => a.id - b.id,
+  max: (a, b) => b.max_activation - a.max_activation || a.id - b.id,
+  count: (a, b) => b.activation_count - a.activation_count || a.id - b.id,
+  title: (a, b) => (a.title || `Feature ${a.id}`).localeCompare(b.title || `Feature ${b.id}`),
+};
 
-  switch (sortSelect.value) {
-    case "max":
-      features.sort((a, b) => b.max_activation - a.max_activation || a.id - b.id);
-      break;
-    case "count":
-      features.sort((a, b) => b.activation_count - a.activation_count || a.id - b.id);
-      break;
-    case "title":
-      features.sort((a, b) => (a.title || `Feature ${a.id}`).localeCompare(b.title || `Feature ${b.id}`));
-      break;
-    default:
-      features.sort((a, b) => a.id - b.id);
-  }
-  return features;
+function visibleFeatures() {
+  const query = ui.search.value.trim().toLocaleLowerCase();
+  const visible = query
+    ? features.filter((feature) =>
+        String(feature.id).includes(query)
+        || (feature.title || "").toLocaleLowerCase().includes(query))
+    : [...features];
+  return visible.sort(sorters[ui.sort.value]);
 }
 
-function renderFeatures() {
-  const features = filteredFeatures();
-  resultCount.textContent = features.length === state.features.length
-    ? `${features.length.toLocaleString()} active features`
-    : `${features.length.toLocaleString()} of ${state.features.length.toLocaleString()} features`;
+function renderFeatureList() {
+  const visible = visibleFeatures();
+  ui.count.textContent = visible.length === features.length
+    ? `${visible.length.toLocaleString()} active features`
+    : `${visible.length.toLocaleString()} of ${features.length.toLocaleString()} features`;
 
   const fragment = document.createDocumentFragment();
-  for (const feature of features) {
-    const details = el("details", "feature");
-    details.dataset.featureId = feature.id;
-
-    const summary = el("summary");
-    const title = el("span", "feature-title", feature.title || `Feature ${feature.id}`);
-    title.title = title.textContent;
+  for (const feature of visible) {
+    const details = element("details", "feature");
+    const summary = element("summary");
+    const title = feature.title || `Feature ${feature.id}`;
+    const titleElement = element("span", "feature-title", title);
+    titleElement.title = title;
     summary.append(
-      el("span", "feature-id", `#${feature.id}`),
-      title,
-      el("span", "feature-stat", feature.activation_count.toLocaleString()),
-      el("span", "feature-stat", formatActivation(feature.max_activation)),
-      el("span", "chevron"),
+      element("span", "feature-id", `#${feature.id}`),
+      titleElement,
+      element("span", "feature-stat", feature.activation_count.toLocaleString()),
+      element("span", "feature-stat", formatActivation(feature.max_activation)),
+      element("span", "chevron", "›"),
     );
-
-    const body = el("div", "feature-body");
-    details.append(summary, body);
+    details.append(summary, element("div", "feature-body"));
     details.addEventListener("toggle", () => {
       if (details.open && !details.dataset.loaded) loadFeature(details, feature);
     });
     fragment.append(details);
   }
-
-  featureList.replaceChildren(fragment);
+  ui.list.replaceChildren(fragment);
 }
 
 function renderContext(context, feature) {
-  const card = el("article", "context-card");
-  const header = el("header", "context-header");
-  const label = el("span", "context-label", `Context ${context.context_id}`);
-  const stats = el("span", "context-stats");
-  if (context.sample) {
-    label.append(el("span", "context-bucket", context.sample.bucket));
-    const target = el("span", "context-stat");
-    const percentile = el("span", "context-stat");
-    target.append("Selected ", el("strong", "", formatActivation(context.sample.activation)));
-    percentile.append("Percentile ", el("strong", "", context.sample.percentile.toFixed(1)));
-    stats.append(target, percentile);
-  } else {
-    const peak = el("span", "context-stat");
-    const hits = el("span", "context-stat");
-    peak.append("Peak ", el("strong", "", formatActivation(context.peak_activation)));
-    hits.append("Active tokens ", el("strong", "", context.activation_count.toLocaleString()));
-    stats.append(peak, hits);
-  }
-  header.append(label, stats);
+  const card = element("article", "context-card");
+  const header = element("header", "context-header");
+  const stats = context.sample
+    ? `${context.sample.bucket} · ${formatActivation(context.sample.activation)} · P${context.sample.percentile.toFixed(1)}`
+    : `Peak ${formatActivation(context.peak_activation)} · ${context.activation_count.toLocaleString()} active tokens`;
+  header.append(
+    element("span", "", `Context ${context.context_id}`),
+    element("span", "context-stats", stats),
+  );
 
-  const tokens = el("pre", "tokens");
-  for (let index = 0; index < context.tokens.length; index += 1) {
-    const token = el("span", "token", context.tokens[index]);
+  const tokens = element("pre", "tokens");
+  context.tokens.forEach((text, index) => {
+    const token = element("span", "token", text);
     const activation = context.activations[index];
     if (activation > 0) {
-      const ratio = Math.min(1, activation / feature.max_activation);
-      const alpha = 0.12 + 0.76 * Math.sqrt(ratio);
+      const strength = Math.sqrt(Math.min(1, activation / feature.max_activation));
       token.classList.add("active");
-      token.style.backgroundColor = `rgba(233, 84, 56, ${alpha})`;
+      token.style.backgroundColor = `rgba(222, 75, 47, ${0.12 + 0.72 * strength})`;
       token.title = `Activation ${formatActivation(activation)}`;
     }
     if (context.sample && index === context.sample.target_position) {
       token.classList.add("sample-target");
-      token.title = `${context.sample.bucket} sample · activation ${formatActivation(context.sample.activation)} · percentile ${context.sample.percentile.toFixed(1)}`;
+      token.title = `${context.sample.bucket} · activation ${formatActivation(context.sample.activation)} · P${context.sample.percentile.toFixed(1)}`;
     }
     tokens.append(token);
-  }
+  });
 
   card.append(header, tokens);
   return card;
 }
 
-function renderFeatureIntroduction(feature, payload) {
-  const section = el("section", "feature-introduction");
-  const heading = el("div", "feature-introduction-heading");
-  const headingText = el("div");
-  headingText.append(
-    el("p", "feature-introduction-eyebrow", `Feature #${feature.id}`),
-    el("h2", "feature-introduction-title", feature.title || `Feature ${feature.id}`),
-  );
-  const facts = el("ul", "feature-facts");
-  const factItems = [
-    [
-      payload.activation_count.toLocaleString(),
-      "activating tokens",
-      `(${formatPercent(payload.activation_count, state.metadata.processed_tokens)})`,
-    ],
-    [
-      payload.context_count.toLocaleString(),
-      "contexts",
-      `(${formatPercent(payload.context_count, state.metadata.context_count)})`,
-    ],
-    [formatActivation(feature.max_activation), "peak activation", ""],
-  ];
-  for (const [value, label, note] of factItems) {
-    const item = el("li");
-    item.append(el("strong", "", value), ` ${label}`);
-    if (note) item.append(el("small", "", ` ${note}`));
-    facts.append(item);
+function renderOverview(feature, payload) {
+  const overview = element("section", "feature-overview");
+  const facts = element("ul", "feature-facts");
+  for (const fact of [
+    `${payload.activation_count.toLocaleString()} activating tokens`,
+    `${payload.context_count.toLocaleString()} contexts`,
+    `${formatActivation(feature.max_activation)} peak activation`,
+  ]) {
+    facts.append(element("li", "", fact));
   }
-  heading.append(headingText, facts);
 
-  const tokensSection = el("section", "characteristic-tokens");
-  const tokensHeading = el("div", "characteristic-tokens-heading");
-  tokensHeading.append(
-    el("h3", "", "Activating tokens"),
-    el("p", "", "Hover for details"),
-  );
-  const tokenGroups = el("div", "activation-token-groups");
-  const levelNames = { high: "High", med: "Med", low: "Low" };
-  for (const group of payload.activation_token_groups) {
-    const groupSection = el("section", "activation-token-group");
-    const groupHeading = el("div", "activation-token-group-heading");
-    groupHeading.append(
-      el("h4", "", `${levelNames[group.level]} activation tokens`),
-      el("span", "", `P${group.percentile}`),
-    );
-    const tokenList = el("ul", "characteristic-token-list");
+  const tokenSummary = element("div", "token-summary");
+  tokenSummary.append(element("h3", "", "Characteristic tokens"));
+  for (const group of payload.token_groups) {
+    const row = element("div", "token-group");
+    row.append(element("span", "token-percentile", `P${group.percentile}`));
+    const tokenList = element("div", "token-list");
     for (const token of group.tokens) {
-      const item = el("li", "characteristic-token");
-      const tokenName = el("code", "characteristic-token-name", formatToken(token.token));
-      const hits = `${token.activation_count.toLocaleString()} ${token.activation_count === 1 ? "hit" : "hits"}`;
-      item.title = `${hits} · mean ${formatActivation(token.mean_activation)} · peak ${formatActivation(token.max_activation)}`;
-      item.append(tokenName);
-      tokenList.append(item);
+      const tokenName = element("code", "token-name", token.token);
+      tokenName.title = `${token.activation_count.toLocaleString()} hits · mean ${formatActivation(token.mean_activation)} · peak ${formatActivation(token.max_activation)}`;
+      tokenList.append(tokenName);
     }
-    groupSection.append(groupHeading, tokenList);
-    tokenGroups.append(groupSection);
+    row.append(tokenList);
+    tokenSummary.append(row);
   }
-  tokensSection.append(tokensHeading, tokenGroups);
-  section.append(heading, tokensSection);
-  return section;
+
+  overview.append(facts, tokenSummary);
+  return overview;
 }
 
 function contextUrl(feature, view, offset = 0) {
   return `/api/features/${feature.id}/contexts?view=${view}&offset=${offset}&limit=${PAGE_SIZE}`;
 }
 
-function setContextView(details, view, loading = false) {
-  details.dataset.contextView = view;
-  const titles = {
-    strongest: "Strongest activation contexts",
-    stratified: "Stratified activation contexts",
-  };
-  details.querySelector(".context-summary-title").textContent = titles[view];
-  for (const button of details.querySelectorAll(".context-view-button")) {
+function updateViewControls(details, loading = false) {
+  const view = details.dataset.view;
+  details.querySelector(".context-title").textContent = view === "stratified"
+    ? "Stratified contexts"
+    : "Strongest contexts";
+  for (const button of details.querySelectorAll(".view-button")) {
     const selected = button.dataset.view === view;
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-pressed", String(selected));
@@ -253,182 +186,152 @@ function setContextView(details, view, loading = false) {
   }
 }
 
-function appendLoadMore(details, feature, payload) {
-  const content = details.querySelector(".context-view");
-  const nextOffset = payload.offset + payload.contexts.length;
-  if (nextOffset >= payload.context_count) return;
-
-  const loadMore = el(
-    "button",
-    "load-more",
-    `Load ${Math.min(PAGE_SIZE, payload.context_count - nextOffset)} more contexts`,
-  );
-  loadMore.type = "button";
-  loadMore.addEventListener("click", async () => {
-    loadMore.disabled = true;
-    loadMore.textContent = "Loading…";
-    try {
-      const nextPayload = await getJson(contextUrl(feature, "strongest", nextOffset));
-      if (details.dataset.contextView !== "strongest") return;
-      loadMore.remove();
-      const contexts = content.querySelector(".contexts");
-      for (const context of nextPayload.contexts) {
-        contexts.append(renderContext(context, feature));
-      }
-      appendLoadMore(details, feature, nextPayload);
-    } catch (error) {
-      loadMore.disabled = false;
-      loadMore.textContent = "Try loading again";
-      showError(error.message);
-    }
-  });
-  content.append(loadMore);
+function renderContextList(contexts, feature) {
+  const list = element("div", "contexts");
+  for (const context of contexts) list.append(renderContext(context, feature));
+  return list;
 }
 
-function renderStrongestView(details, feature, payload) {
-  const content = details.querySelector(".context-view");
-  const contexts = el("div", "contexts");
-  for (const context of payload.contexts) {
-    contexts.append(renderContext(context, feature));
-  }
-  content.replaceChildren(contexts);
-  appendLoadMore(details, feature, payload);
-}
+const sampleGroups = [
+  ["Top activations", "10 strongest token activations", ["Top"]],
+  ["Activation range", "Samples across the 25th–99th percentiles", ["25-50", "50-75", "75-90", "90-99"]],
+  ["Random positives", "5 random activating examples", ["Random positive"]],
+];
 
-function renderStratifiedView(details, feature, payload) {
-  const content = details.querySelector(".context-view");
-  if (!payload.stratified_available) {
-    content.replaceChildren(
-      el(
-        "div",
-        "empty-state",
-        "This feature does not have enough activation data for the complete interpretation evidence set.",
-      ),
-    );
+function renderView(details, feature, payload, view) {
+  const content = details.querySelector(".context-content");
+  if (view === "strongest") {
+    content.replaceChildren(renderContextList(payload.contexts, feature));
+    appendLoadMore(details, feature, payload);
     return;
   }
 
-  const groups = [
-    {
-      category: "top",
-      title: "Top activations",
-      description: "The 10 strongest individual token activations",
-    },
-    {
-      category: "stratified",
-      title: "Stratified activations",
-      description: "Two samples from each 25–50, 50–75, 75–90, and 90–99 percentile band",
-    },
-    {
-      category: "random",
-      title: "Random activating examples",
-      description: "Five random positive activations",
-    },
-  ];
+  if (!payload.contexts.length) {
+    content.replaceChildren(element("p", "empty-state", "Not enough activation data for a stratified sample."));
+    return;
+  }
+
   const fragment = document.createDocumentFragment();
-  for (const group of groups) {
-    const section = el("section", "context-sample-group");
-    const heading = el("header", "context-sample-heading");
-    heading.append(el("h3", "", group.title), el("p", "", group.description));
-    const contexts = el("div", "contexts");
-    for (const context of payload.contexts) {
-      if (context.sample.category === group.category) {
-        contexts.append(renderContext(context, feature));
-      }
-    }
-    section.append(heading, contexts);
+  for (const [title, description, buckets] of sampleGroups) {
+    const contexts = payload.contexts.filter((context) => buckets.includes(context.sample.bucket));
+    const section = element("section", "sample-group");
+    const heading = element("header", "sample-heading");
+    heading.append(element("h3", "", title), element("p", "", description));
+    section.append(heading, renderContextList(contexts, feature));
     fragment.append(section);
   }
   content.replaceChildren(fragment);
 }
 
-async function loadContextView(details, feature, view) {
-  if (details.dataset.contextView === view) return;
-  const content = details.querySelector(".context-view");
-  setContextView(details, view, true);
-  content.replaceChildren(el("div", "loading", "Loading activation contexts…"));
-  try {
-    const payload = await getJson(contextUrl(feature, view));
-    if (view === "stratified") {
-      renderStratifiedView(details, feature, payload);
-    } else {
-      renderStrongestView(details, feature, payload);
+function appendLoadMore(details, feature, payload) {
+  const nextOffset = payload.offset + payload.contexts.length;
+  if (nextOffset >= payload.context_count) return;
+
+  const button = element(
+    "button",
+    "load-more",
+    `Load ${Math.min(PAGE_SIZE, payload.context_count - nextOffset)} more`,
+  );
+  button.type = "button";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    button.textContent = "Loading…";
+    try {
+      const next = await fetchJson(contextUrl(feature, "strongest", nextOffset));
+      if (details.dataset.view !== "strongest") return;
+      button.remove();
+      const list = details.querySelector(".context-content > .contexts");
+      for (const context of next.contexts) list.append(renderContext(context, feature));
+      appendLoadMore(details, feature, next);
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = "Try again";
+      button.title = error.message;
     }
+  });
+  details.querySelector(".context-content").append(button);
+}
+
+async function loadView(details, feature, view) {
+  if (details.dataset.view === view) return;
+  details.dataset.view = view;
+  updateViewControls(details, true);
+  const content = details.querySelector(".context-content");
+  content.replaceChildren(element("p", "loading", "Loading contexts…"));
+
+  try {
+    const payload = await fetchJson(contextUrl(feature, view));
+    if (details.dataset.view === view) renderView(details, feature, payload, view);
   } catch (error) {
-    content.replaceChildren(el("div", "empty-state", `Could not load contexts: ${error.message}`));
+    if (details.dataset.view === view) {
+      content.replaceChildren(element("p", "empty-state", `Could not load contexts: ${error.message}`));
+    }
   } finally {
-    setContextView(details, view);
+    updateViewControls(details);
   }
 }
 
 function renderContextBrowser(details, feature) {
-  const section = el("section", "context-browser");
-  const summary = el("div", "context-summary");
-  const actions = el("div", "context-summary-actions");
-  const switcher = el("div", "context-view-switch");
+  const browser = element("section", "context-browser");
+  const toolbar = element("header", "context-toolbar");
+  const switcher = element("div", "view-switch");
   switcher.setAttribute("role", "group");
-  switcher.setAttribute("aria-label", "Activation context view");
+  switcher.setAttribute("aria-label", "Context view");
   for (const [view, label] of [["strongest", "Strongest"], ["stratified", "Stratified"]]) {
-    const button = el("button", "context-view-button", label);
+    const button = element("button", "view-button", label);
     button.type = "button";
     button.dataset.view = view;
-    button.addEventListener("click", () => loadContextView(details, feature, view));
+    button.addEventListener("click", () => loadView(details, feature, view));
     switcher.append(button);
   }
-  const legend = el("span", "legend");
-  legend.append(
-    "Activation",
-    el("span", "legend-ramp"),
-    `0 — ${formatActivation(feature.max_activation)}`,
-  );
-  actions.append(switcher, legend);
-  summary.append(el("span", "context-summary-title"), actions);
-  section.append(summary, el("div", "context-view"));
-  return section;
+
+  const controls = element("div", "context-controls");
+  const legend = element("span", "legend", `0 — ${formatActivation(feature.max_activation)}`);
+  legend.prepend(element("span", "legend-ramp"));
+  controls.append(switcher, legend);
+  toolbar.append(element("h3", "context-title"), controls);
+  browser.append(toolbar, element("div", "context-content"));
+  return browser;
 }
 
 async function loadFeature(details, feature) {
   const body = details.querySelector(".feature-body");
-  body.replaceChildren(el("div", "loading", "Loading activation contexts…"));
+  body.replaceChildren(element("p", "loading", "Loading feature…"));
   try {
-    const payload = await getJson(contextUrl(feature, "strongest"));
-    body.replaceChildren(
-      renderFeatureIntroduction(feature, payload),
-      renderContextBrowser(details, feature),
-    );
-    setContextView(details, "strongest");
-    renderStrongestView(details, feature, payload);
+    const payload = await fetchJson(contextUrl(feature, "strongest"));
+    body.replaceChildren(renderOverview(feature, payload), renderContextBrowser(details, feature));
+    details.dataset.view = "strongest";
+    updateViewControls(details);
+    renderView(details, feature, payload, "strongest");
     details.dataset.loaded = "true";
   } catch (error) {
-    body.replaceChildren(el("div", "empty-state", `Could not load contexts: ${error.message}`));
+    body.replaceChildren(element("p", "empty-state", `Could not load feature: ${error.message}`));
   }
 }
 
 let renderFrame;
-function scheduleRender() {
+ui.search.addEventListener("input", () => {
   cancelAnimationFrame(renderFrame);
-  renderFrame = requestAnimationFrame(renderFeatures);
-}
-
-searchInput.addEventListener("input", scheduleRender);
-sortSelect.addEventListener("change", renderFeatures);
+  renderFrame = requestAnimationFrame(renderFeatureList);
+});
+ui.sort.addEventListener("change", renderFeatureList);
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && searchInput.value) {
-    searchInput.value = "";
-    renderFeatures();
-    searchInput.focus();
+  if (event.key === "Escape" && ui.search.value) {
+    ui.search.value = "";
+    renderFeatureList();
+    ui.search.focus();
   }
 });
 
 async function initialize() {
   try {
-    const payload = await getJson("/api/summary");
-    state.features = payload.features;
-    state.metadata = payload.metadata;
+    const payload = await fetchJson("/api/summary");
+    features = payload.features;
+    metadata = payload.metadata;
     renderMetadata();
-    renderFeatures();
+    renderFeatureList();
   } catch (error) {
-    resultCount.textContent = "Could not load analysis";
+    ui.count.textContent = "Could not load analysis";
     showError(error.message);
   }
 }

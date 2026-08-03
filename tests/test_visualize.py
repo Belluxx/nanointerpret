@@ -78,20 +78,14 @@ class AnalysisDataTest(unittest.TestCase):
             result["contexts"][0]["activations"], [0.2, 0.0, 0.9, 0.0]
         )
 
-    def test_contexts_include_feature_intro_statistics(self):
+    def test_contexts_include_characteristic_tokens(self):
         result = self.data.feature_contexts(1)
 
-        self.assertEqual(result["unique_token_count"], 3)
-        self.assertAlmostEqual(result["mean_activation"], 0.48)
         self.assertEqual(
-            [group["level"] for group in result["activation_token_groups"]],
-            ["high", "med", "low"],
-        )
-        self.assertEqual(
-            [group["percentile"] for group in result["activation_token_groups"]],
+            [group["percentile"] for group in result["token_groups"]],
             [95, 50, 25],
         )
-        high_tokens = result["activation_token_groups"][0]["tokens"]
+        high_tokens = result["token_groups"][0]["tokens"]
         self.assertEqual([token["token_id"] for token in high_tokens], [10, 14, 17])
         self.assertEqual(high_tokens[0]["token"], "<10>")
         token_10 = next(token for token in high_tokens if token["token_id"] == 10)
@@ -115,6 +109,11 @@ class AnalysisDataTest(unittest.TestCase):
     def test_missing_feature_is_rejected(self):
         with self.assertRaises(KeyError):
             self.data.feature_contexts(0)
+
+    def test_stratified_view_is_empty_when_there_are_too_few_activations(self):
+        result = self.data.feature_contexts(1, view="stratified")
+
+        self.assertEqual(result["contexts"], [])
 
 
 class LoadTitlesTest(unittest.TestCase):

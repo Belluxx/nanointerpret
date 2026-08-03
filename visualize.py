@@ -20,7 +20,25 @@ CONTEXT_ROUTE = re.compile(r"^/api/features/(\d+)/contexts$")
 PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
 TOKENS_PER_PERCENTILE = 4
-TOKEN_PERCENTILES = (("high", 95), ("med", 50), ("low", 25))
+TOKEN_PERCENTILES = (95, 50, 25)
+SUMMARY_METADATA = (
+    "model_id",
+    "dataset_id",
+    "processed_tokens",
+    "context_count",
+    "context_size",
+    "layer_index",
+    "residual_location",
+    "d_sae",
+    "k",
+    "created_at",
+)
+STATIC_FILES = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/index.html": ("index.html", "text/html; charset=utf-8"),
+    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/style.css": ("style.css", "text/css; charset=utf-8"),
+}
 
 
 def positive_int(value: str) -> int:
@@ -81,18 +99,18 @@ class AnalysisData:
             raise ValueError("the visualizer requires a CSR analysis artifact")
 
         self.d_sae = int(self.metadata["d_sae"])
-        self.titles = load_titles(names_path)
         self.tokenizer = tokenizer or AutoTokenizer.from_pretrained(
             self.metadata["model_id"]
         )
 
+        titles = load_titles(names_path)
         counts = np.bincount(self.feature_ids, minlength=self.d_sae)
         maxima = np.zeros(self.d_sae, dtype=np.float32)
         np.maximum.at(maxima, self.feature_ids, self.values)
         self.features = [
             {
                 "id": int(feature_id),
-                "title": self.titles.get(int(feature_id)),
+                "title": titles.get(int(feature_id)),
                 "activation_count": int(counts[feature_id]),
                 "max_activation": float(maxima[feature_id]),
             }
@@ -100,22 +118,10 @@ class AnalysisData:
         ]
 
     def summary(self) -> dict:
-        metadata_keys = (
-            "model_id",
-            "dataset_id",
-            "processed_tokens",
-            "context_count",
-            "context_size",
-            "layer_index",
-            "residual_location",
-            "d_sae",
-            "k",
-            "created_at",
-        )
         return {
             "metadata": {
                 key: self.metadata[key]
-                for key in metadata_keys
+                for key in SUMMARY_METADATA
                 if key in self.metadata
             },
             "features": self.features,
@@ -164,33 +170,23 @@ class AnalysisData:
         token_sums = np.bincount(token_groups, weights=activation_values)
         token_means = token_sums / token_counts
 
-        activation_token_groups = []
-        used_token_groups = set()
-        for level, percentile in TOKEN_PERCENTILES:
+        token_summaries = []
+        for percentile in TOKEN_PERCENTILES:
             percentile_activation = float(
                 np.percentile(activation_values, percentile)
             )
-            nearby_activations = np.argsort(
-                np.abs(activation_values - percentile_activation), kind="stable"
-            )
             selected_token_groups = []
-            for allow_reuse in (False, True):
-                for activation_index in nearby_activations:
-                    token_group = int(token_groups[activation_index])
-                    if token_group in selected_token_groups:
-                        continue
-                    if not allow_reuse and token_group in used_token_groups:
-                        continue
+            for activation_index in np.argsort(
+                np.abs(activation_values - percentile_activation), kind="stable"
+            ):
+                token_group = int(token_groups[activation_index])
+                if token_group not in selected_token_groups:
                     selected_token_groups.append(token_group)
-                    if len(selected_token_groups) == TOKENS_PER_PERCENTILE:
-                        break
                 if len(selected_token_groups) == TOKENS_PER_PERCENTILE:
                     break
-            used_token_groups.update(selected_token_groups)
 
-            activation_token_groups.append(
+            token_summaries.append(
                 {
-                    "level": level,
                     "percentile": percentile,
                     "tokens": [
                         {
@@ -251,13 +247,7 @@ class AnalysisData:
                 local_index = int(
                     np.searchsorted(activation_indices, sample.activation_index)
                 )
-                category = "stratified"
-                if sample.bucket == "Top":
-                    category = "top"
-                elif sample.bucket == "Random positive":
-                    category = "random"
                 context["sample"] = {
-                    "category": category,
                     "bucket": sample.bucket,
                     "activation": sample.activation,
                     "percentile": sample.percentile,
@@ -267,7 +257,6 @@ class AnalysisData:
                 }
             return context
 
-        stratified_available = True
         if view == "strongest":
             ranked_groups = np.argsort(-peaks, kind="stable")
             selected_groups = ranked_groups[offset : offset + limit]
@@ -282,7 +271,6 @@ class AnalysisData:
                 self.context_ptr,
                 self.row_ptr,
             )
-            stratified_available = samples is not None
             contexts = []
             for sample in samples or []:
                 local_index = int(
@@ -294,14 +282,9 @@ class AnalysisData:
                 contexts.append(render_context(group_index, sample))
 
         return {
-            "feature_id": feature_id,
-            "view": view,
             "activation_count": int(len(activation_indices)),
-            "mean_activation": float(np.mean(activation_values)),
             "context_count": int(len(grouped_context_ids)),
-            "unique_token_count": int(len(unique_token_ids)),
-            "activation_token_groups": activation_token_groups,
-            "stratified_available": stratified_available,
+            "token_groups": token_summaries,
             "offset": offset,
             "contexts": contexts,
         }
@@ -334,13 +317,7 @@ class VisualizerHandler(BaseHTTPRequestHandler):
                 self.send_json(payload)
             return
 
-        static_files = {
-            "/": ("index.html", "text/html; charset=utf-8"),
-            "/index.html": ("index.html", "text/html; charset=utf-8"),
-            "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-            "/style.css": ("style.css", "text/css; charset=utf-8"),
-        }
-        static_file = static_files.get(request.path)
+        static_file = STATIC_FILES.get(request.path)
         if static_file is None:
             self.send_error(404)
             return

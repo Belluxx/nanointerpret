@@ -8,42 +8,28 @@
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <header class="site-header">
-      <a class="wordmark" href="/" aria-label="MechBox feature visualizer">
-        <span class="mark" aria-hidden="true"></span>
-        <span>MechBox</span>
-      </a>
-      <span class="product-name">Feature visualizer</span>
-    </header>
-
     <main>
-      <section class="intro" aria-labelledby="page-title">
+      <header class="page-header">
         <div>
-          <p class="eyebrow">Sparse autoencoder analysis</p>
-          <h1 id="page-title">Features</h1>
+          <h1>MechBox</h1>
+          <p>SAE feature visualizer</p>
         </div>
         <dl class="dataset-meta" id="dataset-meta" aria-label="Analysis metadata">
           <div><dt>Model</dt><dd>Loading…</dd></div>
         </dl>
-      </section>
+      </header>
 
       <section class="browser" aria-label="Feature browser">
-        <div class="controls">
-          <label class="search">
-            <span class="visually-hidden">Search features</span>
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="11" cy="11" r="6.5"></circle>
-              <path d="m16 16 4 4"></path>
-            </svg>
-            <input
-              id="search-input"
-              type="search"
-              placeholder="Search by title or feature ID"
-              autocomplete="off"
-            />
-          </label>
+        <header class="toolbar">
+          <input
+            id="search-input"
+            type="search"
+            placeholder="Search by title or feature ID"
+            aria-label="Search features"
+            autocomplete="off"
+          />
 
-          <label class="sort-control">
+          <label>
             <span>Sort</span>
             <select id="sort-select">
               <option value="id">Feature ID</option>
@@ -52,7 +38,7 @@
               <option value="title">Title</option>
             </select>
           </label>
-        </div>
+        </header>
 
         <div class="list-heading">
           <span id="result-count" role="status">Loading analysis…</span>
