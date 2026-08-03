@@ -11,6 +11,8 @@ from urllib.parse import parse_qs, urlsplit
 import numpy as np
 from transformers import AutoTokenizer
 
+from src.feature_examples import choose_activation_examples
+
 
 ANALYSIS_PATH = Path("artifacts/sae_gemma_3_270m/analysis.npz")
 STATIC_DIR = Path(__file__).with_name("visualizer")
@@ -131,12 +133,18 @@ class AnalysisData:
         return str(self.tokenizer.convert_ids_to_tokens(token_id))
 
     def feature_contexts(
-        self, feature_id: int, offset: int = 0, limit: int = PAGE_SIZE
+        self,
+        feature_id: int,
+        offset: int = 0,
+        limit: int = PAGE_SIZE,
+        view: str = "strongest",
     ) -> dict:
         if not 0 <= feature_id < self.d_sae:
             raise KeyError(feature_id)
         if offset < 0 or limit <= 0:
             raise ValueError("offset must be nonnegative and limit must be positive")
+        if view not in ("strongest", "stratified"):
+            raise ValueError("view must be 'strongest' or 'stratified'")
         limit = min(limit, MAX_PAGE_SIZE)
 
         activation_indices = np.flatnonzero(self.feature_ids == feature_id)
@@ -209,11 +217,8 @@ class AnalysisData:
         grouped_context_ids = context_ids[group_starts]
         peaks = np.maximum.reduceat(activation_values, group_starts)
         occurrences = np.diff(np.append(group_starts, len(context_ids)))
-        ranked_groups = np.argsort(-peaks, kind="stable")
-        selected_groups = ranked_groups[offset : offset + limit]
 
-        contexts = []
-        for group_index in selected_groups:
+        def render_context(group_index: int, sample=None) -> dict:
             context_id = int(grouped_context_ids[group_index])
             context_start = int(self.context_ptr[context_id])
             context_stop = int(self.context_ptr[context_id + 1])
@@ -233,25 +238,70 @@ class AnalysisData:
                 activation_start:activation_stop
             ]
 
-            contexts.append(
-                {
-                    "context_id": context_id,
-                    "peak_activation": float(peaks[group_index]),
-                    "activation_count": int(occurrences[group_index]),
-                    "tokens": [
-                        self.decode_token(int(token_id)) for token_id in token_slice
-                    ],
-                    "activations": context_activations.tolist(),
+            context = {
+                "context_id": context_id,
+                "peak_activation": float(peaks[group_index]),
+                "activation_count": int(occurrences[group_index]),
+                "tokens": [
+                    self.decode_token(int(token_id)) for token_id in token_slice
+                ],
+                "activations": context_activations.tolist(),
+            }
+            if sample is not None:
+                local_index = int(
+                    np.searchsorted(activation_indices, sample.activation_index)
+                )
+                category = "stratified"
+                if sample.bucket == "Top":
+                    category = "top"
+                elif sample.bucket == "Random positive":
+                    category = "random"
+                context["sample"] = {
+                    "category": category,
+                    "bucket": sample.bucket,
+                    "activation": sample.activation,
+                    "percentile": sample.percentile,
+                    "target_position": int(
+                        token_positions[local_index] - context_start
+                    ),
                 }
+            return context
+
+        stratified_available = True
+        if view == "strongest":
+            ranked_groups = np.argsort(-peaks, kind="stable")
+            selected_groups = ranked_groups[offset : offset + limit]
+            contexts = [
+                render_context(int(group_index)) for group_index in selected_groups
+            ]
+        else:
+            samples = choose_activation_examples(
+                feature_id,
+                activation_indices,
+                self.values,
+                self.context_ptr,
+                self.row_ptr,
             )
+            stratified_available = samples is not None
+            contexts = []
+            for sample in samples or []:
+                local_index = int(
+                    np.searchsorted(activation_indices, sample.activation_index)
+                )
+                group_index = int(
+                    np.searchsorted(grouped_context_ids, context_ids[local_index])
+                )
+                contexts.append(render_context(group_index, sample))
 
         return {
             "feature_id": feature_id,
+            "view": view,
             "activation_count": int(len(activation_indices)),
             "mean_activation": float(np.mean(activation_values)),
             "context_count": int(len(grouped_context_ids)),
             "unique_token_count": int(len(unique_token_ids)),
             "activation_token_groups": activation_token_groups,
+            "stratified_available": stratified_available,
             "offset": offset,
             "contexts": contexts,
         }
@@ -272,8 +322,9 @@ class VisualizerHandler(BaseHTTPRequestHandler):
             try:
                 offset = int(query.get("offset", [0])[0])
                 limit = int(query.get("limit", [PAGE_SIZE])[0])
+                view = query.get("view", ["strongest"])[0]
                 payload = self.data.feature_contexts(
-                    int(match.group(1)), offset=offset, limit=limit
+                    int(match.group(1)), offset=offset, limit=limit, view=view
                 )
             except ValueError as error:
                 self.send_json({"error": str(error)}, status=400)

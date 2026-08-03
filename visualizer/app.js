@@ -132,13 +132,23 @@ function renderFeatures() {
 function renderContext(context, feature) {
   const card = el("article", "context-card");
   const header = el("header", "context-header");
+  const label = el("span", "context-label", `Context ${context.context_id}`);
   const stats = el("span", "context-stats");
-  const peak = el("span", "context-stat");
-  const hits = el("span", "context-stat");
-  peak.append("Peak ", el("strong", "", formatActivation(context.peak_activation)));
-  hits.append("Active tokens ", el("strong", "", context.activation_count.toLocaleString()));
-  stats.append(peak, hits);
-  header.append(el("span", "", `Context ${context.context_id}`), stats);
+  if (context.sample) {
+    label.append(el("span", "context-bucket", context.sample.bucket));
+    const target = el("span", "context-stat");
+    const percentile = el("span", "context-stat");
+    target.append("Selected ", el("strong", "", formatActivation(context.sample.activation)));
+    percentile.append("Percentile ", el("strong", "", context.sample.percentile.toFixed(1)));
+    stats.append(target, percentile);
+  } else {
+    const peak = el("span", "context-stat");
+    const hits = el("span", "context-stat");
+    peak.append("Peak ", el("strong", "", formatActivation(context.peak_activation)));
+    hits.append("Active tokens ", el("strong", "", context.activation_count.toLocaleString()));
+    stats.append(peak, hits);
+  }
+  header.append(label, stats);
 
   const tokens = el("pre", "tokens");
   for (let index = 0; index < context.tokens.length; index += 1) {
@@ -150,6 +160,10 @@ function renderContext(context, feature) {
       token.classList.add("active");
       token.style.backgroundColor = `rgba(233, 84, 56, ${alpha})`;
       token.title = `Activation ${formatActivation(activation)}`;
+    }
+    if (context.sample && index === context.sample.target_position) {
+      token.classList.add("sample-target");
+      token.title = `${context.sample.bucket} sample · activation ${formatActivation(context.sample.activation)} · percentile ${context.sample.percentile.toFixed(1)}`;
     }
     tokens.append(token);
   }
@@ -220,66 +234,170 @@ function renderFeatureIntroduction(feature, payload) {
   return section;
 }
 
-async function loadContextPage(details, feature, offset, button) {
-  if (button) {
-    button.disabled = true;
-    button.textContent = "Loading…";
-  }
+function contextUrl(feature, view, offset = 0) {
+  return `/api/features/${feature.id}/contexts?view=${view}&offset=${offset}&limit=${PAGE_SIZE}`;
+}
 
-  const payload = await getJson(
-    `/api/features/${feature.id}/contexts?offset=${offset}&limit=${PAGE_SIZE}`,
+function setContextView(details, view, loading = false) {
+  details.dataset.contextView = view;
+  const titles = {
+    strongest: "Strongest activation contexts",
+    stratified: "Stratified activation contexts",
+  };
+  details.querySelector(".context-summary-title").textContent = titles[view];
+  for (const button of details.querySelectorAll(".context-view-button")) {
+    const selected = button.dataset.view === view;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+    button.disabled = loading;
+  }
+}
+
+function appendLoadMore(details, feature, payload) {
+  const content = details.querySelector(".context-view");
+  const nextOffset = payload.offset + payload.contexts.length;
+  if (nextOffset >= payload.context_count) return;
+
+  const loadMore = el(
+    "button",
+    "load-more",
+    `Load ${Math.min(PAGE_SIZE, payload.context_count - nextOffset)} more contexts`,
   );
-  const body = details.querySelector(".feature-body");
-  let contexts = body.querySelector(".contexts");
+  loadMore.type = "button";
+  loadMore.addEventListener("click", async () => {
+    loadMore.disabled = true;
+    loadMore.textContent = "Loading…";
+    try {
+      const nextPayload = await getJson(contextUrl(feature, "strongest", nextOffset));
+      if (details.dataset.contextView !== "strongest") return;
+      loadMore.remove();
+      const contexts = content.querySelector(".contexts");
+      for (const context of nextPayload.contexts) {
+        contexts.append(renderContext(context, feature));
+      }
+      appendLoadMore(details, feature, nextPayload);
+    } catch (error) {
+      loadMore.disabled = false;
+      loadMore.textContent = "Try loading again";
+      showError(error.message);
+    }
+  });
+  content.append(loadMore);
+}
 
-  if (offset === 0) {
-    body.replaceChildren();
-    const summary = el("div", "context-summary");
-    summary.append(
-      el("span", "context-summary-title", "Strongest activation contexts"),
-    );
-    const legend = el("span", "legend");
-    legend.append(
-      "Activation",
-      el("span", "legend-ramp"),
-      `0 — ${formatActivation(feature.max_activation)}`,
-    );
-    summary.append(legend);
-    contexts = el("div", "contexts");
-    body.append(renderFeatureIntroduction(feature, payload), summary, contexts);
-  }
-
+function renderStrongestView(details, feature, payload) {
+  const content = details.querySelector(".context-view");
+  const contexts = el("div", "contexts");
   for (const context of payload.contexts) {
     contexts.append(renderContext(context, feature));
   }
+  content.replaceChildren(contexts);
+  appendLoadMore(details, feature, payload);
+}
 
-  if (button) button.remove();
-  const nextOffset = offset + payload.contexts.length;
-  if (nextOffset < payload.context_count) {
-    const loadMore = el(
-      "button",
-      "load-more",
-      `Load ${Math.min(PAGE_SIZE, payload.context_count - nextOffset)} more contexts`,
+function renderStratifiedView(details, feature, payload) {
+  const content = details.querySelector(".context-view");
+  if (!payload.stratified_available) {
+    content.replaceChildren(
+      el(
+        "div",
+        "empty-state",
+        "This feature does not have enough activation data for the complete interpretation evidence set.",
+      ),
     );
-    loadMore.type = "button";
-    loadMore.addEventListener("click", async () => {
-      try {
-        await loadContextPage(details, feature, nextOffset, loadMore);
-      } catch (error) {
-        loadMore.disabled = false;
-        loadMore.textContent = "Try loading again";
-        showError(error.message);
-      }
-    });
-    body.append(loadMore);
+    return;
   }
+
+  const groups = [
+    {
+      category: "top",
+      title: "Top activations",
+      description: "The 10 strongest individual token activations",
+    },
+    {
+      category: "stratified",
+      title: "Stratified activations",
+      description: "Two samples from each 25–50, 50–75, 75–90, and 90–99 percentile band",
+    },
+    {
+      category: "random",
+      title: "Random activating examples",
+      description: "Five random positive activations",
+    },
+  ];
+  const fragment = document.createDocumentFragment();
+  for (const group of groups) {
+    const section = el("section", "context-sample-group");
+    const heading = el("header", "context-sample-heading");
+    heading.append(el("h3", "", group.title), el("p", "", group.description));
+    const contexts = el("div", "contexts");
+    for (const context of payload.contexts) {
+      if (context.sample.category === group.category) {
+        contexts.append(renderContext(context, feature));
+      }
+    }
+    section.append(heading, contexts);
+    fragment.append(section);
+  }
+  content.replaceChildren(fragment);
+}
+
+async function loadContextView(details, feature, view) {
+  if (details.dataset.contextView === view) return;
+  const content = details.querySelector(".context-view");
+  setContextView(details, view, true);
+  content.replaceChildren(el("div", "loading", "Loading activation contexts…"));
+  try {
+    const payload = await getJson(contextUrl(feature, view));
+    if (view === "stratified") {
+      renderStratifiedView(details, feature, payload);
+    } else {
+      renderStrongestView(details, feature, payload);
+    }
+  } catch (error) {
+    content.replaceChildren(el("div", "empty-state", `Could not load contexts: ${error.message}`));
+  } finally {
+    setContextView(details, view);
+  }
+}
+
+function renderContextBrowser(details, feature) {
+  const section = el("section", "context-browser");
+  const summary = el("div", "context-summary");
+  const actions = el("div", "context-summary-actions");
+  const switcher = el("div", "context-view-switch");
+  switcher.setAttribute("role", "group");
+  switcher.setAttribute("aria-label", "Activation context view");
+  for (const [view, label] of [["strongest", "Strongest"], ["stratified", "Stratified"]]) {
+    const button = el("button", "context-view-button", label);
+    button.type = "button";
+    button.dataset.view = view;
+    button.addEventListener("click", () => loadContextView(details, feature, view));
+    switcher.append(button);
+  }
+  const legend = el("span", "legend");
+  legend.append(
+    "Activation",
+    el("span", "legend-ramp"),
+    `0 — ${formatActivation(feature.max_activation)}`,
+  );
+  actions.append(switcher, legend);
+  summary.append(el("span", "context-summary-title"), actions);
+  section.append(summary, el("div", "context-view"));
+  return section;
 }
 
 async function loadFeature(details, feature) {
   const body = details.querySelector(".feature-body");
   body.replaceChildren(el("div", "loading", "Loading activation contexts…"));
   try {
-    await loadContextPage(details, feature, 0);
+    const payload = await getJson(contextUrl(feature, "strongest"));
+    body.replaceChildren(
+      renderFeatureIntroduction(feature, payload),
+      renderContextBrowser(details, feature),
+    );
+    setContextView(details, "strongest");
+    renderStrongestView(details, feature, payload);
     details.dataset.loaded = "true";
   } catch (error) {
     body.replaceChildren(el("div", "empty-state", `Could not load contexts: ${error.message}`));

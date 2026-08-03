@@ -474,6 +474,51 @@ h1 {
   font-weight: 650;
 }
 
+.context-summary-actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.context-view-switch {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f4f3ef;
+}
+
+.context-view-button {
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 620;
+}
+
+.context-view-button:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.context-view-button.selected {
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(36, 34, 28, 0.12);
+}
+
+.context-view-button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.context-view-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .legend {
   display: flex;
   align-items: center;
@@ -493,6 +538,30 @@ h1 {
 .contexts {
   display: grid;
   gap: 10px;
+}
+
+.context-sample-group + .context-sample-group {
+  margin-top: 28px;
+}
+
+.context-sample-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 10px;
+}
+
+.context-sample-heading h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.context-sample-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .context-card {
@@ -522,6 +591,23 @@ h1 {
   gap: 18px;
 }
 
+.context-label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.context-bucket {
+  padding: 2px 5px;
+  border: 1px solid #edc6bc;
+  border-radius: 4px;
+  color: #9a3d2c;
+  background: var(--accent-soft);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 8px;
+  letter-spacing: 0;
+}
+
 .context-stat strong {
   color: var(--ink);
   font-weight: 600;
@@ -541,6 +627,11 @@ h1 {
 .token.active {
   border-radius: 2px;
   box-shadow: inset 0 -1px rgba(153, 44, 24, 0.28);
+}
+
+.token.sample-target {
+  outline: 1.5px solid #9a3d2c;
+  outline-offset: 1px;
 }
 
 .loading,
@@ -706,6 +797,20 @@ h1 {
     align-items: flex-start;
     padding-top: 9px;
     padding-bottom: 9px;
+  }
+
+  .context-summary-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+
+  .context-sample-heading {
+    display: block;
+  }
+
+  .context-sample-heading p {
+    margin-top: 4px;
   }
 
   .context-stats {

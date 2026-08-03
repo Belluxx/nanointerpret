@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import random
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -13,6 +12,11 @@ import numpy as np
 from openai import OpenAI
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
+
+from src.feature_examples import (
+    DEFAULT_EXAMPLE_SEED,
+    choose_activation_examples,
+)
 
 
 MAX_RETRIES = 3
@@ -54,7 +58,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-reasoning", action="store_true", help="Disable model reasoning. Reasoning is enabled by default.")
     parser.add_argument("--max-tokens", type=positive_int, help="Completion-token budget. Default: 32768, or 32 with --no-reasoning.")
     parser.add_argument("--concurrent", type=positive_int, default=1, help="Number of concurrent interpretation requests. Default: 1.")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, default=DEFAULT_EXAMPLE_SEED)
     return parser.parse_args()
 
 
@@ -110,106 +114,30 @@ def choose_examples(
     tokenizer,
     seed: int,
 ) -> list[Example] | None:
-    feature_values = values[activation_indices]
-    count = len(feature_values)
-    if count < 10:
+    selections = choose_activation_examples(
+        feature_id,
+        activation_indices,
+        values,
+        context_ptr,
+        row_ptr,
+        seed,
+    )
+    if selections is None:
         return None
 
-    ranked_indices = np.argsort(feature_values, kind="stable")
-    inverse_rank = np.empty(count, dtype=np.int64)
-    inverse_rank[ranked_indices] = np.arange(count)
-    token_positions = np.searchsorted(
-        row_ptr, activation_indices, side="right"
-    ) - 1
-    context_indices = np.searchsorted(
-        context_ptr, token_positions, side="right"
-    ) - 1
-    used_activations: set[int] = set()
-    used_contexts: set[int] = set()
-    rng = random.Random(seed + feature_id)
-
-    def activation_index_for_rank(rank: int) -> int:
-        return int(activation_indices[int(ranked_indices[rank])])
-
-    def context_index_for_rank(rank: int) -> int:
-        return int(context_indices[int(ranked_indices[rank])])
-
-    def make_example(rank: int, bucket: str) -> Example:
-        local_index = int(ranked_indices[rank])
-        percentile = 100.0 * (rank + 1) / count
-        return render_example(
+    return [
+        render_example(
             tokenizer,
             token_ids,
             context_ptr,
             row_ptr,
-            int(activation_indices[local_index]),
-            float(feature_values[local_index]),
-            percentile,
-            bucket,
+            selection.activation_index,
+            selection.activation,
+            selection.percentile,
+            selection.bucket,
         )
-
-    def select_examples(
-        ranks,
-        size: int,
-        bucket: str,
-        *,
-        randomize: bool,
-    ) -> list[Example] | None:
-        available = [
-            int(rank)
-            for rank in ranks
-            if activation_index_for_rank(int(rank)) not in used_activations
-        ]
-        selected: list[Example] = []
-        for _ in range(size):
-            if not available:
-                return None
-            unique_context = [
-                rank
-                for rank in available
-                if context_index_for_rank(rank) not in used_contexts
-            ]
-            candidates = unique_context or available
-            rank = rng.choice(candidates) if randomize else candidates[0]
-            available.remove(rank)
-            used_activations.add(activation_index_for_rank(rank))
-            used_contexts.add(context_index_for_rank(rank))
-            selected.append(make_example(rank, bucket))
-        return selected
-
-    top_examples = select_examples(
-        range(count - 1, -1, -1), 10, "Top", randomize=False
-    )
-    if top_examples is None:
-        return None
-    examples = top_examples
-
-    rank_percentiles = 100.0 * (np.arange(count) + 1) / count
-    for lower, upper, label in (
-        (25, 50, "25-50"),
-        (50, 75, "50-75"),
-        (75, 90, "75-90"),
-        (90, 99, "90-99"),
-    ):
-        start = int(np.searchsorted(rank_percentiles, lower, side="left"))
-        stop = int(np.searchsorted(rank_percentiles, upper, side="left"))
-        if stop - start < 2:
-            return None
-        bucket_examples = select_examples(
-            range(start, stop), 2, label, randomize=True
-        )
-        if bucket_examples is None:
-            return None
-        examples.extend(bucket_examples)
-
-    random_ranks = (int(inverse_rank[local_index]) for local_index in range(count))
-    random_examples = select_examples(
-        random_ranks, 5, "Random positive", randomize=True
-    )
-    if random_examples is None:
-        return None
-    examples.extend(random_examples)
-    return examples
+        for selection in selections
+    ]
 
 
 def feature_prompt(examples: list[Example]) -> str:
