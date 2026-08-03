@@ -15,7 +15,6 @@ from tqdm.auto import tqdm
 from transformers import AutoTokenizer
 
 
-ANALYSIS_PATH = Path("artifacts/sae_gemma_3_270m/analysis.npz")
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 3
 INSUFFICIENT_TITLE = "Insufficient activation data"
@@ -49,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--api-key", help="API key. Default: OPENAI_API_KEY, or 'not-needed' if unset.")
-    parser.add_argument("--analysis", type=Path, default=ANALYSIS_PATH)
+    parser.add_argument("--analysis", type=Path, required=True)
     parser.add_argument("--output", type=Path, help="Output JSONL path. Default: next to the analysis artifact.")
     parser.add_argument("--feature-ids", type=nonnegative_int, nargs="+", help="Interpret only these features. Default: every SAE feature.")
     parser.add_argument("--no-reasoning", action="store_true", help="Disable model reasoning. Reasoning is enabled by default.")
