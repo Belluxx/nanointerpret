@@ -5,3 +5,4 @@ datasets>=2.20
 numpy>=1.26
 tqdm>=4.66
 matplotlib>=3.8
+openai>=1.0
