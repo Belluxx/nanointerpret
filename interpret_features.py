@@ -21,6 +21,7 @@ from src.feature_examples import (
 
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 3
+REQUEST_TIMEOUT_SECONDS = 300
 INSUFFICIENT_TITLE = "Insufficient activation data"
 MAX_PREFIX_TOKENS = 64
 RETRYABLE_STATUS_CODES = {408, 409, 429}
@@ -213,7 +214,12 @@ def main() -> None:
     args = parse_args()
     output_path = args.output or args.analysis.with_name("feature_names.jsonl")
     api_key = args.api_key or os.environ.get("OPENAI_API_KEY") or "not-needed"
-    client = OpenAI(base_url=args.base_url, api_key=api_key)
+    client = OpenAI(
+        base_url=args.base_url,
+        api_key=api_key,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+        max_retries=0,
+    )
 
     analysis = load_analysis(args.analysis)
     metadata = analysis.metadata
