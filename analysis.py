@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
-from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -151,37 +149,13 @@ def write_analysis(
     config: dict,
     device: torch.device,
     model_batch_size: int,
-    evaluation_path: Path,
-    checkpoint_path: Path,
-    max_tokens: int | None,
 ) -> None:
     context_size = int(config["context_size"])
     token_count = len(evaluation_tokens)
     metadata = {
-        "created_at": datetime.now(timezone.utc).isoformat(),
         "model_id": config["model_id"],
-        "sae_checkpoint": str(checkpoint_path),
-        "dataset_id": config["dataset_id"],
-        "dataset_config": config["dataset_config"],
-        "evaluation_split": "validation",
-        "evaluation_path": str(evaluation_path),
-        "available_tokens": int(config["validation_tokens"]),
-        "processed_tokens": token_count,
-        "max_tokens": max_tokens,
         "context_size": context_size,
-        "context_count": math.ceil(token_count / context_size),
         "layer_index": int(config["layer_index"]),
-        "layer_path": config["layer_path"],
-        "residual_location": config["residual_location"],
-        "d_model": int(config["d_model"]),
-        "d_sae": int(config["d_sae"]),
-        "k": int(config["k"]),
-        "activation_scale": float(config["activation_scale"]),
-        "firing_threshold": FIRING_THRESHOLD,
-        "activation_type": "topk_post_relu",
-        "value_dtype": np.dtype(ANALYSIS_VALUE_DTYPE).name,
-        "device": str(device),
-        "model_dtype": config["model_dtype"],
     }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -346,9 +320,6 @@ def main() -> None:
             config,
             device,
             model_batch_size,
-            evaluation_path,
-            args.sae_dir / "sae_final.pt",
-            args.max_tokens,
         )
 
 

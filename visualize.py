@@ -20,18 +20,6 @@ FEATURE_ROUTE = re.compile(r"^/api/features/(\d+)$")
 CONTEXT_LIMIT = 20
 TOKENS_PER_PERCENTILE = 4
 TOKEN_PERCENTILES = (95, 50, 25)
-SUMMARY_METADATA = (
-    "model_id",
-    "dataset_id",
-    "processed_tokens",
-    "context_count",
-    "context_size",
-    "layer_index",
-    "residual_location",
-    "d_sae",
-    "k",
-    "created_at",
-)
 
 
 def positive_int(value: str) -> int:
@@ -88,7 +76,7 @@ class AnalysisData:
         self.values = analysis.values
         self.feature_max = analysis.feature_max
 
-        self.d_sae = int(self.metadata["d_sae"])
+        self.d_sae = len(self.feature_ptr) - 1
         self.context_size = int(self.metadata["context_size"])
         self.tokenizer = tokenizer or AutoTokenizer.from_pretrained(
             self.metadata["model_id"]
@@ -109,9 +97,10 @@ class AnalysisData:
     def summary(self) -> dict:
         return {
             "metadata": {
-                key: self.metadata[key]
-                for key in SUMMARY_METADATA
-                if key in self.metadata
+                "model_id": self.metadata["model_id"],
+                "processed_tokens": len(self.token_ids),
+                "layer_index": self.metadata["layer_index"],
+                "d_sae": self.d_sae,
             },
             "features": self.features,
         }

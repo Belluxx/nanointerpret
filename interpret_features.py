@@ -209,7 +209,7 @@ def main() -> None:
 
     analysis = load_analysis(args.analysis)
     metadata = analysis.metadata
-    d_sae = int(metadata["d_sae"])
+    d_sae = len(analysis.feature_ptr) - 1
     context_size = int(metadata["context_size"])
     requested = args.feature_ids or range(d_sae)
     invalid = [feature_id for feature_id in requested if feature_id >= d_sae]
