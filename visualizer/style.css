@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light dark;
   --background: #f2f2f2;
   --surface: #fff;
   --text: #161616;
@@ -9,10 +10,35 @@
   --accent: #c44f1b;
   --accent-soft: #ececec;
   --focus: #161616;
+  --focus-ring: #2858d8;
+  --switch-background: #e9e9e9;
+  --error-border: #777;
+  --error-text: #222;
+  --error-background: #e7e7e7;
   --mono: "SFMono-Regular", Consolas, monospace;
   color: var(--text);
   background: var(--background);
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #171717;
+    --surface: #222;
+    --text: #ededed;
+    --muted: #aaa;
+    --line: #555;
+    --soft-line: #3a3a3a;
+    --subtle: #292929;
+    --accent: #c95c2d;
+    --accent-soft: #3a302c;
+    --focus: #ededed;
+    --focus-ring: #86a6ff;
+    --switch-background: #333;
+    --error-border: #888;
+    --error-text: #ededed;
+    --error-background: #303030;
+  }
 }
 
 * {
@@ -129,8 +155,8 @@ main {
 }
 
 .toolbar select:focus-visible {
-  border-color: #2858d8;
-  box-shadow: 0 0 0 3px rgb(40 88 216 / 12%);
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 12%, transparent);
 }
 
 .list-heading {
@@ -364,7 +390,7 @@ main {
 .view-switch {
   display: flex;
   border: 1px solid var(--line);
-  background: #e9e9e9;
+  background: var(--switch-background);
 }
 
 .view-button {
@@ -493,9 +519,9 @@ main {
 .error-message {
   margin: 14px;
   padding: 11px 12px;
-  border: 1px solid #777;
-  color: #222;
-  background: #e7e7e7;
+  border: 1px solid var(--error-border);
+  color: var(--error-text);
+  background: var(--error-background);
   font-size: 12px;
 }
 
