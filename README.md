@@ -19,7 +19,7 @@ The main objectives are:
 1. Train the SAE:
 
 ```py
-python3 train.py --output-dir artifacts/500M --train-tokens 500000000 --validation-tokens 100000000 --checkpoint-every 250000000
+python3 train.py --output-dir artifacts/500M --train-tokens 500000000 --checkpoint-every 250000000 --validation-tokens 10000000
 ```
 
 2. Extract feature activation stats:
