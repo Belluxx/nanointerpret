@@ -22,6 +22,7 @@ MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 3
 REQUEST_TIMEOUT_SECONDS = 300
 INSUFFICIENT_TITLE = "Insufficient activation data"
+UNCLEAR_TITLE = "No coherent interpretation"
 MAX_PREFIX_TOKENS = 64
 RETRYABLE_STATUS_CODES = {408, 409, 429}
 EXAMPLE_CATEGORIES = (
@@ -139,6 +140,7 @@ def feature_prompt(examples: dict[str, list[str]]) -> str:
         if texts:
             sections.append(f"{heading}:\n" + "\n".join(f"- {text}" for text in texts))
     sections.append(
+        f"If the examples do not support one coherent concept, return exactly \"{UNCLEAR_TITLE}\". "
         "Give this feature a very concise, specific title. "
         "Return only the plain title, with no quotes, label or explanation."
     )
