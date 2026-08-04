@@ -39,10 +39,10 @@ async function fetchJson(url) {
 
 function renderMetadata(metadata) {
   const items = [
-    ["Model", metadata.model_id || "—"],
-    ["Tokens", metadata.processed_tokens ? compactNumber.format(metadata.processed_tokens) : "—"],
-    ["Layer", metadata.layer_index ?? "—"],
-    ["SAE width", metadata.d_sae ? compactNumber.format(metadata.d_sae) : "—"],
+    ["Model", metadata.model_id || "-"],
+    ["Tokens", metadata.processed_tokens ? compactNumber.format(metadata.processed_tokens) : "-"],
+    ["Layer", metadata.layer_index ?? "-"],
+    ["SAE width", metadata.d_sae ? compactNumber.format(metadata.d_sae) : "-"],
   ];
 
   ui.metadata.replaceChildren();
@@ -233,7 +233,7 @@ function renderContextBrowser(feature, payload) {
   }
 
   const controls = element("div", "context-controls");
-  const legend = element("span", "legend", `0 — ${formatActivation(feature.max_activation)}`);
+  const legend = element("span", "legend", `0 - ${formatActivation(feature.max_activation)}`);
   legend.prepend(element("span", "legend-ramp"));
   controls.append(switcher, legend);
   toolbar.append(title, controls);
