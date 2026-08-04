@@ -235,7 +235,7 @@ class AnalysisData:
             activation_values,
             self.context_size,
         )
-        for sample in samples:
+        for sample in samples or []:
             group_index = int(
                 np.searchsorted(
                     grouped_context_ids,

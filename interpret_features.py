@@ -14,7 +14,6 @@ from transformers import AutoTokenizer
 
 from src.data import load_analysis
 from src.feature_examples import (
-    COMPLETE_EXAMPLE_COUNT,
     DEFAULT_EXAMPLE_SEED,
     choose_activation_examples,
 )
@@ -116,7 +115,7 @@ def choose_examples(
         context_size,
         seed,
     )
-    if len(selections) != COMPLETE_EXAMPLE_COUNT:
+    if selections is None:
         return None
 
     return [

@@ -38,10 +38,10 @@ def choose_activation_examples(
     values: np.ndarray,
     context_size: int,
     seed: int = DEFAULT_EXAMPLE_SEED,
-) -> list[ActivationExample]:
+) -> list[ActivationExample] | None:
     count = len(values)
-    if count == 0:
-        return []
+    if count < COMPLETE_EXAMPLE_COUNT:
+        return None
 
     ranked_indices = np.argsort(values, kind="stable")
     context_indices = token_positions // context_size
@@ -70,14 +70,16 @@ def choose_activation_examples(
         bucket: str,
         *,
         randomize: bool,
-    ) -> list[ActivationExample]:
+    ) -> list[ActivationExample] | None:
         available = [
             int(rank)
             for rank in ranks
             if token_position_for_rank(int(rank)) not in used_positions
         ]
         selected = []
-        while available and len(selected) < size:
+        for _ in range(size):
+            if not available:
+                return None
             unique_context = [
                 rank
                 for rank in available
@@ -94,22 +96,26 @@ def choose_activation_examples(
     examples = select_examples(
         range(count - 1, -1, -1), TOP_EXAMPLE_COUNT, "Top", randomize=False
     )
+    if examples is None:
+        return None
 
     for lower, upper, label in STRATIFIED_BUCKETS:
         start = math.ceil(lower * count / 100) - 1
         stop = math.ceil(upper * count / 100) - 1
-        examples.extend(
-            select_examples(
-                range(start, stop),
-                STRATIFIED_EXAMPLES_PER_BUCKET,
-                label,
-                randomize=True,
-            )
+        bucket_examples = select_examples(
+            range(start, stop),
+            STRATIFIED_EXAMPLES_PER_BUCKET,
+            label,
+            randomize=True,
         )
+        if bucket_examples is None:
+            return None
+        examples.extend(bucket_examples)
 
-    examples.extend(
-        select_examples(
-            range(count), RANDOM_EXAMPLE_COUNT, "Random positive", randomize=True
-        )
+    random_examples = select_examples(
+        range(count), RANDOM_EXAMPLE_COUNT, "Random positive", randomize=True
     )
+    if random_examples is None:
+        return None
+    examples.extend(random_examples)
     return examples

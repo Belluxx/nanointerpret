@@ -192,6 +192,11 @@ function renderView(content, feature, contexts, view) {
     return;
   }
 
+  if (!contexts.length) {
+    content.replaceChildren(element("p", "empty-state", "Not enough activation data for a stratified sample."));
+    return;
+  }
+
   const fragment = document.createDocumentFragment();
   for (const [title, description, buckets] of sampleGroups) {
     const groupContexts = contexts.filter((context) => buckets.includes(context.sample.bucket));
