@@ -240,6 +240,28 @@ def main() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = output_path.with_suffix(output_path.suffix + ".tmp")
 
+    completed = 0
+    insufficient = 0
+    output_mode = "w"
+    if temporary.exists():
+        answer = input(f"{temporary} already exists. Continue? [Y/n] ").strip().lower()
+        if answer in {"", "y", "yes"}:
+            with temporary.open(encoding="utf-8") as saved_output:
+                for completed, line in enumerate(saved_output, start=1):
+                    record = json.loads(line)
+                    if (
+                        completed > len(requested)
+                        or record["feature_id"] != requested[completed - 1]
+                    ):
+                        raise ValueError(
+                            f"{temporary} does not match the requested feature order"
+                        )
+                    insufficient += record["title"] == INSUFFICIENT_TITLE
+            output_mode = "a"
+            print(f"Continuing after {completed:,} completed features.")
+
+    remaining = requested[completed:]
+
     def interpret_feature(feature_id: int) -> tuple[int, str, bool]:
         start, stop = map(int, analysis.feature_ptr[feature_id : feature_id + 2])
         examples = choose_examples(
@@ -262,14 +284,14 @@ def main() -> None:
         )
         return feature_id, title, False
 
-    insufficient = 0
-    with temporary.open("w", encoding="utf-8") as output, ThreadPoolExecutor(
+    with temporary.open(output_mode, encoding="utf-8") as output, ThreadPoolExecutor(
         max_workers=args.concurrent
     ) as executor:
-        results = executor.map(interpret_feature, requested)
+        results = executor.map(interpret_feature, remaining)
         for feature_id, title, was_insufficient in tqdm(
             results,
             total=len(requested),
+            initial=completed,
             unit="feature",
             desc="Interpret",
             dynamic_ncols=True,
