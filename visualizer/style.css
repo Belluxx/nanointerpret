@@ -1,14 +1,14 @@
 :root {
-  --background: #f5f4ef;
+  --background: #f2f2f2;
   --surface: #fff;
-  --text: #24231f;
-  --muted: #73716a;
-  --line: #deddd7;
-  --soft-line: #ebeae5;
-  --subtle: #faf9f6;
-  --accent: #de4b2f;
-  --accent-soft: #fff0eb;
-  --focus: #2858d8;
+  --text: #161616;
+  --muted: #686868;
+  --line: #c9c9c9;
+  --soft-line: #e2e2e2;
+  --subtle: #f7f7f7;
+  --accent: #c44f1b;
+  --accent-soft: #ececec;
+  --focus: #161616;
   --mono: "SFMono-Regular", Consolas, monospace;
   color: var(--text);
   background: var(--background);
@@ -33,7 +33,7 @@ select {
 main {
   width: min(1080px, calc(100% - 40px));
   margin: 0 auto;
-  padding: 56px 0 80px;
+  padding: 52px 0 80px;
 }
 
 .page-header {
@@ -46,17 +46,17 @@ main {
 
 .page-header h1 {
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(42px, 7vw, 64px);
-  font-weight: 400;
-  letter-spacing: -0.04em;
-  line-height: 1;
+  font-size: clamp(38px, 6vw, 58px);
+  font-weight: 650;
+  letter-spacing: -0.055em;
+  line-height: 0.95;
 }
 
 .page-header p {
-  margin: 8px 0 0;
+  margin: 10px 0 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
 }
 
 .dataset-meta {
@@ -84,7 +84,6 @@ main {
 .browser {
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 9px;
   background: var(--surface);
 }
 
@@ -92,15 +91,14 @@ main {
   display: flex;
   gap: 16px;
   justify-content: space-between;
-  padding: 14px;
+  padding: 12px;
   border-bottom: 1px solid var(--line);
 }
 
 .toolbar input,
 .toolbar select {
-  height: 40px;
+  height: 38px;
   border: 1px solid var(--line);
-  border-radius: 6px;
   outline: none;
   color: var(--text);
   background: var(--subtle);
@@ -121,12 +119,17 @@ main {
 }
 
 .toolbar select {
+  height: 40px;
   padding: 0 10px;
 }
 
-.toolbar input:focus,
-.toolbar select:focus-visible {
+.toolbar input:focus {
   border-color: var(--focus);
+  box-shadow: inset 0 0 0 1px var(--focus);
+}
+
+.toolbar select:focus-visible {
+  border-color: #2858d8;
   box-shadow: 0 0 0 3px rgb(40 88 216 / 12%);
 }
 
@@ -135,7 +138,7 @@ main {
   grid-template-columns: 1fr auto;
   align-items: center;
   min-height: 38px;
-  padding: 0 50px 0 16px;
+  padding: 0 52px 0 16px;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
   background: var(--subtle);
@@ -160,10 +163,10 @@ main {
 
 .feature > summary {
   display: grid;
-  grid-template-columns: 64px minmax(180px, 1fr) 110px 90px 20px;
+  grid-template-columns: 64px minmax(180px, 1fr) 110px 90px 52px;
   align-items: center;
   min-height: 58px;
-  padding: 0 16px;
+  padding: 0 0 0 16px;
   cursor: pointer;
   list-style: none;
 }
@@ -183,6 +186,7 @@ main {
 
 .feature[open] > summary {
   background: var(--accent-soft);
+  box-shadow: inset 3px 0 var(--accent);
 }
 
 .feature-id,
@@ -213,20 +217,32 @@ main {
 }
 
 .chevron {
+  display: grid;
+  align-self: stretch;
+  place-items: center;
   color: var(--muted);
-  font-size: 23px;
-  text-align: right;
+  font-size: 0;
+}
+
+.chevron::before {
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid currentcolor;
+  border-bottom: 2px solid currentcolor;
+  content: "";
+  transform: rotate(-45deg);
   transition: transform 120ms ease;
 }
 
-.feature[open] .chevron {
-  transform: rotate(90deg);
+.feature[open] .chevron::before {
+  color: var(--accent);
+  transform: rotate(45deg);
 }
 
 .feature-body {
   padding: 22px 24px 26px 80px;
-  border-top: 1px solid #f0d8d1;
-  background: #fffaf8;
+  border-top: 1px solid var(--line);
+  background: var(--subtle);
 }
 
 .feature-overview {
@@ -236,7 +252,7 @@ main {
   gap: 32px;
   margin-bottom: 22px;
   padding-bottom: 22px;
-  border-bottom: 1px solid #f0d8d1;
+  border-bottom: 1px solid var(--line);
 }
 
 .feature-facts {
@@ -252,10 +268,8 @@ main {
   display: flex;
   padding: 9px 12px;
   border: 1px solid var(--line);
-  border-radius: 6px;
   flex-direction: column;
   background: var(--surface);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 4%);
 }
 
 .feature-fact dt {
@@ -328,7 +342,6 @@ main {
   max-width: 180px;
   padding: 3px 6px;
   border: 1px solid var(--line);
-  border-radius: 4px;
   background: var(--surface);
   font-family: var(--mono);
   font-size: 10px;
@@ -350,16 +363,13 @@ main {
 
 .view-switch {
   display: flex;
-  padding: 2px;
   border: 1px solid var(--line);
-  border-radius: 5px;
-  background: #f2f1ed;
+  background: #e9e9e9;
 }
 
 .view-button {
-  padding: 4px 8px;
+  padding: 5px 9px;
   border: 0;
-  border-radius: 3px;
   color: var(--muted);
   background: transparent;
   cursor: pointer;
@@ -367,9 +377,8 @@ main {
 }
 
 .view-button.selected {
-  color: var(--text);
-  background: var(--surface);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+  color: var(--surface);
+  background: var(--accent);
 }
 
 .view-button:focus-visible {
@@ -388,8 +397,8 @@ main {
 .legend-ramp {
   width: 70px;
   height: 7px;
-  border-radius: 8px;
-  background: linear-gradient(90deg, rgb(222 75 47 / 12%), rgb(222 75 47 / 84%));
+  border: 1px solid #aaa;
+  background: linear-gradient(90deg, #ebebeb, #393939);
 }
 
 .contexts {
@@ -418,7 +427,6 @@ main {
 .context-card {
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 6px;
   background: var(--surface);
 }
 
@@ -444,7 +452,7 @@ main {
 .tokens {
   margin: 0;
   padding: 14px;
-  color: #302f2b;
+  color: var(--text);
   font-family: var(--mono);
   font-size: 11px;
   line-height: 1.8;
@@ -453,12 +461,11 @@ main {
 }
 
 .token.active {
-  border-radius: 2px;
-  box-shadow: inset 0 -1px rgb(135 40 22 / 28%);
+  box-shadow: inset 0 -1px rgb(0 0 0 / 28%);
 }
 
 .token.sample-target {
-  outline: 1.5px solid #8e321f;
+  outline: 1.5px solid var(--accent);
   outline-offset: 1px;
 }
 
@@ -486,10 +493,9 @@ main {
 .error-message {
   margin: 14px;
   padding: 11px 12px;
-  border: 1px solid #e3b4a8;
-  border-radius: 6px;
-  color: #842f20;
-  background: #fff0ec;
+  border: 1px solid #777;
+  color: #222;
+  background: #e7e7e7;
   font-size: 12px;
 }
 
@@ -534,7 +540,7 @@ main {
   }
 
   .feature > summary {
-    grid-template-columns: 52px minmax(0, 1fr) 20px;
+    grid-template-columns: 52px minmax(0, 1fr) 52px;
   }
 
   .feature-body {

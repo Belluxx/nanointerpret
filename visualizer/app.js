@@ -88,7 +88,7 @@ function renderFeatureList() {
       titleElement,
       element("span", "feature-stat", feature.activation_count.toLocaleString()),
       element("span", "feature-stat", formatActivation(feature.max_activation)),
-      element("span", "chevron", "›"),
+      element("span", "chevron"),
     );
     details.append(summary, element("div", "feature-body"));
     details.addEventListener("toggle", () => {
@@ -117,7 +117,8 @@ function renderContext(context, feature) {
     if (activation > 0) {
       const strength = Math.sqrt(Math.min(1, activation / feature.max_activation));
       token.classList.add("active");
-      token.style.backgroundColor = `rgba(222, 75, 47, ${0.12 + 0.72 * strength})`;
+      token.style.backgroundColor = `rgba(24, 24, 24, ${0.08 + 0.72 * strength})`;
+      if (strength > 0.6) token.style.color = "#fff";
       token.title = `Activation ${formatActivation(activation)}`;
     }
     if (context.sample && index === context.sample.target_position) {
