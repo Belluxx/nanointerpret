@@ -161,15 +161,22 @@ def write_analysis(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     feature_temporary = output_path.with_name(output_path.name + ".feature_ids.tmp")
     values_temporary = output_path.with_name(output_path.name + ".values.tmp")
+    row_ptr_temporary = output_path.with_name(output_path.name + ".row_ptr.tmp")
     pointer_dtype = (
         np.uint32
         if token_count * int(config["k"]) <= np.iinfo(np.uint32).max
         else np.uint64
     )
     feature_dtype = np.min_scalar_type(int(config["d_sae"]) - 1)
-    row_ptr = np.empty(token_count + 1, dtype=pointer_dtype)
-    row_ptr[0] = 0
+    row_ptr = None
     try:
+        row_ptr = np.memmap(
+            row_ptr_temporary,
+            mode="w+",
+            dtype=pointer_dtype,
+            shape=(token_count + 1,),
+        )
+        row_ptr[0] = 0
         processed_tokens = 0
         active_count = 0
         feature_counts = np.zeros(int(config["d_sae"]), dtype=np.uint64)
@@ -256,8 +263,12 @@ def write_analysis(
             feature_max,
         )
     finally:
+        if row_ptr is not None:
+            row_ptr.flush()
+            del row_ptr
         feature_temporary.unlink(missing_ok=True)
         values_temporary.unlink(missing_ok=True)
+        row_ptr_temporary.unlink(missing_ok=True)
 
 
 def main() -> None:
