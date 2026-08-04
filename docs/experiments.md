@@ -65,9 +65,9 @@ python3 train.py \
   --sae-batch-size 4096
 ```
 
-It resulted in pretty good results, identifying interesting features like `#1009` which identified **severe harm** (injured, killed, lives, wounded, deaths, dead, lost, ...) and `#9147` which identified **professions** (fisherman, photographer, painter, farmer, artist, ...).
+It resulted in pretty good results, identifying interesting features like `#1009` which identified **severe harm** (*injured*, *killed*, *lives*, *wounded*, *deaths*, *dead*, *lost*, ...) and `#9147` which identified **professions** (*fisherman*, *photographer*, *painter*, *farmer*, *artist*, ...).
 
-However many features were polysemantic, for example the severe harm feature activated both with **causalities terms** (injured, killed, wounded) and with **employment terms** (employment, workers, gained and lost jobs).
+However many features were polysemantic, for example the severe harm feature activated both with causalities terms and with **employment terms** (*employment*, *workers*, gained and lost jobs).
 
 My first 2 ideas to fix this issue were the following:
 - Increase `--width-multiplier` (number of features in the SAE): this may help in separating fused features
