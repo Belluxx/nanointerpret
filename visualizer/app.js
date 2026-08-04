@@ -117,8 +117,7 @@ function renderContext(context, feature) {
     if (activation > 0) {
       const strength = Math.sqrt(Math.min(1, activation / feature.max_activation));
       token.classList.add("active");
-      token.style.backgroundColor = `rgba(24, 24, 24, ${0.08 + 0.72 * strength})`;
-      if (strength > 0.6) token.style.color = "#fff";
+      token.style.backgroundColor = `rgba(196, 79, 27, ${0.1 + 0.75 * strength})`;
       token.title = `Activation ${formatActivation(activation)}`;
     }
     if (context.sample && index === context.sample.target_position) {
