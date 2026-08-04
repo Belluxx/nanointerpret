@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-from openai import OpenAI
+from openai import APIConnectionError, APIStatusError, OpenAI
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
 
@@ -23,6 +23,7 @@ MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 3
 INSUFFICIENT_TITLE = "Insufficient activation data"
 MAX_PREFIX_TOKENS = 64
+RETRYABLE_STATUS_CODES = {408, 409, 429}
 
 
 @dataclass(frozen=True)
@@ -195,8 +196,15 @@ def request_title(
             if not title:
                 raise ValueError("the model returned an empty feature title")
             return title
-        except Exception:
-            if retry == MAX_RETRIES:
+        except Exception as error:
+            retryable = isinstance(error, APIConnectionError) or (
+                isinstance(error, APIStatusError)
+                and (
+                    error.status_code in RETRYABLE_STATUS_CODES
+                    or error.status_code >= 500
+                )
+            )
+            if not retryable or retry == MAX_RETRIES:
                 raise
             time.sleep(RETRY_DELAY_SECONDS)
 
