@@ -186,6 +186,8 @@ def request_title(
                 max_tokens=max_tokens,
                 **reasoning_options,
             )
+            if not completion.choices:
+                raise ValueError("the model returned no completion choices")
             content = completion.choices[0].message.content
             if not content or not content.strip():
                 raise ValueError("the model returned an empty feature title")
@@ -198,11 +200,15 @@ def request_title(
                 raise ValueError("the model returned an empty feature title")
             return title
         except Exception as error:
-            retryable = isinstance(error, APIConnectionError) or (
-                isinstance(error, APIStatusError)
-                and (
-                    error.status_code in RETRYABLE_STATUS_CODES
-                    or error.status_code >= 500
+            retryable = (
+                isinstance(error, ValueError)
+                or isinstance(error, APIConnectionError)
+                or (
+                    isinstance(error, APIStatusError)
+                    and (
+                        error.status_code in RETRYABLE_STATUS_CODES
+                        or error.status_code >= 500
+                    )
                 )
             )
             if not retryable or retry == MAX_RETRIES:
