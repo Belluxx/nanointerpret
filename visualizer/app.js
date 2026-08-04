@@ -181,7 +181,6 @@ function renderContextList(contexts, feature) {
 }
 
 const sampleGroups = [
-  ["Top activations", "Strongest token activations", ["Top"]],
   ["Activation range", "Samples across the 25th–99th percentiles", ["25-50", "50-75", "75-90", "90-99"]],
   ["Random positives", "5 random activating examples", ["Random positive"]],
 ];
