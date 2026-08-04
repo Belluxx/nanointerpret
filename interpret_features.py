@@ -5,7 +5,6 @@ import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from pathlib import Path
 
 from openai import APIConnectionError, APIStatusError, OpenAI
@@ -25,14 +24,14 @@ REQUEST_TIMEOUT_SECONDS = 300
 INSUFFICIENT_TITLE = "Insufficient activation data"
 MAX_PREFIX_TOKENS = 64
 RETRYABLE_STATUS_CODES = {408, 409, 429}
-
-
-@dataclass(frozen=True)
-class Example:
-    bucket: str
-    activation: float
-    percentile: float
-    text: str
+EXAMPLE_CATEGORIES = (
+    ("Top activations", "Top"),
+    ("Very high activations", "90-99"),
+    ("High activations", "75-90"),
+    ("Medium activations", "50-75"),
+    ("Low activations", "25-50"),
+    ("Random activations", "Random positive"),
+)
 
 
 def nonnegative_int(value: str) -> int:
@@ -89,16 +88,12 @@ def render_example(
     token_ids,
     context_size: int,
     token_position: int,
-    activation: float,
-    percentile: float,
-    bucket: str,
-) -> Example:
+) -> str:
     context_start = token_position // context_size * context_size
     prefix_start = max(context_start, token_position - MAX_PREFIX_TOKENS + 1)
-    text = decode_marked_prefix(
+    return decode_marked_prefix(
         tokenizer, token_ids[prefix_start : token_position + 1]
     )
-    return Example(bucket, activation, percentile, text)
 
 
 def choose_examples(
@@ -109,7 +104,7 @@ def choose_examples(
     context_size: int,
     tokenizer,
     seed: int,
-) -> list[Example] | None:
+) -> dict[str, list[str]] | None:
     selections = choose_activation_examples(
         feature_id,
         token_positions,
@@ -120,37 +115,27 @@ def choose_examples(
     if selections is None:
         return None
 
-    return [
-        render_example(
+    examples: dict[str, list[str]] = {}
+    for selection in selections:
+        text = render_example(
             tokenizer,
             token_ids,
             context_size,
             selection.token_position,
-            selection.activation,
-            selection.percentile,
-            selection.bucket,
         )
-        for selection in selections
-    ]
+        examples.setdefault(selection.bucket, []).append(text)
+    return examples
 
 
-def feature_prompt(examples: list[Example]) -> str:
+def feature_prompt(examples: dict[str, list[str]]) -> str:
     sections = [
         "Infer the feature's core concept from the examples below.\n"
         "Focus primarily on high-activation examples, but use weaker examples to "
         "detect broader meanings or polysemanticity.\n"
         "The token inside << >> is the token that activates the feature."
     ]
-    categories = (
-        ("Top activations", "Top"),
-        ("Very high activations", "90-99"),
-        ("High activations", "75-90"),
-        ("Medium activations", "50-75"),
-        ("Low activations", "25-50"),
-        ("Random activations", "Random positive"),
-    )
-    for heading, bucket in categories:
-        texts = [example.text for example in examples if example.bucket == bucket]
+    for heading, bucket in EXAMPLE_CATEGORIES:
+        texts = examples.get(bucket)
         if texts:
             sections.append(f"{heading}:\n" + "\n".join(f"- {text}" for text in texts))
     sections.append(
@@ -158,6 +143,19 @@ def feature_prompt(examples: list[Example]) -> str:
         "Return only the plain title, with no quotes, label or explanation."
     )
     return "\n\n".join(sections)
+
+
+def clean_title(content: str | None) -> str:
+    if not content or not content.strip():
+        raise ValueError("the model returned an empty feature title")
+
+    title = content.strip().splitlines()[0].strip()
+    if title.lower().startswith("title:"):
+        title = title[6:].strip()
+    title = title.strip('"\'`').strip()
+    if not title:
+        raise ValueError("the model returned an empty feature title")
+    return title
 
 
 def request_title(
@@ -168,7 +166,9 @@ def request_title(
     max_tokens: int | None = None,
 ) -> str:
     reasoning_options = {} if reasoning else {"reasoning_effort": "none"}
-    max_tokens = max_tokens or (32_768 if reasoning else 64)
+    if max_tokens is None:
+        max_tokens = 32_768 if reasoning else 64
+
     for retry in range(MAX_RETRIES + 1):
         try:
             completion = client.chat.completions.create(
@@ -188,17 +188,7 @@ def request_title(
             )
             if not completion.choices:
                 raise ValueError("the model returned no completion choices")
-            content = completion.choices[0].message.content
-            if not content or not content.strip():
-                raise ValueError("the model returned an empty feature title")
-
-            title = content.strip().splitlines()[0].strip()
-            if title.lower().startswith("title:"):
-                title = title[6:].strip()
-            title = title.strip('"\'`').strip()
-            if not title:
-                raise ValueError("the model returned an empty feature title")
-            return title
+            return clean_title(completion.choices[0].message.content)
         except Exception as error:
             retryable = (
                 isinstance(error, ValueError)
@@ -216,6 +206,32 @@ def request_title(
             time.sleep(RETRY_DELAY_SECONDS)
 
 
+def resume_progress(temporary: Path, requested: list[int]) -> tuple[int, int]:
+    if not temporary.exists():
+        return 0, 0
+
+    answer = input(f"{temporary} already exists. Continue? [Y/n] ").strip().lower()
+    if answer not in {"", "y", "yes"}:
+        return 0, 0
+
+    completed = 0
+    insufficient = 0
+    with temporary.open(encoding="utf-8") as saved_output:
+        for completed, line in enumerate(saved_output, start=1):
+            record = json.loads(line)
+            if (
+                completed > len(requested)
+                or record["feature_id"] != requested[completed - 1]
+            ):
+                raise ValueError(
+                    f"{temporary} does not match the requested feature order"
+                )
+            insufficient += record["title"] == INSUFFICIENT_TITLE
+
+    print(f"Continuing after {completed:,} completed features.")
+    return completed, insufficient
+
+
 def main() -> None:
     args = parse_args()
     output_path = args.output or args.analysis.with_name("feature_names.jsonl")
@@ -231,38 +247,21 @@ def main() -> None:
     metadata = analysis.metadata
     d_sae = len(analysis.feature_ptr) - 1
     context_size = int(metadata["context_size"])
-    requested = args.feature_ids or range(d_sae)
-    invalid = [feature_id for feature_id in requested if feature_id >= d_sae]
-    if invalid:
-        raise ValueError(f"feature IDs must be below {d_sae}; got {invalid[0]}")
+    requested = list(args.feature_ids or range(d_sae))
+    invalid = next(
+        (feature_id for feature_id in requested if feature_id >= d_sae), None
+    )
+    if invalid is not None:
+        raise ValueError(f"feature IDs must be below {d_sae}; got {invalid}")
 
     tokenizer = AutoTokenizer.from_pretrained(metadata["model_id"])
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = output_path.with_suffix(output_path.suffix + ".tmp")
 
-    completed = 0
-    insufficient = 0
-    output_mode = "w"
-    if temporary.exists():
-        answer = input(f"{temporary} already exists. Continue? [Y/n] ").strip().lower()
-        if answer in {"", "y", "yes"}:
-            with temporary.open(encoding="utf-8") as saved_output:
-                for completed, line in enumerate(saved_output, start=1):
-                    record = json.loads(line)
-                    if (
-                        completed > len(requested)
-                        or record["feature_id"] != requested[completed - 1]
-                    ):
-                        raise ValueError(
-                            f"{temporary} does not match the requested feature order"
-                        )
-                    insufficient += record["title"] == INSUFFICIENT_TITLE
-            output_mode = "a"
-            print(f"Continuing after {completed:,} completed features.")
-
+    completed, insufficient = resume_progress(temporary, requested)
     remaining = requested[completed:]
 
-    def interpret_feature(feature_id: int) -> tuple[int, str, bool]:
+    def interpret_feature(feature_id: int) -> tuple[int, str]:
         start, stop = map(int, analysis.feature_ptr[feature_id : feature_id + 2])
         examples = choose_examples(
             feature_id,
@@ -274,7 +273,7 @@ def main() -> None:
             args.seed,
         )
         if examples is None:
-            return feature_id, INSUFFICIENT_TITLE, True
+            return feature_id, INSUFFICIENT_TITLE
         title = request_title(
             client,
             args.model,
@@ -282,13 +281,14 @@ def main() -> None:
             reasoning=not args.no_reasoning,
             max_tokens=args.max_tokens,
         )
-        return feature_id, title, False
+        return feature_id, title
 
+    output_mode = "a" if completed else "w"
     with temporary.open(output_mode, encoding="utf-8") as output, ThreadPoolExecutor(
         max_workers=args.concurrent
     ) as executor:
         results = executor.map(interpret_feature, remaining)
-        for feature_id, title, was_insufficient in tqdm(
+        for feature_id, title in tqdm(
             results,
             total=len(requested),
             initial=completed,
@@ -296,7 +296,7 @@ def main() -> None:
             desc="Interpret",
             dynamic_ncols=True,
         ):
-            insufficient += was_insufficient
+            insufficient += title == INSUFFICIENT_TITLE
             output.write(
                 json.dumps(
                     {"feature_id": feature_id, "title": title},
