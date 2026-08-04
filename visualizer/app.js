@@ -103,8 +103,8 @@ function renderContext(context, feature) {
   const card = element("article", "context-card");
   const header = element("header", "context-header");
   const stats = context.sample
-    ? `${context.sample.bucket} · ${formatActivation(context.sample.activation)} · P${context.sample.percentile.toFixed(1)}`
-    : `Peak ${formatActivation(context.peak_activation)} · ${context.activation_count.toLocaleString()} active tokens`;
+    ? `${context.sample.bucket}, ${formatActivation(context.sample.activation)}, P${context.sample.percentile.toFixed(1)}`
+    : `Peak ${formatActivation(context.peak_activation)}, ${context.activation_count.toLocaleString()} active tokens`;
   header.append(
     element("span", "", `Context ${context.context_id}`),
     element("span", "context-stats", stats),
@@ -122,7 +122,7 @@ function renderContext(context, feature) {
     }
     if (context.sample && index === context.sample.target_position) {
       token.classList.add("sample-target");
-      token.title = `${context.sample.bucket} · activation ${formatActivation(context.sample.activation)} · P${context.sample.percentile.toFixed(1)}`;
+      token.title = `${context.sample.bucket}, activation ${formatActivation(context.sample.activation)}, P${context.sample.percentile.toFixed(1)}`;
     }
     tokens.append(token);
   });
@@ -149,7 +149,7 @@ function renderOverview(feature, payload) {
     const tokenList = element("div", "token-list");
     for (const token of group.tokens) {
       const tokenName = element("code", "token-name", token.token);
-      tokenName.title = `${token.activation_count.toLocaleString()} hits · mean ${formatActivation(token.mean_activation)} · peak ${formatActivation(token.max_activation)}`;
+      tokenName.title = `${token.activation_count.toLocaleString()} hits, mean ${formatActivation(token.mean_activation)}, peak ${formatActivation(token.max_activation)}`;
       tokenList.append(tokenName);
     }
     row.append(tokenList);
