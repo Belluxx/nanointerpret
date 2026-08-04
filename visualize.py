@@ -196,12 +196,8 @@ class AnalysisData:
             )
             token_slice = self.token_ids[context_start:context_stop]
 
-            activation_start = int(
-                np.searchsorted(token_positions, context_start, side="left")
-            )
-            activation_stop = int(
-                np.searchsorted(token_positions, context_stop, side="left")
-            )
+            activation_start = int(group_starts[group_index])
+            activation_stop = activation_start + int(occurrences[group_index])
             positions = (
                 token_positions[activation_start:activation_stop] - context_start
             )
@@ -220,16 +216,11 @@ class AnalysisData:
                 "activations": context_activations.tolist(),
             }
             if sample is not None:
-                local_index = int(
-                    np.searchsorted(token_positions, sample.token_position)
-                )
                 context["sample"] = {
                     "bucket": sample.bucket,
                     "activation": sample.activation,
                     "percentile": sample.percentile,
-                    "target_position": int(
-                        token_positions[local_index] - context_start
-                    ),
+                    "target_position": sample.token_position - context_start,
                 }
             return context
 
@@ -244,12 +235,12 @@ class AnalysisData:
             activation_values,
             self.context_size,
         )
-        for sample in samples or []:
-            local_index = int(
-                np.searchsorted(token_positions, sample.token_position)
-            )
+        for sample in samples:
             group_index = int(
-                np.searchsorted(grouped_context_ids, context_ids[local_index])
+                np.searchsorted(
+                    grouped_context_ids,
+                    sample.token_position // self.context_size,
+                )
             )
             stratified.append(render_context(group_index, sample))
 

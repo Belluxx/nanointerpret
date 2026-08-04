@@ -16,6 +16,7 @@ from tqdm.auto import tqdm
 
 RESIDUAL_DTYPE = np.float16
 RESIDUAL_STORAGE_SCALE = 1 / 256
+ANALYSIS_VALUE_DTYPE = np.float16
 TRANSPOSE_TOKENS = 1_000_000
 
 
@@ -110,7 +111,7 @@ def save_analysis(
         value_output = np.lib.format.open_memmap(
             temporary / "values.npy",
             mode="w+",
-            dtype=np.float32,
+            dtype=ANALYSIS_VALUE_DTYPE,
             shape=(activation_count,),
         )
         cursors = feature_ptr[:-1].copy()

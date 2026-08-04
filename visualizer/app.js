@@ -181,7 +181,7 @@ function renderContextList(contexts, feature) {
 }
 
 const sampleGroups = [
-  ["Top activations", "10 strongest token activations", ["Top"]],
+  ["Top activations", "Strongest token activations", ["Top"]],
   ["Activation range", "Samples across the 25th–99th percentiles", ["25-50", "50-75", "75-90", "90-99"]],
   ["Random positives", "5 random activating examples", ["Random positive"]],
 ];
@@ -192,14 +192,10 @@ function renderView(content, feature, contexts, view) {
     return;
   }
 
-  if (!contexts.length) {
-    content.replaceChildren(element("p", "empty-state", "Not enough activation data for a stratified sample."));
-    return;
-  }
-
   const fragment = document.createDocumentFragment();
   for (const [title, description, buckets] of sampleGroups) {
     const groupContexts = contexts.filter((context) => buckets.includes(context.sample.bucket));
+    if (!groupContexts.length) continue;
     const section = element("section", "sample-group");
     const heading = element("header", "sample-heading");
     heading.append(element("h3", "", title), element("p", "", description));

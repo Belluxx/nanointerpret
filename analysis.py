@@ -13,6 +13,7 @@ from tqdm.auto import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src.data import (
+    ANALYSIS_VALUE_DTYPE,
     TokenCacheSpec,
     iter_context_batches,
     save_analysis,
@@ -128,12 +129,14 @@ def encode_residuals(
 
 
 def flatten_activations(
-    indices: Tensor, values: Tensor
+    indices: Tensor, values: Tensor, feature_dtype: np.dtype
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     firing = values > FIRING_THRESHOLD
     counts = firing.sum(dim=1).numpy().astype(np.uint32, copy=False)
-    feature_ids = indices[firing].numpy().astype(np.uint32, copy=False)
-    active_values = values[firing].numpy().astype(np.float32, copy=False)
+    feature_ids = indices[firing].numpy().astype(feature_dtype, copy=False)
+    active_values = values[firing].numpy().astype(
+        ANALYSIS_VALUE_DTYPE, copy=False
+    )
     return counts, feature_ids, active_values
 
 
@@ -176,6 +179,7 @@ def write_analysis(
         "activation_scale": float(config["activation_scale"]),
         "firing_threshold": FIRING_THRESHOLD,
         "activation_type": "topk_post_relu",
+        "value_dtype": np.dtype(ANALYSIS_VALUE_DTYPE).name,
         "device": str(device),
         "model_dtype": config["model_dtype"],
     }
@@ -188,6 +192,7 @@ def write_analysis(
         if token_count * int(config["k"]) <= np.iinfo(np.uint32).max
         else np.uint64
     )
+    feature_dtype = np.min_scalar_type(int(config["d_sae"]) - 1)
     row_ptr = np.empty(token_count + 1, dtype=pointer_dtype)
     row_ptr[0] = 0
     try:
@@ -224,7 +229,7 @@ def write_analysis(
                     int(config["sae_batch_size"]),
                 )
                 counts, feature_ids, active_values = flatten_activations(
-                    indices, values
+                    indices, values, feature_dtype
                 )
                 batch_tokens = len(counts)
                 cumulative = np.cumsum(counts, dtype=pointer_dtype)
@@ -250,21 +255,21 @@ def write_analysis(
             np.memmap(
                 feature_temporary,
                 mode="r",
-                dtype=np.uint32,
+                dtype=feature_dtype,
                 shape=(active_count,),
             )
             if active_count
-            else np.empty(0, dtype=np.uint32)
+            else np.empty(0, dtype=feature_dtype)
         )
         active_values = (
             np.memmap(
                 values_temporary,
                 mode="r",
-                dtype=np.float32,
+                dtype=ANALYSIS_VALUE_DTYPE,
                 shape=(active_count,),
             )
             if active_count
-            else np.empty(0, dtype=np.float32)
+            else np.empty(0, dtype=ANALYSIS_VALUE_DTYPE)
         )
         save_analysis(
             output_path,

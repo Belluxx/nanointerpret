@@ -14,6 +14,7 @@ from transformers import AutoTokenizer
 
 from src.data import load_analysis
 from src.feature_examples import (
+    COMPLETE_EXAMPLE_COUNT,
     DEFAULT_EXAMPLE_SEED,
     choose_activation_examples,
 )
@@ -115,7 +116,7 @@ def choose_examples(
         context_size,
         seed,
     )
-    if selections is None:
+    if len(selections) != COMPLETE_EXAMPLE_COUNT:
         return None
 
     return [
@@ -269,7 +270,7 @@ def main() -> None:
     if insufficient:
         print(
             f"Used '{INSUFFICIENT_TITLE}' for {insufficient:,} features "
-            "without the full requested evidence set."
+            "without the complete activation evidence set."
         )
 
 
