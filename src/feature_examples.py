@@ -22,6 +22,7 @@ COMPLETE_EXAMPLE_COUNT = (
     + len(STRATIFIED_BUCKETS) * STRATIFIED_EXAMPLES_PER_BUCKET
     + RANDOM_EXAMPLE_COUNT
 )
+RANDOM_SELECTION_ATTEMPTS = 64
 
 
 @dataclass(frozen=True)
@@ -71,23 +72,50 @@ def choose_activation_examples(
         *,
         randomize: bool,
     ) -> list[ActivationExample] | None:
-        available = [
-            int(rank)
-            for rank in ranks
-            if token_position_for_rank(int(rank)) not in used_positions
-        ]
+        def is_available(rank: int, require_new_context: bool) -> bool:
+            return (
+                token_position_for_rank(rank) not in used_positions
+                and (
+                    not require_new_context
+                    or context_index_for_rank(rank) not in used_contexts
+                )
+            )
+
+        def find_rank(require_new_context: bool) -> int | None:
+            if not randomize:
+                return next(
+                    (
+                        int(rank)
+                        for rank in ranks
+                        if is_available(int(rank), require_new_context)
+                    ),
+                    None,
+                )
+
+            for _ in range(RANDOM_SELECTION_ATTEMPTS):
+                rank = int(ranks[rng.randrange(len(ranks))])
+                if is_available(rank, require_new_context):
+                    return rank
+
+            # Collisions are normally rare. If they are not, use reservoir
+            # sampling to choose uniformly without building a large list.
+            selected_rank = None
+            candidate_count = 0
+            for rank in ranks:
+                rank = int(rank)
+                if is_available(rank, require_new_context):
+                    candidate_count += 1
+                    if rng.randrange(candidate_count) == 0:
+                        selected_rank = rank
+            return selected_rank
+
         selected = []
         for _ in range(size):
-            if not available:
+            rank = find_rank(require_new_context=True)
+            if rank is None:
+                rank = find_rank(require_new_context=False)
+            if rank is None:
                 return None
-            unique_context = [
-                rank
-                for rank in available
-                if context_index_for_rank(rank) not in used_contexts
-            ]
-            candidates = unique_context or available
-            rank = rng.choice(candidates) if randomize else candidates[0]
-            available.remove(rank)
             used_positions.add(token_position_for_rank(rank))
             used_contexts.add(context_index_for_rank(rank))
             selected.append(make_example(rank, bucket))
