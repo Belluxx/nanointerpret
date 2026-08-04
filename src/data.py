@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterator
@@ -15,6 +16,7 @@ from tqdm.auto import tqdm
 
 RESIDUAL_DTYPE = np.float16
 RESIDUAL_STORAGE_SCALE = 1 / 256
+TRANSPOSE_TOKENS = 1_000_000
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,174 @@ class ResidualCacheSpec:
     context_size: int
     activation_layer: int | None
     model_dtype: str
+
+
+@dataclass(frozen=True)
+class FeatureAnalysis:
+    metadata: dict
+    token_ids: np.ndarray
+    context_ptr: np.ndarray
+    feature_ptr: np.ndarray
+    token_positions: np.ndarray
+    values: np.ndarray
+    feature_max: np.ndarray
+
+
+def load_analysis(path: Path) -> FeatureAnalysis:
+    metadata = json.loads((path / "metadata.json").read_text())
+    if metadata.get("format") != "csc":
+        raise ValueError(
+            "the analysis artifact must use the feature-major CSC format"
+        )
+
+    def load(name: str) -> np.ndarray:
+        return np.load(path / f"{name}.npy", mmap_mode="r")
+
+    return FeatureAnalysis(
+        metadata=metadata,
+        token_ids=load("token_ids"),
+        context_ptr=load("context_ptr"),
+        feature_ptr=load("feature_ptr"),
+        token_positions=load("token_positions"),
+        values=load("values"),
+        feature_max=load("feature_max"),
+    )
+
+
+def save_feature_major_analysis(
+    output_path: Path,
+    metadata: dict,
+    token_ids: np.ndarray,
+    context_ptr: np.ndarray,
+    row_ptr: np.ndarray,
+    feature_ids: np.ndarray,
+    values: np.ndarray,
+    feature_counts: np.ndarray,
+    feature_max: np.ndarray | None = None,
+) -> None:
+    if output_path.exists():
+        raise FileExistsError(f"analysis output already exists: {output_path}")
+
+    token_count = len(token_ids)
+    activation_count = len(feature_ids)
+    d_sae = int(metadata["d_sae"])
+    pointer_dtype = (
+        np.uint32 if activation_count <= np.iinfo(np.uint32).max else np.uint64
+    )
+    position_dtype = (
+        np.uint32 if token_count <= np.iinfo(np.uint32).max else np.uint64
+    )
+    feature_ptr = np.empty(d_sae + 1, dtype=pointer_dtype)
+    feature_ptr[0] = 0
+    np.cumsum(feature_counts, dtype=pointer_dtype, out=feature_ptr[1:])
+    if int(feature_ptr[-1]) != activation_count:
+        raise ValueError("feature counts do not match the activation count")
+
+    temporary = output_path.with_name(output_path.name + ".tmp")
+    temporary.mkdir(parents=True)
+    try:
+        token_output = np.lib.format.open_memmap(
+            temporary / "token_ids.npy",
+            mode="w+",
+            dtype=np.uint32,
+            shape=(token_count,),
+        )
+        for start in range(0, token_count, TRANSPOSE_TOKENS):
+            stop = min(start + TRANSPOSE_TOKENS, token_count)
+            token_output[start:stop] = token_ids[start:stop]
+        token_output.flush()
+        del token_output
+
+        np.save(temporary / "context_ptr.npy", context_ptr)
+        np.save(temporary / "feature_ptr.npy", feature_ptr)
+        position_output = np.lib.format.open_memmap(
+            temporary / "token_positions.npy",
+            mode="w+",
+            dtype=position_dtype,
+            shape=(activation_count,),
+        )
+        value_output = np.lib.format.open_memmap(
+            temporary / "values.npy",
+            mode="w+",
+            dtype=np.float32,
+            shape=(activation_count,),
+        )
+        maxima = (
+            np.asarray(feature_max, dtype=np.float32).copy()
+            if feature_max is not None
+            else np.zeros(d_sae, dtype=np.float32)
+        )
+        cursors = feature_ptr[:-1].copy()
+
+        progress = tqdm(
+            total=token_count,
+            unit="tok",
+            desc="Index features",
+            dynamic_ncols=True,
+        )
+        try:
+            for token_start in range(0, token_count, TRANSPOSE_TOKENS):
+                token_stop = min(token_start + TRANSPOSE_TOKENS, token_count)
+                activation_start = int(row_ptr[token_start])
+                activation_stop = int(row_ptr[token_stop])
+                if activation_start == activation_stop:
+                    progress.update(token_stop - token_start)
+                    continue
+                chunk_ids = feature_ids[activation_start:activation_stop]
+                order = np.argsort(chunk_ids, kind="stable")
+                sorted_ids = chunk_ids[order]
+                counts = np.diff(row_ptr[token_start : token_stop + 1])
+                positions = np.repeat(
+                    np.arange(token_start, token_stop, dtype=position_dtype),
+                    counts,
+                )[order]
+                chunk_values = values[activation_start:activation_stop][order]
+                group_starts = np.concatenate(
+                    ([0], np.flatnonzero(sorted_ids[1:] != sorted_ids[:-1]) + 1)
+                )
+                group_stops = np.append(group_starts[1:], len(sorted_ids))
+
+                for group_start, group_stop in zip(group_starts, group_stops):
+                    feature_id = int(sorted_ids[group_start])
+                    output_start = int(cursors[feature_id])
+                    output_stop = output_start + int(group_stop - group_start)
+                    position_output[output_start:output_stop] = positions[
+                        group_start:group_stop
+                    ]
+                    value_output[output_start:output_stop] = chunk_values[
+                        group_start:group_stop
+                    ]
+                    cursors[feature_id] = output_stop
+                    if feature_max is None:
+                        maxima[feature_id] = max(
+                            maxima[feature_id],
+                            float(chunk_values[group_start:group_stop].max()),
+                        )
+                progress.update(token_stop - token_start)
+        finally:
+            progress.close()
+
+        if not np.array_equal(cursors, feature_ptr[1:]):
+            raise RuntimeError(
+                "feature index construction did not write every activation"
+            )
+        position_output.flush()
+        value_output.flush()
+        del position_output, value_output
+        np.save(temporary / "feature_max.npy", maxima)
+
+        stored_metadata = {
+            **metadata,
+            "format": "csc",
+            "activation_count": activation_count,
+        }
+        (temporary / "metadata.json").write_text(
+            json.dumps(stored_metadata, indent=2) + "\n"
+        )
+        os.replace(temporary, output_path)
+    except BaseException:
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise
 
 
 def token_cache_paths(spec: TokenCacheSpec) -> tuple[Path, Path, Path]:

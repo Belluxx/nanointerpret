@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +15,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from src.data import (
     TokenCacheSpec,
     iter_context_batches,
+    save_feature_major_analysis,
     token_cache_is_valid,
     token_cache_paths,
 )
@@ -50,7 +50,7 @@ def parse_args() -> argparse.Namespace:
         "--output",
         type=Path,
         default=None,
-        help="Output NPZ path. Default: <sae-dir>/analysis.npz.",
+        help="Output directory. Default: <sae-dir>/analysis.",
     )
     parser.add_argument(
         "--max-tokens",
@@ -154,10 +154,13 @@ def write_analysis(
     checkpoint_path: Path,
     max_tokens: int | None,
 ) -> None:
+    if output_path.exists():
+        raise FileExistsError(f"analysis output already exists: {output_path}")
+
     context_size = int(config["context_size"])
     token_count = len(evaluation_tokens)
     metadata = {
-        "format": "csr",
+        "format": "csc",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "model_id": config["model_id"],
         "sae_checkpoint": str(checkpoint_path),
@@ -184,9 +187,8 @@ def write_analysis(
     }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output_path.with_suffix(output_path.suffix + ".tmp")
-    feature_temporary = temporary.with_suffix(temporary.suffix + ".feature_ids")
-    values_temporary = temporary.with_suffix(temporary.suffix + ".values")
+    feature_temporary = output_path.with_name(output_path.name + ".feature_ids.tmp")
+    values_temporary = output_path.with_name(output_path.name + ".values.tmp")
     pointer_dtype = (
         np.uint32
         if token_count * int(config["k"]) <= np.iinfo(np.uint32).max
@@ -202,6 +204,8 @@ def write_analysis(
     try:
         processed_tokens = 0
         active_count = 0
+        feature_counts = np.zeros(int(config["d_sae"]), dtype=np.uint64)
+        feature_max = np.zeros(int(config["d_sae"]), dtype=np.float32)
         with feature_temporary.open("wb") as feature_output, values_temporary.open(
             "wb"
         ) as values_output:
@@ -233,6 +237,10 @@ def write_analysis(
                 ] = active_count + cumulative
                 feature_ids.tofile(feature_output)
                 active_values.tofile(values_output)
+                feature_counts += np.bincount(
+                    feature_ids, minlength=len(feature_counts)
+                ).astype(np.uint64)
+                np.maximum.at(feature_max, feature_ids, active_values)
                 processed_tokens += batch_tokens
                 active_count += len(feature_ids)
                 progress.update(batch_tokens)
@@ -262,20 +270,19 @@ def write_analysis(
             if active_count
             else np.empty(0, dtype=np.float32)
         )
-        with temporary.open("wb") as output:
-            np.savez_compressed(
-                output,
-                metadata=json.dumps(metadata, separators=(",", ":")),
-                token_ids=np.asarray(evaluation_tokens, dtype=np.uint32),
-                context_ptr=context_ptr,
-                row_ptr=row_ptr,
-                feature_ids=feature_ids,
-                values=active_values,
-            )
-        os.replace(temporary, output_path)
+        save_feature_major_analysis(
+            output_path,
+            metadata,
+            evaluation_tokens,
+            context_ptr,
+            row_ptr,
+            feature_ids,
+            active_values,
+            feature_counts,
+            feature_max,
+        )
     finally:
         progress.close()
-        temporary.unlink(missing_ok=True)
         feature_temporary.unlink(missing_ok=True)
         values_temporary.unlink(missing_ok=True)
 
@@ -297,6 +304,9 @@ def main() -> None:
     evaluation_tokens = np.memmap(
         evaluation_path, mode="r", dtype=np.uint32, shape=(available_tokens,)
     )[:token_count]
+    output_path = args.output or args.sae_dir / "analysis"
+    if output_path.exists():
+        raise FileExistsError(f"analysis output already exists: {output_path}")
 
     device = choose_device(args.device)
     tokenizer = AutoTokenizer.from_pretrained(config["model_id"])
@@ -321,7 +331,6 @@ def main() -> None:
         )
 
     sae = load_sae(args.sae_dir, config, device)
-    output_path = args.output or args.sae_dir / "analysis.npz"
     model_batch_size = args.model_batch_size or int(config["model_batch_size"])
     print(
         f"Device: {device} | Evaluation: {token_count:,} tokens | "

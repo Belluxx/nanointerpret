@@ -13,6 +13,7 @@ from openai import OpenAI
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
 
+from src.data import load_analysis
 from src.feature_examples import (
     DEFAULT_EXAMPLE_SEED,
     choose_activation_examples,
@@ -86,13 +87,11 @@ def render_example(
     tokenizer,
     token_ids: np.ndarray,
     context_ptr: np.ndarray,
-    row_ptr: np.ndarray,
-    activation_index: int,
+    token_position: int,
     activation: float,
     percentile: float,
     bucket: str,
 ) -> Example:
-    token_position = int(np.searchsorted(row_ptr, activation_index, side="right") - 1)
     context_index = int(
         np.searchsorted(context_ptr, token_position, side="right") - 1
     )
@@ -106,20 +105,18 @@ def render_example(
 
 def choose_examples(
     feature_id: int,
-    activation_indices: np.ndarray,
+    token_positions: np.ndarray,
     values: np.ndarray,
     token_ids: np.ndarray,
     context_ptr: np.ndarray,
-    row_ptr: np.ndarray,
     tokenizer,
     seed: int,
 ) -> list[Example] | None:
     selections = choose_activation_examples(
         feature_id,
-        activation_indices,
+        token_positions,
         values,
         context_ptr,
-        row_ptr,
         seed,
     )
     if selections is None:
@@ -130,8 +127,7 @@ def choose_examples(
             tokenizer,
             token_ids,
             context_ptr,
-            row_ptr,
-            selection.activation_index,
+            selection.token_position,
             selection.activation,
             selection.percentile,
             selection.bucket,
@@ -215,76 +211,62 @@ def main() -> None:
     api_key = args.api_key or os.environ.get("OPENAI_API_KEY") or "not-needed"
     client = OpenAI(base_url=args.base_url, api_key=api_key)
 
-    with np.load(args.analysis) as analysis:
-        metadata = json.loads(analysis["metadata"].item())
-        token_ids = analysis["token_ids"]
-        context_ptr = analysis["context_ptr"]
-        row_ptr = analysis["row_ptr"]
-        feature_ids = analysis["feature_ids"]
-        values = analysis["values"]
+    analysis = load_analysis(args.analysis)
+    metadata = analysis.metadata
+    d_sae = int(metadata["d_sae"])
+    requested = args.feature_ids or range(d_sae)
+    invalid = [feature_id for feature_id in requested if feature_id >= d_sae]
+    if invalid:
+        raise ValueError(f"feature IDs must be below {d_sae}; got {invalid[0]}")
 
-        d_sae = int(metadata["d_sae"])
-        requested = args.feature_ids or range(d_sae)
-        invalid = [feature_id for feature_id in requested if feature_id >= d_sae]
-        if invalid:
-            raise ValueError(
-                f"feature IDs must be below {d_sae}; got {invalid[0]}"
-            )
+    tokenizer = AutoTokenizer.from_pretrained(metadata["model_id"])
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output_path.with_suffix(output_path.suffix + ".tmp")
 
-        tokenizer = AutoTokenizer.from_pretrained(metadata["model_id"])
-        counts = np.bincount(feature_ids, minlength=d_sae)
-        offsets = np.concatenate(([0], np.cumsum(counts)))
-        feature_order = np.argsort(feature_ids, kind="stable")
+    def interpret_feature(feature_id: int) -> tuple[int, str, bool]:
+        start, stop = analysis.feature_ptr[feature_id : feature_id + 2]
+        examples = choose_examples(
+            feature_id,
+            analysis.token_positions[int(start) : int(stop)],
+            analysis.values[int(start) : int(stop)],
+            analysis.token_ids,
+            analysis.context_ptr,
+            tokenizer,
+            args.seed,
+        )
+        if examples is None:
+            return feature_id, INSUFFICIENT_TITLE, True
+        title = request_title(
+            client,
+            args.model,
+            feature_prompt(examples),
+            reasoning=not args.no_reasoning,
+            max_tokens=args.max_tokens,
+        )
+        return feature_id, title, False
 
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = output_path.with_suffix(output_path.suffix + ".tmp")
-
-        def interpret_feature(feature_id: int) -> tuple[int, str, bool]:
-            start, stop = offsets[feature_id : feature_id + 2]
-            activation_indices = feature_order[start:stop]
-            examples = choose_examples(
-                feature_id,
-                activation_indices,
-                values,
-                token_ids,
-                context_ptr,
-                row_ptr,
-                tokenizer,
-                args.seed,
-            )
-            if examples is None:
-                return feature_id, INSUFFICIENT_TITLE, True
-            title = request_title(
-                client,
-                args.model,
-                feature_prompt(examples),
-                reasoning=not args.no_reasoning,
-                max_tokens=args.max_tokens,
-            )
-            return feature_id, title, False
-
-        insufficient = 0
-        with temporary.open("w", encoding="utf-8") as output, ThreadPoolExecutor(
-            max_workers=args.concurrent
-        ) as executor:
-            results = executor.map(interpret_feature, requested)
-            for feature_id, title, was_insufficient in tqdm(
-                results,
-                total=len(requested),
-                unit="feature",
-                desc="Interpret",
-                dynamic_ncols=True,
-            ):
-                insufficient += was_insufficient
-                output.write(
-                    json.dumps(
-                        {"feature_id": feature_id, "title": title},
-                        ensure_ascii=False,
-                    )
-                    + "\n"
+    insufficient = 0
+    with temporary.open("w", encoding="utf-8") as output, ThreadPoolExecutor(
+        max_workers=args.concurrent
+    ) as executor:
+        results = executor.map(interpret_feature, requested)
+        for feature_id, title, was_insufficient in tqdm(
+            results,
+            total=len(requested),
+            unit="feature",
+            desc="Interpret",
+            dynamic_ncols=True,
+        ):
+            insufficient += was_insufficient
+            output.write(
+                json.dumps(
+                    {"feature_id": feature_id, "title": title},
+                    ensure_ascii=False,
                 )
-                output.flush()
-        os.replace(temporary, output_path)
+                + "\n"
+            )
+            output.flush()
+    os.replace(temporary, output_path)
 
     print(f"Saved {len(requested):,} feature names to {output_path}")
     if insufficient:

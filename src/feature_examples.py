@@ -18,7 +18,7 @@ STRATIFIED_BUCKETS = (
 
 @dataclass(frozen=True)
 class ActivationExample:
-    activation_index: int
+    token_position: int
     activation: float
     percentile: float
     bucket: str
@@ -26,32 +26,27 @@ class ActivationExample:
 
 def choose_activation_examples(
     feature_id: int,
-    activation_indices: np.ndarray,
+    token_positions: np.ndarray,
     values: np.ndarray,
     context_ptr: np.ndarray,
-    row_ptr: np.ndarray,
     seed: int = DEFAULT_EXAMPLE_SEED,
 ) -> list[ActivationExample] | None:
-    feature_values = values[activation_indices]
-    count = len(feature_values)
+    count = len(values)
     if count < 10:
         return None
 
-    ranked_indices = np.argsort(feature_values, kind="stable")
+    ranked_indices = np.argsort(values, kind="stable")
     inverse_rank = np.empty(count, dtype=np.int64)
     inverse_rank[ranked_indices] = np.arange(count)
-    token_positions = np.searchsorted(
-        row_ptr, activation_indices, side="right"
-    ) - 1
     context_indices = np.searchsorted(
         context_ptr, token_positions, side="right"
     ) - 1
-    used_activations: set[int] = set()
+    used_positions: set[int] = set()
     used_contexts: set[int] = set()
     rng = random.Random(seed + feature_id)
 
-    def activation_index_for_rank(rank: int) -> int:
-        return int(activation_indices[int(ranked_indices[rank])])
+    def token_position_for_rank(rank: int) -> int:
+        return int(token_positions[int(ranked_indices[rank])])
 
     def context_index_for_rank(rank: int) -> int:
         return int(context_indices[int(ranked_indices[rank])])
@@ -59,8 +54,8 @@ def choose_activation_examples(
     def make_example(rank: int, bucket: str) -> ActivationExample:
         local_index = int(ranked_indices[rank])
         return ActivationExample(
-            activation_index=int(activation_indices[local_index]),
-            activation=float(feature_values[local_index]),
+            token_position=int(token_positions[local_index]),
+            activation=float(values[local_index]),
             percentile=100.0 * (rank + 1) / count,
             bucket=bucket,
         )
@@ -75,7 +70,7 @@ def choose_activation_examples(
         available = [
             int(rank)
             for rank in ranks
-            if activation_index_for_rank(int(rank)) not in used_activations
+            if token_position_for_rank(int(rank)) not in used_positions
         ]
         selected = []
         for _ in range(size):
@@ -89,7 +84,7 @@ def choose_activation_examples(
             candidates = unique_context or available
             rank = rng.choice(candidates) if randomize else candidates[0]
             available.remove(rank)
-            used_activations.add(activation_index_for_rank(rank))
+            used_positions.add(token_position_for_rank(rank))
             used_contexts.add(context_index_for_rank(rank))
             selected.append(make_example(rank, bucket))
         return selected

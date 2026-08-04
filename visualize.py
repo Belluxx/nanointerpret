@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 import numpy as np
 from transformers import AutoTokenizer
 
+from src.data import load_analysis
 from src.feature_examples import choose_activation_examples
 
 
@@ -79,16 +80,14 @@ def load_titles(path: Path | None) -> dict[int, str]:
 
 class AnalysisData:
     def __init__(self, analysis_path: Path, names_path: Path | None, tokenizer=None):
-        with np.load(analysis_path) as analysis:
-            self.metadata = json.loads(analysis["metadata"].item())
-            self.token_ids = analysis["token_ids"]
-            self.context_ptr = analysis["context_ptr"]
-            self.row_ptr = analysis["row_ptr"]
-            self.feature_ids = analysis["feature_ids"]
-            self.values = analysis["values"]
-
-        if self.metadata.get("format") != "csr":
-            raise ValueError("the visualizer requires a CSR analysis artifact")
+        analysis = load_analysis(analysis_path)
+        self.metadata = analysis.metadata
+        self.token_ids = analysis.token_ids
+        self.context_ptr = analysis.context_ptr
+        self.feature_ptr = analysis.feature_ptr
+        self.token_positions = analysis.token_positions
+        self.values = analysis.values
+        self.feature_max = analysis.feature_max
 
         self.d_sae = int(self.metadata["d_sae"])
         self.tokenizer = tokenizer or AutoTokenizer.from_pretrained(
@@ -96,15 +95,13 @@ class AnalysisData:
         )
 
         titles = load_titles(names_path)
-        counts = np.bincount(self.feature_ids, minlength=self.d_sae)
-        maxima = np.zeros(self.d_sae, dtype=np.float32)
-        np.maximum.at(maxima, self.feature_ids, self.values)
+        counts = np.diff(self.feature_ptr)
         self.features = [
             {
                 "id": int(feature_id),
                 "title": titles.get(int(feature_id)),
                 "activation_count": int(counts[feature_id]),
-                "max_activation": float(maxima[feature_id]),
+                "max_activation": float(self.feature_max[feature_id]),
             }
             for feature_id in np.flatnonzero(counts)
         ]
@@ -134,14 +131,12 @@ class AnalysisData:
         if not 0 <= feature_id < self.d_sae:
             raise KeyError(feature_id)
 
-        activation_indices = np.flatnonzero(self.feature_ids == feature_id)
-        if not len(activation_indices):
+        start, stop = self.feature_ptr[feature_id : feature_id + 2]
+        if start == stop:
             raise KeyError(feature_id)
 
-        token_positions = np.searchsorted(
-            self.row_ptr, activation_indices, side="right"
-        ) - 1
-        activation_values = self.values[activation_indices]
+        token_positions = self.token_positions[int(start) : int(stop)]
+        activation_values = self.values[int(start) : int(stop)]
         activating_token_ids = self.token_ids[token_positions]
         unique_token_ids, token_groups, token_counts = np.unique(
             activating_token_ids, return_inverse=True, return_counts=True
@@ -226,7 +221,7 @@ class AnalysisData:
             }
             if sample is not None:
                 local_index = int(
-                    np.searchsorted(activation_indices, sample.activation_index)
+                    np.searchsorted(token_positions, sample.token_position)
                 )
                 context["sample"] = {
                     "bucket": sample.bucket,
@@ -245,14 +240,13 @@ class AnalysisData:
         stratified = []
         samples = choose_activation_examples(
             feature_id,
-            activation_indices,
-            self.values,
+            token_positions,
+            activation_values,
             self.context_ptr,
-            self.row_ptr,
         )
         for sample in samples or []:
             local_index = int(
-                np.searchsorted(activation_indices, sample.activation_index)
+                np.searchsorted(token_positions, sample.token_position)
             )
             group_index = int(
                 np.searchsorted(grouped_context_ids, context_ids[local_index])
@@ -260,7 +254,7 @@ class AnalysisData:
             stratified.append(render_context(group_index, sample))
 
         return {
-            "activation_count": int(len(activation_indices)),
+            "activation_count": int(len(token_positions)),
             "context_count": int(len(grouped_context_ids)),
             "token_groups": token_summaries,
             "contexts": {
