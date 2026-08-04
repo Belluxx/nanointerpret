@@ -26,72 +26,92 @@
 
   <rect width="1400" height="420" class="background"/>
 
-  <g class="foreground" font-family="Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
-    <text x="64" y="184" font-size="88" font-weight="650" letter-spacing="-5.5">nano</text>
-    <text x="64" y="266" font-size="88" font-weight="350" letter-spacing="-5.5">interpret</text>
-  </g>
+  <text x="64" y="232" class="foreground" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="72" font-weight="600" letter-spacing="-4">nanointerpret</text>
   <text x="68" y="316" class="muted" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" letter-spacing="1.5">SPARSE AUTOENCODER PLAYGROUND</text>
 
-  <g transform="translate(758 94)">
-    <g class="faint">
-      <rect x="0" y="0" width="92" height="2"/>
-      <rect x="0" y="20" width="128" height="2"/>
-      <rect x="0" y="40" width="74" height="2"/>
-      <rect x="0" y="60" width="151" height="2"/>
-      <rect x="0" y="80" width="109" height="2"/>
-      <rect x="0" y="100" width="137" height="2"/>
-      <rect x="0" y="120" width="81" height="2"/>
-      <rect x="0" y="140" width="155" height="2"/>
-      <rect x="0" y="160" width="116" height="2"/>
-      <rect x="0" y="180" width="143" height="2"/>
-      <rect x="0" y="200" width="99" height="2"/>
-      <rect x="0" y="220" width="132" height="2"/>
-
-      <rect x="424" y="0" width="72" height="2"/>
-      <rect x="424" y="20" width="119" height="2"/>
-      <rect x="424" y="40" width="86" height="2"/>
-      <rect x="424" y="60" width="141" height="2"/>
-      <rect x="424" y="80" width="101" height="2"/>
-      <rect x="424" y="100" width="130" height="2"/>
-      <rect x="424" y="120" width="79" height="2"/>
-      <rect x="424" y="140" width="151" height="2"/>
-      <rect x="424" y="160" width="110" height="2"/>
-      <rect x="424" y="180" width="135" height="2"/>
-      <rect x="424" y="200" width="95" height="2"/>
-      <rect x="424" y="220" width="125" height="2"/>
+  <g transform="translate(780 90)">
+    <g fill="none" class="faint-stroke" stroke-width="1">
+      <path d="M20 59 C104 59 166 1 248 1"/>
+      <path d="M20 184 C104 184 166 239 248 239"/>
+      <path d="M272 1 C354 1 416 64 500 64"/>
+      <path d="M272 239 C354 239 416 189 500 189"/>
     </g>
 
-    <g fill="none" class="faint-stroke">
-      <path d="M92 1 H234 M128 21 H234 M74 41 H234 M109 81 H234 M137 101 H234 M81 121 H234 M116 161 H234 M99 201 H234"/>
+    <g fill="none" class="foreground-stroke" stroke-width="1.1">
+      <path d="M20 59 C102 59 166 15 248 15"/>
+      <path d="M20 115 C112 115 166 15 248 15"/>
+
+      <path d="M20 76 C108 76 170 99 248 99"/>
+      <path d="M20 131 C104 131 168 99 248 99"/>
+      <path d="M20 184 C118 184 180 99 248 99"/>
+
+      <path d="M20 76 C110 76 174 155 248 155"/>
+      <path d="M20 115 C100 115 166 155 248 155"/>
+      <path d="M20 150 C108 150 174 155 248 155"/>
+      <path d="M20 166 C106 166 174 155 248 155"/>
+
+      <path d="M20 59 C112 59 180 225 248 225"/>
+      <path d="M20 131 C110 131 176 225 248 225"/>
+      <path d="M20 184 C108 184 174 225 248 225"/>
+
+      <path d="M272 15 C354 15 416 64 500 64"/>
+      <path d="M272 15 C346 15 408 139 500 139"/>
+      <path d="M272 15 C350 15 416 175 500 175"/>
+
+      <path d="M272 99 C350 99 412 81 500 81"/>
+      <path d="M272 99 C354 99 416 118 500 118"/>
+
+      <path d="M272 155 C350 155 412 81 500 81"/>
+      <path d="M272 155 C354 155 416 102 500 102"/>
+      <path d="M272 155 C350 155 412 139 500 139"/>
+
+      <path d="M272 225 C348 225 410 64 500 64"/>
+      <path d="M272 225 C348 225 410 154 500 154"/>
+      <path d="M272 225 C354 225 416 189 500 189"/>
     </g>
 
-    <g class="foreground-stroke" stroke-width="1.25">
-      <path d="M151 61 H234 M155 141 H234 M143 181 H234 M132 221 H234"/>
+    <g class="muted">
+      <circle cx="12" cy="59" r="3.5"/>
+      <circle cx="12" cy="76" r="3.5"/>
+      <circle cx="12" cy="94" r="3.5"/>
+      <circle cx="12" cy="115" r="3.5"/>
+      <circle cx="12" cy="131" r="3.5"/>
+      <circle cx="12" cy="150" r="3.5"/>
+      <circle cx="12" cy="166" r="3.5"/>
+      <circle cx="12" cy="184" r="3.5"/>
+
+      <circle cx="508" cy="64" r="3.5"/>
+      <circle cx="508" cy="81" r="3.5"/>
+      <circle cx="508" cy="102" r="3.5"/>
+      <circle cx="508" cy="118" r="3.5"/>
+      <circle cx="508" cy="139" r="3.5"/>
+      <circle cx="508" cy="154" r="3.5"/>
+      <circle cx="508" cy="175" r="3.5"/>
+      <circle cx="508" cy="189" r="3.5"/>
     </g>
 
-    <g class="hollow faint-stroke">
-      <circle cx="246" cy="1" r="3.5"/>
-      <circle cx="246" cy="21" r="3.5"/>
-      <circle cx="246" cy="41" r="3.5"/>
-      <circle cx="246" cy="81" r="3.5"/>
-      <circle cx="246" cy="101" r="3.5"/>
-      <circle cx="246" cy="121" r="3.5"/>
-      <circle cx="246" cy="161" r="3.5"/>
-      <circle cx="246" cy="201" r="3.5"/>
+    <g class="hollow faint-stroke" stroke-width="1.25">
+      <circle cx="260" cy="1" r="3.25"/>
+      <circle cx="260" cy="29" r="3.25"/>
+      <circle cx="260" cy="43" r="3.25"/>
+      <circle cx="260" cy="57" r="3.25"/>
+      <circle cx="260" cy="71" r="3.25"/>
+      <circle cx="260" cy="85" r="3.25"/>
+      <circle cx="260" cy="113" r="3.25"/>
+      <circle cx="260" cy="127" r="3.25"/>
+      <circle cx="260" cy="141" r="3.25"/>
+      <circle cx="260" cy="169" r="3.25"/>
+      <circle cx="260" cy="183" r="3.25"/>
+      <circle cx="260" cy="197" r="3.25"/>
+      <circle cx="260" cy="211" r="3.25"/>
+      <circle cx="260" cy="239" r="3.25"/>
     </g>
 
     <g class="foreground">
-      <circle cx="246" cy="61" r="4.5"/>
-      <circle cx="246" cy="141" r="4.5"/>
-      <circle cx="246" cy="181" r="4.5"/>
-      <circle cx="246" cy="221" r="4.5"/>
-    </g>
-
-    <g fill="none" class="foreground-stroke" stroke-width="1.25">
-      <path d="M258 61 C324 61 350 72 424 81"/>
-      <path d="M258 141 C326 141 350 128 424 121"/>
-      <path d="M258 181 C324 181 350 190 424 201"/>
-      <path d="M258 221 C326 221 350 215 424 221"/>
+      <circle cx="260" cy="15" r="4.5"/>
+      <circle cx="260" cy="99" r="4.5"/>
+      <circle cx="260" cy="155" r="4.5"/>
+      <circle cx="260" cy="225" r="4.5"/>
     </g>
   </g>
 </svg>
