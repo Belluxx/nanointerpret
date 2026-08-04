@@ -47,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_titles(path: Path | None) -> dict[int, str]:
+def load_titles(path: Path | None) -> dict[int, str | None]:
     if path is None:
         return {}
 
@@ -58,7 +58,10 @@ def load_titles(path: Path | None) -> dict[int, str]:
                 continue
             try:
                 result = json.loads(line)
-                titles[int(result["feature_id"])] = str(result["title"])
+                title = result["title"]
+                if title is not None and not isinstance(title, str):
+                    raise TypeError("feature title must be a string or null")
+                titles[int(result["feature_id"])] = title
             except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
                 raise ValueError(
                     f"invalid feature title on line {line_number} of {path}"

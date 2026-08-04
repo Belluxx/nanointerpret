@@ -164,7 +164,7 @@ def request_title(
     prompt: str,
     reasoning: bool = True,
     max_tokens: int | None = None,
-) -> str:
+) -> str | None:
     reasoning_options = {} if reasoning else {"reasoning_effort": "none"}
     if max_tokens is None:
         max_tokens = 32_768 if reasoning else 64
@@ -201,8 +201,10 @@ def request_title(
                     )
                 )
             )
-            if not retryable or retry == MAX_RETRIES:
+            if not retryable:
                 raise
+            if retry == MAX_RETRIES:
+                return None
             time.sleep(RETRY_DELAY_SECONDS)
 
 
@@ -261,7 +263,7 @@ def main() -> None:
     completed, insufficient = resume_progress(temporary, requested)
     remaining = requested[completed:]
 
-    def interpret_feature(feature_id: int) -> tuple[int, str]:
+    def interpret_feature(feature_id: int) -> tuple[int, str | None]:
         start, stop = map(int, analysis.feature_ptr[feature_id : feature_id + 2])
         examples = choose_examples(
             feature_id,
