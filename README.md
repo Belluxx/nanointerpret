@@ -31,13 +31,13 @@ python3 record_activations.py --sae-dir artifacts/1B
 3. Name the features with an LLM:
 
 ```py
-# Around 5$ in API cost for 10K features
+# Around $2-$5 in API cost for 10K features
 
 python3 interpret_features.py --analysis artifacts/1B/analysis --base-url https://openrouter.ai/api/v1 --api-key [API_KEY] --model openai/gpt-5.6-luna --no-reasoning --concurrent 8
 ```
 
 > [!TIP]
-> If you want you can run it without `--no-reasoning` and it will produce higher quality feature titles but at a **MUCH** higher API cost (100$ to 2k$ depending on how hard the model thinks, instead of 5$)
+> If you want you can run it without `--no-reasoning` and it will produce higher quality feature titles but at a **MUCH** higher API cost (up to $200 depending on how long the model thinks)
 
 4. Browse the features and their strongest activation contexts:
 
