@@ -1,6 +1,6 @@
-# NanoInterpret
+# nanointerpret
 
-I find mechanistic interpretability of LLMs extremely interesting, so I built this repo to offer a minimal playground where you can play with Sparse Autoencoders, train many versions with different params and see some simple but cool interpretability results.
+This repo to offers a minimal self-contained playground where you can play with sparse autoencoders, trainin many versions of them with different params and see some simple but cool interpretability results.
 
 > [!NOTE]
 > I am by no means an expert in interpretability, I just wanted to get started with an hands-on approach and share the results publicly.
