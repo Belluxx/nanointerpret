@@ -25,7 +25,7 @@ python3 train.py --output-dir artifacts/1B --train-tokens 1000000000 --checkpoin
 2. Extract feature activation stats:
 
 ```py
-python3 analysis.py --sae-dir artifacts/1B
+python3 record_activations.py --sae-dir artifacts/1B
 ```
 
 3. Name the features with an LLM:

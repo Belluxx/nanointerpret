@@ -3,7 +3,7 @@
 Minimal training and feature interpretability analysis of LLMs with sparse autoencoders.
 
 - `train.py`: build token/residual caches, train and evaluate the SAE, save checkpoints, and plot metrics.
-- `analysis.py`: record and save SAE feature activations.
+- `record_activations.py`: record and save SAE feature activations.
 - `interpret_features.py`: ask an LLM to give concise titles to SAE features.
 - `visualize.py` and `visualizer/`: serve the local feature browser and its frontend.
 - `docs/experiments.md`: experiment results and reproduction commands.
