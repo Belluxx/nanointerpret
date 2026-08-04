@@ -51,7 +51,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help=(
             "Feature-title JSONL produced by interpret_features.py. "
-            "Default: feature_names.jsonl next to the analysis file, when present."
+            "Default: feature_names.jsonl next to the analysis directory, when present."
         ),
     )
     parser.add_argument("--host", default="127.0.0.1")
@@ -83,13 +83,13 @@ class AnalysisData:
         analysis = load_analysis(analysis_path)
         self.metadata = analysis.metadata
         self.token_ids = analysis.token_ids
-        self.context_ptr = analysis.context_ptr
         self.feature_ptr = analysis.feature_ptr
         self.token_positions = analysis.token_positions
         self.values = analysis.values
         self.feature_max = analysis.feature_max
 
         self.d_sae = int(self.metadata["d_sae"])
+        self.context_size = int(self.metadata["context_size"])
         self.tokenizer = tokenizer or AutoTokenizer.from_pretrained(
             self.metadata["model_id"]
         )
@@ -131,12 +131,12 @@ class AnalysisData:
         if not 0 <= feature_id < self.d_sae:
             raise KeyError(feature_id)
 
-        start, stop = self.feature_ptr[feature_id : feature_id + 2]
+        start, stop = map(int, self.feature_ptr[feature_id : feature_id + 2])
         if start == stop:
             raise KeyError(feature_id)
 
-        token_positions = self.token_positions[int(start) : int(stop)]
-        activation_values = self.values[int(start) : int(stop)]
+        token_positions = self.token_positions[start:stop]
+        activation_values = self.values[start:stop]
         activating_token_ids = self.token_ids[token_positions]
         unique_token_ids, token_groups, token_counts = np.unique(
             activating_token_ids, return_inverse=True, return_counts=True
@@ -179,9 +179,7 @@ class AnalysisData:
                 }
             )
 
-        context_ids = np.searchsorted(
-            self.context_ptr, token_positions, side="right"
-        ) - 1
+        context_ids = token_positions // self.context_size
 
         group_starts = np.concatenate(
             ([0], np.flatnonzero(np.diff(context_ids)) + 1)
@@ -192,8 +190,10 @@ class AnalysisData:
 
         def render_context(group_index: int, sample=None) -> dict:
             context_id = int(grouped_context_ids[group_index])
-            context_start = int(self.context_ptr[context_id])
-            context_stop = int(self.context_ptr[context_id + 1])
+            context_start = context_id * self.context_size
+            context_stop = min(
+                context_start + self.context_size, len(self.token_ids)
+            )
             token_slice = self.token_ids[context_start:context_stop]
 
             activation_start = int(
@@ -242,7 +242,7 @@ class AnalysisData:
             feature_id,
             token_positions,
             activation_values,
-            self.context_ptr,
+            self.context_size,
         )
         for sample in samples or []:
             local_index = int(

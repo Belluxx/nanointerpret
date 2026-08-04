@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass
 
@@ -28,7 +29,7 @@ def choose_activation_examples(
     feature_id: int,
     token_positions: np.ndarray,
     values: np.ndarray,
-    context_ptr: np.ndarray,
+    context_size: int,
     seed: int = DEFAULT_EXAMPLE_SEED,
 ) -> list[ActivationExample] | None:
     count = len(values)
@@ -36,11 +37,7 @@ def choose_activation_examples(
         return None
 
     ranked_indices = np.argsort(values, kind="stable")
-    inverse_rank = np.empty(count, dtype=np.int64)
-    inverse_rank[ranked_indices] = np.arange(count)
-    context_indices = np.searchsorted(
-        context_ptr, token_positions, side="right"
-    ) - 1
+    context_indices = token_positions // context_size
     used_positions: set[int] = set()
     used_contexts: set[int] = set()
     rng = random.Random(seed + feature_id)
@@ -96,10 +93,9 @@ def choose_activation_examples(
         return None
     examples = top_examples
 
-    rank_percentiles = 100.0 * (np.arange(count) + 1) / count
     for lower, upper, label in STRATIFIED_BUCKETS:
-        start = int(np.searchsorted(rank_percentiles, lower, side="left"))
-        stop = int(np.searchsorted(rank_percentiles, upper, side="left"))
+        start = math.ceil(lower * count / 100) - 1
+        stop = math.ceil(upper * count / 100) - 1
         if stop - start < STRATIFIED_EXAMPLES_PER_BUCKET:
             return None
         bucket_examples = select_examples(
@@ -112,9 +108,8 @@ def choose_activation_examples(
             return None
         examples.extend(bucket_examples)
 
-    random_ranks = (int(inverse_rank[index]) for index in range(count))
     random_examples = select_examples(
-        random_ranks, 5, "Random positive", randomize=True
+        range(count), 5, "Random positive", randomize=True
     )
     if random_examples is None:
         return None

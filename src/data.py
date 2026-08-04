@@ -46,7 +46,6 @@ class ResidualCacheSpec:
 class FeatureAnalysis:
     metadata: dict
     token_ids: np.ndarray
-    context_ptr: np.ndarray
     feature_ptr: np.ndarray
     token_positions: np.ndarray
     values: np.ndarray
@@ -55,10 +54,6 @@ class FeatureAnalysis:
 
 def load_analysis(path: Path) -> FeatureAnalysis:
     metadata = json.loads((path / "metadata.json").read_text())
-    if metadata.get("format") != "csc":
-        raise ValueError(
-            "the analysis artifact must use the feature-major CSC format"
-        )
 
     def load(name: str) -> np.ndarray:
         return np.load(path / f"{name}.npy", mmap_mode="r")
@@ -66,7 +61,6 @@ def load_analysis(path: Path) -> FeatureAnalysis:
     return FeatureAnalysis(
         metadata=metadata,
         token_ids=load("token_ids"),
-        context_ptr=load("context_ptr"),
         feature_ptr=load("feature_ptr"),
         token_positions=load("token_positions"),
         values=load("values"),
@@ -74,23 +68,22 @@ def load_analysis(path: Path) -> FeatureAnalysis:
     )
 
 
-def save_feature_major_analysis(
+def save_analysis(
     output_path: Path,
     metadata: dict,
     token_ids: np.ndarray,
-    context_ptr: np.ndarray,
     row_ptr: np.ndarray,
     feature_ids: np.ndarray,
     values: np.ndarray,
     feature_counts: np.ndarray,
-    feature_max: np.ndarray | None = None,
+    feature_max: np.ndarray,
 ) -> None:
     if output_path.exists():
         raise FileExistsError(f"analysis output already exists: {output_path}")
 
     token_count = len(token_ids)
     activation_count = len(feature_ids)
-    d_sae = int(metadata["d_sae"])
+    d_sae = len(feature_counts)
     pointer_dtype = (
         np.uint32 if activation_count <= np.iinfo(np.uint32).max else np.uint64
     )
@@ -106,19 +99,7 @@ def save_feature_major_analysis(
     temporary = output_path.with_name(output_path.name + ".tmp")
     temporary.mkdir(parents=True)
     try:
-        token_output = np.lib.format.open_memmap(
-            temporary / "token_ids.npy",
-            mode="w+",
-            dtype=np.uint32,
-            shape=(token_count,),
-        )
-        for start in range(0, token_count, TRANSPOSE_TOKENS):
-            stop = min(start + TRANSPOSE_TOKENS, token_count)
-            token_output[start:stop] = token_ids[start:stop]
-        token_output.flush()
-        del token_output
-
-        np.save(temporary / "context_ptr.npy", context_ptr)
+        np.save(temporary / "token_ids.npy", token_ids)
         np.save(temporary / "feature_ptr.npy", feature_ptr)
         position_output = np.lib.format.open_memmap(
             temporary / "token_positions.npy",
@@ -132,20 +113,14 @@ def save_feature_major_analysis(
             dtype=np.float32,
             shape=(activation_count,),
         )
-        maxima = (
-            np.asarray(feature_max, dtype=np.float32).copy()
-            if feature_max is not None
-            else np.zeros(d_sae, dtype=np.float32)
-        )
         cursors = feature_ptr[:-1].copy()
 
-        progress = tqdm(
+        with tqdm(
             total=token_count,
             unit="tok",
             desc="Index features",
             dynamic_ncols=True,
-        )
-        try:
+        ) as progress:
             for token_start in range(0, token_count, TRANSPOSE_TOKENS):
                 token_stop = min(token_start + TRANSPOSE_TOKENS, token_count)
                 activation_start = int(row_ptr[token_start])
@@ -178,14 +153,7 @@ def save_feature_major_analysis(
                         group_start:group_stop
                     ]
                     cursors[feature_id] = output_stop
-                    if feature_max is None:
-                        maxima[feature_id] = max(
-                            maxima[feature_id],
-                            float(chunk_values[group_start:group_stop].max()),
-                        )
                 progress.update(token_stop - token_start)
-        finally:
-            progress.close()
 
         if not np.array_equal(cursors, feature_ptr[1:]):
             raise RuntimeError(
@@ -194,15 +162,9 @@ def save_feature_major_analysis(
         position_output.flush()
         value_output.flush()
         del position_output, value_output
-        np.save(temporary / "feature_max.npy", maxima)
-
-        stored_metadata = {
-            **metadata,
-            "format": "csc",
-            "activation_count": activation_count,
-        }
+        np.save(temporary / "feature_max.npy", feature_max)
         (temporary / "metadata.json").write_text(
-            json.dumps(stored_metadata, indent=2) + "\n"
+            json.dumps(metadata, indent=2) + "\n"
         )
         os.replace(temporary, output_path)
     except BaseException:

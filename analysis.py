@@ -15,7 +15,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from src.data import (
     TokenCacheSpec,
     iter_context_batches,
-    save_feature_major_analysis,
+    save_analysis,
     token_cache_is_valid,
     token_cache_paths,
 )
@@ -127,15 +127,13 @@ def encode_residuals(
     return torch.cat(indices), torch.cat(values)
 
 
-def csr_activations(
+def flatten_activations(
     indices: Tensor, values: Tensor
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    sorted_ids, order = indices.sort(dim=1)
-    sorted_values = values.gather(1, order)
-    firing = sorted_values > FIRING_THRESHOLD
+    firing = values > FIRING_THRESHOLD
     counts = firing.sum(dim=1).numpy().astype(np.uint32, copy=False)
-    feature_ids = sorted_ids[firing].numpy().astype(np.uint32, copy=False)
-    active_values = sorted_values[firing].numpy().astype(np.float32, copy=False)
+    feature_ids = indices[firing].numpy().astype(np.uint32, copy=False)
+    active_values = values[firing].numpy().astype(np.float32, copy=False)
     return counts, feature_ids, active_values
 
 
@@ -154,13 +152,9 @@ def write_analysis(
     checkpoint_path: Path,
     max_tokens: int | None,
 ) -> None:
-    if output_path.exists():
-        raise FileExistsError(f"analysis output already exists: {output_path}")
-
     context_size = int(config["context_size"])
     token_count = len(evaluation_tokens)
     metadata = {
-        "format": "csc",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "model_id": config["model_id"],
         "sae_checkpoint": str(checkpoint_path),
@@ -196,11 +190,6 @@ def write_analysis(
     )
     row_ptr = np.empty(token_count + 1, dtype=pointer_dtype)
     row_ptr[0] = 0
-    context_ptr = np.append(
-        np.arange(0, token_count, context_size, dtype=pointer_dtype),
-        np.array([token_count], dtype=pointer_dtype),
-    )
-    progress = tqdm(total=token_count, unit="tok", desc="Analyze", dynamic_ncols=True)
     try:
         processed_tokens = 0
         active_count = 0
@@ -208,7 +197,12 @@ def write_analysis(
         feature_max = np.zeros(int(config["d_sae"]), dtype=np.float32)
         with feature_temporary.open("wb") as feature_output, values_temporary.open(
             "wb"
-        ) as values_output:
+        ) as values_output, tqdm(
+            total=token_count,
+            unit="tok",
+            desc="Analyze",
+            dynamic_ncols=True,
+        ) as progress:
             batches = iter_context_batches(
                 evaluation_tokens,
                 context_size,
@@ -229,7 +223,9 @@ def write_analysis(
                     float(config["activation_scale"]),
                     int(config["sae_batch_size"]),
                 )
-                counts, feature_ids, active_values = csr_activations(indices, values)
+                counts, feature_ids, active_values = flatten_activations(
+                    indices, values
+                )
                 batch_tokens = len(counts)
                 cumulative = np.cumsum(counts, dtype=pointer_dtype)
                 row_ptr[
@@ -270,11 +266,10 @@ def write_analysis(
             if active_count
             else np.empty(0, dtype=np.float32)
         )
-        save_feature_major_analysis(
+        save_analysis(
             output_path,
             metadata,
             evaluation_tokens,
-            context_ptr,
             row_ptr,
             feature_ids,
             active_values,
@@ -282,7 +277,6 @@ def write_analysis(
             feature_max,
         )
     finally:
-        progress.close()
         feature_temporary.unlink(missing_ok=True)
         values_temporary.unlink(missing_ok=True)
 

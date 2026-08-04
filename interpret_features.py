@@ -8,7 +8,6 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-import numpy as np
 from openai import OpenAI
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
@@ -63,7 +62,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def decode_marked_prefix(tokenizer, token_ids: np.ndarray) -> str:
+def decode_marked_prefix(tokenizer, token_ids) -> str:
     decode_args = {
         "skip_special_tokens": True,
         "clean_up_tokenization_spaces": False,
@@ -85,17 +84,14 @@ def decode_marked_prefix(tokenizer, token_ids: np.ndarray) -> str:
 
 def render_example(
     tokenizer,
-    token_ids: np.ndarray,
-    context_ptr: np.ndarray,
+    token_ids,
+    context_size: int,
     token_position: int,
     activation: float,
     percentile: float,
     bucket: str,
 ) -> Example:
-    context_index = int(
-        np.searchsorted(context_ptr, token_position, side="right") - 1
-    )
-    context_start = int(context_ptr[context_index])
+    context_start = token_position // context_size * context_size
     prefix_start = max(context_start, token_position - MAX_PREFIX_TOKENS + 1)
     text = decode_marked_prefix(
         tokenizer, token_ids[prefix_start : token_position + 1]
@@ -105,10 +101,10 @@ def render_example(
 
 def choose_examples(
     feature_id: int,
-    token_positions: np.ndarray,
-    values: np.ndarray,
-    token_ids: np.ndarray,
-    context_ptr: np.ndarray,
+    token_positions,
+    values,
+    token_ids,
+    context_size: int,
     tokenizer,
     seed: int,
 ) -> list[Example] | None:
@@ -116,7 +112,7 @@ def choose_examples(
         feature_id,
         token_positions,
         values,
-        context_ptr,
+        context_size,
         seed,
     )
     if selections is None:
@@ -126,7 +122,7 @@ def choose_examples(
         render_example(
             tokenizer,
             token_ids,
-            context_ptr,
+            context_size,
             selection.token_position,
             selection.activation,
             selection.percentile,
@@ -214,6 +210,7 @@ def main() -> None:
     analysis = load_analysis(args.analysis)
     metadata = analysis.metadata
     d_sae = int(metadata["d_sae"])
+    context_size = int(metadata["context_size"])
     requested = args.feature_ids or range(d_sae)
     invalid = [feature_id for feature_id in requested if feature_id >= d_sae]
     if invalid:
@@ -224,13 +221,13 @@ def main() -> None:
     temporary = output_path.with_suffix(output_path.suffix + ".tmp")
 
     def interpret_feature(feature_id: int) -> tuple[int, str, bool]:
-        start, stop = analysis.feature_ptr[feature_id : feature_id + 2]
+        start, stop = map(int, analysis.feature_ptr[feature_id : feature_id + 2])
         examples = choose_examples(
             feature_id,
-            analysis.token_positions[int(start) : int(stop)],
-            analysis.values[int(start) : int(stop)],
+            analysis.token_positions[start:stop],
+            analysis.values[start:stop],
             analysis.token_ids,
-            analysis.context_ptr,
+            context_size,
             tokenizer,
             args.seed,
         )
