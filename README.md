@@ -18,19 +18,19 @@ The main objectives are:
 
 1. Train the SAE:
 
-```py
+```sh
 python3 train.py --output-dir artifacts/500M --train-tokens 500000000 --checkpoint-every 250000000 --validation-tokens 10000000
 ```
 
 2. Extract feature activation stats:
 
-```py
+```sh
 python3 record_activations.py --sae-dir artifacts/500M
 ```
 
 3. Name the features with an LLM:
 
-```py
+```sh
 # Around $2-$5 in API cost for 10K features
 
 python3 interpret_features.py --analysis artifacts/500M/analysis --base-url https://openrouter.ai/api/v1 --api-key [API_KEY] --model openai/gpt-5.6-luna --no-reasoning --concurrent 8
@@ -41,7 +41,7 @@ python3 interpret_features.py --analysis artifacts/500M/analysis --base-url http
 
 4. Browse the features and their strongest activation contexts:
 
-```py
+```sh
 python3 visualize.py --analysis artifacts/500M/analysis
 ```
 
