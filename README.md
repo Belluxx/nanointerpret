@@ -2,9 +2,6 @@
 
 This repo to offers a minimal self-contained playground where you can play with sparse autoencoders, trainin many versions of them with different params and see some simple but cool interpretability results.
 
-> [!NOTE]
-> I am by no means an expert in interpretability, I just wanted to get started with an hands-on approach and share the results publicly.
-
 The main objectives are:
 - [x] Take different SAE training ideas from [OpenAI](https://arxiv.org/abs/2406.04093) and [Anthropic](https://transformer-circuits.pub/2024/scaling-monosemanticity/index.html)
 - [x] Optimize SAE training for Apple Silicon (MPS)
@@ -46,3 +43,8 @@ python3 visualize.py --analysis artifacts/500M/analysis
 ```
 
 Then open [http://127.0.0.1:8000](http://127.0.0.1:8000).
+
+## Disclaimer
+
+> [!NOTE]
+> I am by no means an expert in interpretability, I just wanted to get started with an hands-on approach and share the results publicly.
