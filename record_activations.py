@@ -98,12 +98,11 @@ def load_sae(sae_dir: Path, config: dict, device: torch.device) -> TopKSAE:
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"SAE checkpoint not found: {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-    if checkpoint["config"] != config:
-        raise ValueError("config.json does not match the SAE checkpoint configuration")
-
+    decoder_weight = checkpoint["sae"]["decoder_weight"]
+    d_sae, d_model = decoder_weight.shape
     sae = TopKSAE(
-        int(config["d_model"]),
-        int(config["d_sae"]),
+        d_model,
+        d_sae,
         int(config["k"]),
         device,
         subtract_pre_bias=bool(config["subtract_pre_bias"]),
@@ -164,10 +163,10 @@ def write_analysis(
     row_ptr_temporary = output_path.with_name(output_path.name + ".row_ptr.tmp")
     pointer_dtype = (
         np.uint32
-        if token_count * int(config["k"]) <= np.iinfo(np.uint32).max
+        if token_count * sae.k <= np.iinfo(np.uint32).max
         else np.uint64
     )
-    feature_dtype = np.min_scalar_type(int(config["d_sae"]) - 1)
+    feature_dtype = np.min_scalar_type(sae.d_sae - 1)
     row_ptr = None
     try:
         row_ptr = np.memmap(
@@ -179,8 +178,8 @@ def write_analysis(
         row_ptr[0] = 0
         processed_tokens = 0
         active_count = 0
-        feature_counts = np.zeros(int(config["d_sae"]), dtype=np.uint64)
-        feature_max = np.zeros(int(config["d_sae"]), dtype=np.float32)
+        feature_counts = np.zeros(sae.d_sae, dtype=np.uint64)
+        feature_max = np.zeros(sae.d_sae, dtype=np.float32)
         with feature_temporary.open("wb") as feature_output, values_temporary.open(
             "wb"
         ) as values_output, tqdm(
@@ -302,12 +301,7 @@ def main() -> None:
         attn_implementation="eager",
     ).to(device)
     model.eval().requires_grad_(False)
-    layer_path, layers = find_transformer_layers(model)
-    if layer_path != config["layer_path"]:
-        raise ValueError(
-            f"configured layer path {config['layer_path']!r} does not match "
-            f"model layer path {layer_path!r}"
-        )
+    _layer_path, layers = find_transformer_layers(model)
     layer_index = int(config["layer_index"])
     if not 0 <= layer_index < len(layers):
         raise ValueError(

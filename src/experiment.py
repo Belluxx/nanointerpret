@@ -40,18 +40,14 @@ class ExperimentConfig:
     validation_tokens: int
     context_size: int
     layer_index: int
-    layer_path: str
-    residual_location: str
-    d_model: int
-    d_sae: int
     width_multiplier: int
     k: int
     aux_k: int
     learning_rate: float
+    gradient_clip: float | None
     model_batch_size: int
     sae_batch_size: int
     seed: int
-    device: str
     model_dtype: str
     normalization_tokens: int = 0
     activation_scale: float = 1.0
@@ -527,7 +523,7 @@ def train_sae(
             state.last_fired,
             state.processed_tokens,
             config.sae_batch_size,
-            args.gradient_clip,
+            config.gradient_clip,
             config.aux_k,
             config.aux_k_coef,
             config.dead_window,
@@ -580,7 +576,7 @@ def train_sae(
     metric_status.close()
     progress.close()
     torch.save(
-        {"sae": sae.state_dict(), "config": asdict(config)},
+        {"sae": sae.state_dict()},
         args.output_dir / "sae_final.pt",
     )
     return state.processed_tokens, latest_evaluation
