@@ -152,16 +152,16 @@ def format_metrics(record: dict) -> str:
         f"EV {record['explained_variance']:.2%}",
         f"MSE {record['mse']:,.4f}",
     ]
-    if "auxk_loss" in record:
+    if record.get("auxk_loss") is not None:
         parts.append(f"AuxK NMSE {record['auxk_loss']:,.4f}")
     parts.append(f"dead {dead}")
     return " | ".join(parts)
 
 
 def format_metrics_line(record: dict) -> str:
-    if record["split"] == "validation":
+    if record.get("split") == "validation":
         return f"Validation: {record['tokens']:,} tok | {format_metrics(record)}"
-    return f"{record['split']:<10} {record['tokens']:>12,} tok | {format_metrics(record)}"
+    return f"{'train':<10} {record['tokens']:>12,} tok | {format_metrics(record)}"
 
 
 def load_checkpoint_evaluation(path: Path, training_tokens: int) -> dict | None:
@@ -545,11 +545,9 @@ def train_sae(
             else:
                 dead_feature_pct = None
             record = {
-                "split": "train",
                 "tokens": state.processed_tokens,
                 **metrics.compute(),
                 "dead_feature_pct": dead_feature_pct,
-                "learning_rate": config.learning_rate,
                 "tokens_per_second": (state.processed_tokens - start_tokens)
                 / (time.monotonic() - start_time - evaluation_seconds),
             }

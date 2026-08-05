@@ -108,7 +108,6 @@ class RunningMetrics:
 
     def reset(self) -> None:
         self.count = 0
-        self.l0_sum = torch.zeros((), device=self.device)
         self.x_sum = torch.zeros(self.d_model, device=self.device)
         self.x_sq_sum = torch.zeros(self.d_model, device=self.device)
         self.error_sq_sum = torch.zeros(self.d_model, device=self.device)
@@ -128,7 +127,6 @@ class RunningMetrics:
         error = x - reconstruction
         self.count += x.shape[0]
         firing = values > FIRING_THRESHOLD
-        self.l0_sum += firing.sum()
         self.x_sum += x.sum(dim=0)
         self.x_sq_sum += x.square().sum(dim=0)
         self.error_sq_sum += error.square().sum(dim=0)
@@ -144,7 +142,7 @@ class RunningMetrics:
         return batch_fire_counts
 
     @torch.no_grad()
-    def compute(self) -> dict[str, float]:
+    def compute(self) -> dict[str, float | None]:
         n = float(self.count)
         sse = self.error_sq_sum.sum()
         x_variance = (self.x_sq_sum - self.x_sum.square() / n).sum().clamp_min(1e-12)
@@ -152,10 +150,7 @@ class RunningMetrics:
         result = {
             "mse": mse,
             "explained_variance": float((1.0 - sse / x_variance).item()),
-            "l0": float((self.l0_sum / n).item()),
-            "window_dead_feature_pct": float(
-                100.0 * (self.feature_fire_counts == 0).float().mean().item()
-            ),
+            "auxk_loss": None,
         }
         if self.auxk_token_count:
             result["auxk_loss"] = float(
