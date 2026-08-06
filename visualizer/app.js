@@ -2,6 +2,7 @@ const ui = {
   list: document.querySelector("#feature-list"),
   count: document.querySelector("#result-count"),
   search: document.querySelector("#search-input"),
+  namedOnly: document.querySelector("#named-only-input"),
   sort: document.querySelector("#sort-select"),
   metadata: document.querySelector("#dataset-meta"),
   error: document.querySelector("#error-message"),
@@ -62,11 +63,12 @@ const sorters = {
 
 function visibleFeatures() {
   const query = ui.search.value.trim().toLocaleLowerCase();
-  const visible = query
-    ? features.filter((feature) =>
-        String(feature.id).includes(query)
-        || (feature.title || "").toLocaleLowerCase().includes(query))
-    : [...features];
+  const visible = features.filter((feature) => {
+    if (ui.namedOnly.checked && !feature.title?.trim()) return false;
+    return !query
+      || String(feature.id).includes(query)
+      || (feature.title || "").toLocaleLowerCase().includes(query);
+  });
   return visible.sort(sorters[ui.sort.value]);
 }
 
@@ -259,6 +261,7 @@ ui.search.addEventListener("input", () => {
   cancelAnimationFrame(renderFrame);
   renderFrame = requestAnimationFrame(renderFeatureList);
 });
+ui.namedOnly.addEventListener("change", renderFeatureList);
 ui.sort.addEventListener("change", renderFeatureList);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && ui.search.value) {
