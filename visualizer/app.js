@@ -2,6 +2,7 @@ const ui = {
   list: document.querySelector("#feature-list"),
   count: document.querySelector("#result-count"),
   search: document.querySelector("#search-input"),
+  namedFilter: document.querySelector(".named-filter"),
   namedOnly: document.querySelector("#named-only-input"),
   sort: document.querySelector("#sort-select"),
   metadata: document.querySelector("#dataset-meta"),
@@ -275,6 +276,9 @@ async function initialize() {
   try {
     const payload = await fetchJson("/api/summary");
     features = payload.features;
+    const hasFeatureNames = features.some((feature) => feature.title?.trim());
+    ui.namedFilter.hidden = !hasFeatureNames;
+    ui.namedOnly.checked = hasFeatureNames;
     renderMetadata(payload.metadata);
     renderFeatureList();
   } catch (error) {
