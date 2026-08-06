@@ -73,7 +73,7 @@ My first 2 ideas to fix this issue were the following:
 - Increase `--width-multiplier` (number of features in the SAE): this may help in separating fused features
 - Extract the residual stream from a later layer like `13`-`15` instead of the middle one (`9`). Especially after seeing that many of the features activate on identical tokens, so moving to later layers should help with higher-abstraction representations.
 
-## Second run (32x multiplier)
+## Run 2 (32x multiplier)
 
 The second run only increased `--width-multiplier` from `16` to `32`.
 
@@ -102,7 +102,7 @@ Other interesting features were:
 - `#8727`: kindness and compassion
 - `#15023`: catastrophic or debilitating severity
 
-## Second run (later layers)
+## Run 3 (later layers)
 
 ```sh
 python3 train.py \
@@ -122,7 +122,7 @@ python3 train.py \
 
 This run was not as good as expected, the features are more abstract but quickly become less coherent at medium activations already. Layer 9 (10th layer) had a cleaner dictionary.
 
-## Third run (incresase K)
+## Run 4 (incresase K)
 
 ```sh
 python3 train.py \
@@ -140,7 +140,7 @@ python3 train.py \
   --sae-batch-size 4096
 ```
 
-## Fourth run (switch to 13th layer)
+## Run 5 (switch to 13th layer)
 
 ```sh
 python3 train.py \
