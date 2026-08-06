@@ -10,7 +10,7 @@ The main objectives are:
 - [ ] Use GGUF / llama.cpp to capture acivations
 - [ ] Implement Matryoshka BatchTopK ([paper](https://arxiv.org/abs/2503.17547), [repo](https://github.com/bartbussmann/matryoshka_sae)) to trade worse reconstruction for better interpretability
 - [ ] Instead of the current `1e-3`, use a learned-threshold (like JumpReLU SAE from [GemmaScope](https://arxiv.org/abs/2408.05147))
-- [ ] Support for ablation / other interventions
+- [ ] Support for feature steering
 - [ ] Test not just on base but also on Gemma3-270M instruct (chat version, useful to steer behaviour in interactive mode)
 
 ## Main experiment reproduction
