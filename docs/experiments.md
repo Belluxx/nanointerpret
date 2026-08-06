@@ -72,3 +72,89 @@ However many features were polysemantic, for example the severe harm feature act
 My first 2 ideas to fix this issue were the following:
 - Increase `--width-multiplier` (number of features in the SAE): this may help in separating fused features
 - Extract the residual stream from a later layer like `13`-`15` instead of the middle one (`9`). Especially after seeing that many of the features activate on identical tokens, so moving to later layers should help with higher-abstraction representations.
+
+## Second run (32x multiplier)
+
+The second run only increased `--width-multiplier` from `16` to `32`.
+
+```sh
+python3 train.py \
+  --output-dir artifacts/500M_w32 \
+  --train-tokens 500000000 \
+  --validation-tokens 100000000 \
+  --checkpoint-every 250000000 \
+  --activation-layer 9 \
+  --width-multiplier 32 \
+  --k 16 \
+  --aux-k 256 \
+  --aux-k-coef 0.03125 \
+  --dead-window 10000000 \
+  --learning-rate 0.0003 \
+  --sae-batch-size 4096
+```
+
+The results were remarkably better. The feature `#1009` from the previous run (the one that mixed "severe harm" with "employment terms") was now correctly separated between `#19969` and `#13311`, where:
+- `#19969` cleanly isolates "casualties and destructive outcomes"
+- `#13311` cleanly isolates "workforce and human labour capacity"
+
+Other interesting features were:
+- `#13180`: deception, misinformation, and betrayal
+- `#8727`: kindness and compassion
+- `#15023`: catastrophic or debilitating severity
+
+## Second run (later layers)
+
+```sh
+python3 train.py \
+  --output-dir artifacts/500M_l14_w32 \
+  --train-tokens 500000000 \
+  --validation-tokens 100000000 \
+  --checkpoint-every 250000000 \
+  --activation-layer 14 \
+  --width-multiplier 32 \
+  --k 16 \
+  --aux-k 256 \
+  --aux-k-coef 0.03125 \
+  --dead-window 10000000 \
+  --learning-rate 0.0003 \
+  --sae-batch-size 4096
+```
+
+This run was not as good as expected, the features are more abstract but quickly become less coherent at medium activations already. Layer 9 (10th layer) had a cleaner dictionary.
+
+## Third run (incresase K)
+
+```sh
+python3 train.py \
+  --output-dir artifacts/500M_l14_w32_k32 \
+  --train-tokens 500000000 \
+  --validation-tokens 100000000 \
+  --checkpoint-every 250000000 \
+  --activation-layer 14 \
+  --width-multiplier 32 \
+  --k 32 \
+  --aux-k 256 \
+  --aux-k-coef 0.03125 \
+  --dead-window 10000000 \
+  --learning-rate 0.0003 \
+  --sae-batch-size 4096
+```
+
+## Fourth run (switch to 13th layer)
+
+```sh
+python3 train.py \
+  --output-dir artifacts/500M_l12_w32_k32 \
+  --train-tokens 500000000 \
+  --validation-tokens 100000000 \
+  --checkpoint-every 250000000 \
+  --activation-layer 12 \
+  --width-multiplier 32 \
+  --k 32 \
+  --aux-k 256 \
+  --aux-k-coef 0.03125 \
+  --dead-window 10000000 \
+  --learning-rate 0.0003 \
+  --sae-batch-size 4096
+```
+
