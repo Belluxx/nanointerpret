@@ -131,7 +131,7 @@ def feature_prompt(examples: dict[str, list[str]]) -> str:
     sections = [
         "Infer the feature's core concept from the examples below.\n"
         "Focus primarily on high-activation examples, but use weaker examples to detect broader meanings or polysemanticity.\n"
-        "The token inside << >> is the token that activates the feature."
+        "The token inside `<< >>` is the token that activates the feature."
     ]
     for heading, bucket in EXAMPLE_CATEGORIES:
         texts = examples.get(bucket)
