@@ -94,8 +94,10 @@ python3 train.py \
 ```
 
 The results were remarkably better. The feature `#1009` from the previous run (the one that mixed "severe harm" with "employment terms") was now correctly separated between `#19969` and `#13311`, where:
-- `#19969` cleanly isolates "casualties and destructive outcomes"
-- `#13311` cleanly isolates "workforce and human labour capacity"
+- `#19969` isolates "casualties and destructive outcomes"
+- `#13311` isolates "workforce and human labour capacity"
+
+Note that these two features are not perfectly clean, there still some overlap between them. Probably some of it is due to the fact that the LLM used is extremely small (`0.2B` params).
 
 Other interesting features were:
 - `#13180`: deception, misinformation, and betrayal
