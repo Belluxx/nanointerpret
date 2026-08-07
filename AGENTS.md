@@ -1,4 +1,4 @@
-# NanoInterpret
+# nanointerpret
 
 Minimal training and feature interpretability analysis of LLMs with sparse autoencoders.
 

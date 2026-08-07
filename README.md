@@ -1,4 +1,4 @@
-![nanointerpret ](assets/banner.svg)
+![nanointerpret](assets/banner.svg)
 
 This repo to offers a minimal self-contained playground where you can play with sparse autoencoders, trainin many versions of them with different params and see some simple but cool interpretability results.
 
