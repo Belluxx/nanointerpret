@@ -130,14 +130,13 @@ def choose_examples(
 def feature_prompt(examples: dict[str, list[str]]) -> str:
     sections = [
         "Infer the feature's core concept from the examples below.\n"
-        "Focus primarily on high-activation examples, but use weaker examples to "
-        "detect broader meanings or polysemanticity.\n"
+        "Focus primarily on high-activation examples, but use weaker examples to detect broader meanings or polysemanticity.\n"
         "The token inside << >> is the token that activates the feature."
     ]
     for heading, bucket in EXAMPLE_CATEGORIES:
         texts = examples.get(bucket)
         if texts:
-            sections.append(f"{heading}:\n" + "\n".join(f"- {text}" for text in texts))
+            sections.append(f"## {heading}:\n" + "\n".join(f"```\n{text.strip()}\n```" for text in texts))
     sections.append(
         f"If the examples do not support one coherent concept, return exactly \"{UNCLEAR_TITLE}\". "
         "Give this feature a very concise, specific title. "
