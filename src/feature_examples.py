@@ -8,7 +8,6 @@ import numpy as np
 
 
 DEFAULT_EXAMPLE_SEED = 42
-TOP_EXAMPLE_COUNT = 10
 STRATIFIED_EXAMPLES_PER_BUCKET = 5
 RANDOM_EXAMPLE_COUNT = 5
 STRATIFIED_BUCKETS = (
@@ -18,9 +17,7 @@ STRATIFIED_BUCKETS = (
     (90, 99, "90-99"),
 )
 COMPLETE_EXAMPLE_COUNT = (
-    TOP_EXAMPLE_COUNT
-    + len(STRATIFIED_BUCKETS) * STRATIFIED_EXAMPLES_PER_BUCKET
-    + RANDOM_EXAMPLE_COUNT
+    len(STRATIFIED_BUCKETS) * STRATIFIED_EXAMPLES_PER_BUCKET + RANDOM_EXAMPLE_COUNT
 )
 RANDOM_SELECTION_ATTEMPTS = 64
 
@@ -121,12 +118,7 @@ def choose_activation_examples(
             selected.append(make_example(rank, bucket))
         return selected
 
-    examples = select_examples(
-        range(count - 1, -1, -1), TOP_EXAMPLE_COUNT, "Top", randomize=False
-    )
-    if examples is None:
-        return None
-
+    examples: list[ActivationExample] = []
     for lower, upper, label in STRATIFIED_BUCKETS:
         start = math.ceil(lower * count / 100) - 1
         stop = math.ceil(upper * count / 100) - 1
@@ -139,7 +131,6 @@ def choose_activation_examples(
         if bucket_examples is None:
             return None
         examples.extend(bucket_examples)
-
     random_examples = select_examples(
         range(count), RANDOM_EXAMPLE_COUNT, "Random positive", randomize=True
     )

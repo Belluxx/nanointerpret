@@ -26,7 +26,6 @@ UNCLEAR_TITLE = "No coherent interpretation"
 MAX_PREFIX_TOKENS = 64
 RETRYABLE_STATUS_CODES = {408, 409, 429}
 EXAMPLE_CATEGORIES = (
-    ("Top activations", "Top"),
     ("Very high activations", "90-99"),
     ("High activations", "75-90"),
     ("Medium activations", "50-75"),
