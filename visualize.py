@@ -294,11 +294,7 @@ def main() -> None:
     handler = partial(VisualizerHandler, data=data)
     with ThreadingHTTPServer((args.host, args.port), handler) as server:
         url = f"http://{args.host}:{server.server_address[1]}"
-        print(
-            f"Loaded {len(data.features):,} active features across "
-            f"{len(data.token_ids):,} tokens."
-        )
-        print(f"Open {url} (Ctrl+C to stop)")
+        print(f"Open {url}")
         try:
             server.serve_forever()
         except KeyboardInterrupt:
