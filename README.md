@@ -1,6 +1,6 @@
 ![nanointerpret](assets/banner.svg)
 
-This repo to offers a minimal self-contained playground where you can play with sparse autoencoders, trainin many versions of them with different params and see some simple but cool interpretability results.
+This repo offers a minimal self-contained playground where you can play with sparse autoencoders, training many versions of them with different params and see some basic but cool interpretability results.
 
 The main objectives are:
 - [x] Take different SAE training ideas from [OpenAI](https://arxiv.org/abs/2406.04093) and [Anthropic](https://transformer-circuits.pub/2024/scaling-monosemanticity/index.html)
