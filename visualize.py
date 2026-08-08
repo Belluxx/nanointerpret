@@ -2,22 +2,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 from functools import lru_cache, partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import numpy as np
 from transformers import AutoTokenizer
 
 from src.data import load_analysis
-from src.feature_examples import choose_activation_examples
 
 
 STATIC_DIR = Path(__file__).with_name("visualizer")
 FEATURE_ROUTE = re.compile(r"^/api/features/(\d+)$")
 CONTEXT_LIMIT = 20
+ACTIVATION_HISTOGRAM_BINS = 40
 TOKENS_PER_PERCENTILE = 4
 TOKEN_PERCENTILES = (95, 50, 25)
 
@@ -119,7 +120,8 @@ class AnalysisData:
             return text
         return str(self.tokenizer.convert_ids_to_tokens(token_id))
 
-    def feature(self, feature_id: int) -> dict:
+    @lru_cache(maxsize=32)
+    def _context_data(self, feature_id: int) -> tuple:
         if not 0 <= feature_id < self.d_sae:
             raise KeyError(feature_id)
 
@@ -129,6 +131,60 @@ class AnalysisData:
 
         token_positions = self.token_positions[start:stop]
         activation_values = self.values[start:stop]
+        context_ids = token_positions // self.context_size
+        group_starts = np.concatenate(
+            ([0], np.flatnonzero(np.diff(context_ids)) + 1)
+        )
+        grouped_context_ids = context_ids[group_starts]
+        peaks = np.maximum.reduceat(activation_values, group_starts)
+        occurrences = np.diff(np.append(group_starts, len(context_ids)))
+        peak_order = np.argsort(peaks, kind="stable")
+        return (
+            token_positions,
+            activation_values,
+            grouped_context_ids,
+            group_starts,
+            peaks,
+            occurrences,
+            peak_order,
+        )
+
+    def _render_context(self, context_data: tuple, group_index: int) -> dict:
+        (
+            token_positions,
+            activation_values,
+            grouped_context_ids,
+            group_starts,
+            peaks,
+            occurrences,
+            _,
+        ) = context_data
+        context_id = int(grouped_context_ids[group_index])
+        context_start = context_id * self.context_size
+        context_stop = min(context_start + self.context_size, len(self.token_ids))
+        token_slice = self.token_ids[context_start:context_stop]
+
+        activation_start = int(group_starts[group_index])
+        activation_stop = activation_start + int(occurrences[group_index])
+        positions = token_positions[activation_start:activation_stop] - context_start
+        context_activations = np.zeros(len(token_slice), dtype=np.float32)
+        context_activations[positions] = activation_values[
+            activation_start:activation_stop
+        ]
+
+        return {
+            "context_id": context_id,
+            "peak_activation": float(peaks[group_index]),
+            "activation_count": int(occurrences[group_index]),
+            "tokens": [self.decode_token(int(token_id)) for token_id in token_slice],
+            "activations": context_activations.tolist(),
+        }
+
+    def feature(self, feature_id: int) -> dict:
+        context_data = self._context_data(feature_id)
+        token_positions, activation_values, grouped_context_ids, _, peaks, _, _ = (
+            context_data
+        )
         activating_token_ids = self.token_ids[token_positions]
         unique_token_ids, token_groups, token_counts = np.unique(
             activating_token_ids, return_inverse=True, return_counts=True
@@ -171,79 +227,48 @@ class AnalysisData:
                 }
             )
 
-        context_ids = token_positions // self.context_size
-
-        group_starts = np.concatenate(
-            ([0], np.flatnonzero(np.diff(context_ids)) + 1)
-        )
-        grouped_context_ids = context_ids[group_starts]
-        peaks = np.maximum.reduceat(activation_values, group_starts)
-        occurrences = np.diff(np.append(group_starts, len(context_ids)))
-
-        def render_context(group_index: int, sample=None) -> dict:
-            context_id = int(grouped_context_ids[group_index])
-            context_start = context_id * self.context_size
-            context_stop = min(
-                context_start + self.context_size, len(self.token_ids)
-            )
-            token_slice = self.token_ids[context_start:context_stop]
-
-            activation_start = int(group_starts[group_index])
-            activation_stop = activation_start + int(occurrences[group_index])
-            positions = (
-                token_positions[activation_start:activation_stop] - context_start
-            )
-            context_activations = np.zeros(len(token_slice), dtype=np.float32)
-            context_activations[positions] = activation_values[
-                activation_start:activation_stop
-            ]
-
-            context = {
-                "context_id": context_id,
-                "peak_activation": float(peaks[group_index]),
-                "activation_count": int(occurrences[group_index]),
-                "tokens": [
-                    self.decode_token(int(token_id)) for token_id in token_slice
-                ],
-                "activations": context_activations.tolist(),
-            }
-            if sample is not None:
-                context["sample"] = {
-                    "bucket": sample.bucket,
-                    "activation": sample.activation,
-                    "percentile": sample.percentile,
-                    "target_position": sample.token_position - context_start,
-                }
-            return context
-
         strongest = [
-            render_context(int(group_index))
+            self._render_context(context_data, int(group_index))
             for group_index in np.argsort(-peaks, kind="stable")[:CONTEXT_LIMIT]
         ]
-        stratified = []
-        samples = choose_activation_examples(
-            feature_id,
-            token_positions,
-            activation_values,
-            self.context_size,
-        )
-        for sample in samples or []:
-            group_index = int(
-                np.searchsorted(
-                    grouped_context_ids,
-                    sample.token_position // self.context_size,
-                )
+
+        maximum = float(peaks.max())
+        bin_count = min(ACTIVATION_HISTOGRAM_BINS, len(peaks))
+        if maximum > 0:
+            histogram, _ = np.histogram(
+                peaks, bins=bin_count, range=(0.0, maximum)
             )
-            stratified.append(render_context(group_index, sample))
+        else:
+            histogram = np.array([len(peaks)])
 
         return {
             "activation_count": int(len(token_positions)),
             "context_count": int(len(grouped_context_ids)),
             "token_groups": token_summaries,
+            "activation_distribution": {
+                "maximum": maximum,
+                "counts": histogram.tolist(),
+            },
             "contexts": {
                 "strongest": strongest,
-                "stratified": stratified,
             },
+        }
+
+    def range_contexts(
+        self, feature_id: int, minimum: float, maximum: float
+    ) -> dict:
+        context_data = self._context_data(feature_id)
+        _, _, _, _, peaks, _, peak_order = context_data
+        ordered_peaks = peaks[peak_order]
+        start = int(np.searchsorted(ordered_peaks, minimum, side="left"))
+        stop = int(np.searchsorted(ordered_peaks, maximum, side="right"))
+        ordered = peak_order[start:stop]
+        return {
+            "matching_context_count": int(len(ordered)),
+            "contexts": [
+                self._render_context(context_data, int(group_index))
+                for group_index in ordered[:CONTEXT_LIMIT]
+            ],
         }
 
 
@@ -261,7 +286,22 @@ class VisualizerHandler(SimpleHTTPRequestHandler):
         match = FEATURE_ROUTE.fullmatch(request.path)
         if match:
             try:
-                payload = self.data.feature(int(match.group(1)))
+                feature_id = int(match.group(1))
+                if request.query:
+                    query = parse_qs(request.query, strict_parsing=True)
+                    minimum = float(query.get("min", [None])[0])
+                    maximum = float(query.get("max", [None])[0])
+                    if not all(map(math.isfinite, (minimum, maximum))):
+                        raise ValueError
+                    if minimum > maximum:
+                        raise ValueError
+                    payload = self.data.range_contexts(
+                        feature_id, minimum, maximum
+                    )
+                else:
+                    payload = self.data.feature(feature_id)
+            except (TypeError, ValueError):
+                self.send_json({"error": "invalid activation range"}, status=400)
             except KeyError:
                 self.send_json({"error": "feature not found"}, status=404)
             else:

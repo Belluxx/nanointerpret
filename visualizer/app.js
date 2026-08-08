@@ -105,12 +105,9 @@ function renderFeatureList() {
 function renderContext(context, feature) {
   const card = element("article", "context-card");
   const header = element("header", "context-header");
-  const stats = context.sample
-    ? `${context.sample.bucket}, ${formatActivation(context.sample.activation)}, P${context.sample.percentile.toFixed(1)}`
-    : `Peak ${formatActivation(context.peak_activation)}, ${context.activation_count.toLocaleString()} active tokens`;
   header.append(
     element("span", "", `Context ${context.context_id}`),
-    element("span", "context-stats", stats),
+    element("span", "context-stats", `Peak ${formatActivation(context.peak_activation)}, ${context.activation_count.toLocaleString()} active tokens`),
   );
 
   const tokens = element("pre", "tokens");
@@ -122,10 +119,6 @@ function renderContext(context, feature) {
       token.classList.add("active");
       token.style.backgroundColor = `rgba(196, 79, 27, ${0.1 + 0.75 * strength})`;
       token.title = `Activation ${formatActivation(activation)}`;
-    }
-    if (context.sample && index === context.sample.target_position) {
-      token.classList.add("sample-target");
-      token.title = `${context.sample.bucket}, activation ${formatActivation(context.sample.activation)}, P${context.sample.percentile.toFixed(1)}`;
     }
     tokens.append(token);
   });
@@ -177,39 +170,117 @@ function renderOverview(feature, payload) {
   return overview;
 }
 
-function renderContextList(contexts, feature) {
-  const list = element("div", "contexts");
+function renderContextList(contexts, feature, list = element("div", "contexts")) {
+  list.replaceChildren();
   for (const context of contexts) list.append(renderContext(context, feature));
   return list;
 }
 
-const sampleGroups = [
-  ["Activation range", "Samples across the 25th–99th percentiles", ["25-50", "50-75", "75-90", "90-99"]],
-  ["Random positives", "5 random activating examples", ["Random positive"]],
-];
+const RANGE_RESOLUTION = 1000;
 
-function renderView(content, feature, contexts, view) {
-  if (view === "strongest") {
-    content.replaceChildren(renderContextList(contexts, feature));
-    return;
+function renderRangeView(content, feature, distribution) {
+  const panel = element("section");
+  const heading = element("header", "range-heading");
+  const selectedRange = element("span", "selected-range");
+  heading.append(element("h3", "", "Context peak distribution"), selectedRange);
+
+  const plot = element("div", "distribution-plot");
+  plot.setAttribute("aria-hidden", "true");
+  plot.style.gridTemplateColumns = `repeat(${distribution.counts.length}, minmax(2px, 1fr))`;
+  const largestBin = Math.max(...distribution.counts, 1);
+  const bars = distribution.counts.map((count, index) => {
+    const bar = element("span", "distribution-bar");
+    bar.style.height = `${Math.max(2, 100 * Math.sqrt(count / largestBin))}%`;
+    const lower = distribution.maximum * index / distribution.counts.length;
+    const upper = distribution.maximum * (index + 1) / distribution.counts.length;
+    bar.title = `${formatActivation(lower)}–${formatActivation(upper)}: ${count.toLocaleString()} contexts`;
+    plot.append(bar);
+    return bar;
+  });
+
+  const selector = element("div", "range-selector");
+  const track = element("div", "range-track");
+  function rangeInput(label, value) {
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = "0";
+    input.max = String(RANGE_RESOLUTION);
+    input.step = "1";
+    input.value = String(value);
+    input.setAttribute("aria-label", label);
+    return input;
+  }
+  const minimumInput = rangeInput("Minimum peak activation", 0);
+  const maximumInput = rangeInput("Maximum peak activation", RANGE_RESOLUTION);
+  selector.append(track, minimumInput, maximumInput);
+
+  const resultCount = element("span", "range-result-count");
+  const results = element("div", "contexts");
+  panel.append(heading, plot, selector, resultCount, results);
+  content.replaceChildren(panel);
+
+  let loadTimer;
+  let requestId = 0;
+
+  function updateSelection(changedInput) {
+    if (Number(minimumInput.value) > Number(maximumInput.value)) {
+      if (changedInput === minimumInput) maximumInput.value = minimumInput.value;
+      else minimumInput.value = maximumInput.value;
+    }
+
+    const minimumStep = Number(minimumInput.value);
+    const maximumStep = Number(maximumInput.value);
+    const start = `${100 * minimumStep / RANGE_RESOLUTION}%`;
+    const end = `${100 * maximumStep / RANGE_RESOLUTION}%`;
+    selector.style.setProperty("--range-start", start);
+    selector.style.setProperty("--range-end", end);
+
+    const minimum = distribution.maximum * minimumStep / RANGE_RESOLUTION;
+    const maximum = distribution.maximum * maximumStep / RANGE_RESOLUTION;
+    selectedRange.textContent = `${formatActivation(minimum)} – ${formatActivation(maximum)}`;
+    bars.forEach((bar, index) => {
+      const binStart = index * RANGE_RESOLUTION / bars.length;
+      const binEnd = (index + 1) * RANGE_RESOLUTION / bars.length;
+      bar.classList.toggle("selected", binEnd >= minimumStep && binStart <= maximumStep);
+    });
+
+    clearTimeout(loadTimer);
+    const currentRequest = ++requestId;
+    loadTimer = setTimeout(
+      () => loadContexts(minimum, maximum, currentRequest),
+      120,
+    );
   }
 
-  if (!contexts.length) {
-    content.replaceChildren(element("p", "empty-state", "Not enough activation data for a stratified sample."));
-    return;
+  async function loadContexts(minimum, maximum, currentRequest) {
+    resultCount.textContent = "Loading…";
+    if (!results.childElementCount) {
+      results.append(element("p", "loading", "Loading contexts…"));
+    }
+    const query = new URLSearchParams({ min: minimum, max: maximum });
+    try {
+      const payload = await fetchJson(`/api/features/${feature.id}?${query}`);
+      if (currentRequest !== requestId) return;
+      const shown = payload.contexts.length;
+      resultCount.textContent = shown === payload.matching_context_count
+        ? `${shown.toLocaleString()} contexts · low to high`
+        : `Showing ${shown.toLocaleString()} of ${payload.matching_context_count.toLocaleString()} · low to high`;
+      if (shown) renderContextList(payload.contexts, feature, results);
+      else results.replaceChildren(
+        element("p", "empty-state", "No contexts fall within this activation range."),
+      );
+    } catch (error) {
+      if (currentRequest !== requestId) return;
+      resultCount.textContent = "Could not load contexts";
+      results.replaceChildren(
+        element("p", "empty-state", `Could not load contexts: ${error.message}`),
+      );
+    }
   }
 
-  const fragment = document.createDocumentFragment();
-  for (const [title, description, buckets] of sampleGroups) {
-    const groupContexts = contexts.filter((context) => buckets.includes(context.sample.bucket));
-    if (!groupContexts.length) continue;
-    const section = element("section", "sample-group");
-    const heading = element("header", "sample-heading");
-    heading.append(element("h3", "", title), element("p", "", description));
-    section.append(heading, renderContextList(groupContexts, feature));
-    fragment.append(section);
-  }
-  content.replaceChildren(fragment);
+  minimumInput.addEventListener("input", () => updateSelection(minimumInput));
+  maximumInput.addEventListener("input", () => updateSelection(maximumInput));
+  updateSelection();
 }
 
 function renderContextBrowser(feature, payload) {
@@ -220,7 +291,7 @@ function renderContextBrowser(feature, payload) {
   const content = element("div");
   switcher.setAttribute("role", "group");
   switcher.setAttribute("aria-label", "Context view");
-  for (const [view, label] of [["strongest", "Strongest"], ["stratified", "Stratified"]]) {
+  for (const [view, label] of [["strongest", "Strongest"], ["range", "Range"]]) {
     const button = element("button", "view-button", label);
     button.type = "button";
     button.addEventListener("click", () => {
@@ -230,7 +301,11 @@ function renderContextBrowser(feature, payload) {
         viewButton.classList.toggle("selected", selected);
         viewButton.setAttribute("aria-pressed", String(selected));
       }
-      renderView(content, feature, payload.contexts[view], view);
+      if (view === "strongest") {
+        content.replaceChildren(renderContextList(payload.contexts.strongest, feature));
+      } else {
+        renderRangeView(content, feature, payload.activation_distribution);
+      }
     });
     switcher.append(button);
   }
