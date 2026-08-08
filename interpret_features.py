@@ -86,46 +86,39 @@ def decode_prefix(tokenizer, token_ids) -> tuple[str, str]:
 def render_example(
     tokenizer,
     token_ids,
-    feature_token_positions,
-    feature_values,
+    token_positions,
+    values,
     context_size: int,
     token_position: int,
 ) -> str:
     context_start = token_position // context_size * context_size
     prefix_start = max(context_start, token_position - MAX_PREFIX_TOKENS + 1)
-    context, _token_text = decode_prefix(
-        tokenizer, token_ids[prefix_start : token_position + 1]
-    )
+    start = int(token_positions.searchsorted(prefix_start))
+    stop = int(token_positions.searchsorted(token_position, side="right"))
+    activations = [
+        (int(position), float(strength))
+        for position, strength in zip(token_positions[start:stop], values[start:stop])
+    ]
+    if len(activations) > MAX_ACTIVATED_TOKENS:
+        focal = activations.pop()
+        activations.sort(key=lambda item: item[1], reverse=True)
+        activations = activations[: MAX_ACTIVATED_TOKENS - 1] + [focal]
+        activations.sort()
 
-    activation_start = int(feature_token_positions.searchsorted(prefix_start))
-    activation_stop = int(
-        feature_token_positions.searchsorted(token_position, side="right")
-    )
-    activation_indices = list(range(activation_start, activation_stop))
-    if len(activation_indices) > MAX_ACTIVATED_TOKENS:
-        focal_index = activation_stop - 1
-        strongest_others = sorted(
-            activation_indices[:-1],
-            key=lambda index: float(feature_values[index]),
-            reverse=True,
-        )[: MAX_ACTIVATED_TOKENS - 1]
-        activation_indices = sorted([*strongest_others, focal_index])
-
-    activations = []
-    for index in activation_indices:
-        position = int(feature_token_positions[index])
-        _prefix, activated_token = decode_prefix(
-            tokenizer, token_ids[prefix_start : position + 1]
+    decoded = [
+        (
+            *decode_prefix(tokenizer, token_ids[prefix_start : position + 1]),
+            strength,
         )
-        activations.append((activated_token, float(feature_values[index])))
-
-    if len(activations) == 1:
-        activated_token, strength = activations[0]
-        activation_text = f"Activated token: `{activated_token}` ({strength:g})"
+        for position, strength in activations
+    ]
+    context = decoded[-1][0]
+    if len(decoded) == 1:
+        _, token, strength = decoded[0]
+        activation_text = f"Activated token: `{token}` ({strength:g})"
     else:
         activation_text = "Activated tokens:\n" + "\n".join(
-            f"- `{activated_token}`: {strength:g}"
-            for activated_token, strength in activations
+            f"- `{token}`: {strength:g}" for _, token, strength in decoded
         )
     return f"Context: {context.strip()}\n{activation_text}"
 
@@ -226,8 +219,7 @@ def request_title(
             return clean_title(completion.choices[0].message.content)
         except Exception as error:
             retryable = (
-                isinstance(error, ValueError)
-                or isinstance(error, APIConnectionError)
+                isinstance(error, (ValueError, APIConnectionError))
                 or (
                     isinstance(error, APIStatusError)
                     and (
@@ -272,18 +264,16 @@ def resume_progress(temporary: Path, requested: list[int]) -> tuple[int, int]:
 def main() -> None:
     args = parse_args()
     output_path = args.output or args.analysis.with_name("feature_names.jsonl")
-    api_key = args.api_key or os.environ.get("OPENAI_API_KEY") or "not-needed"
     client = OpenAI(
         base_url=args.base_url,
-        api_key=api_key,
+        api_key=args.api_key or os.environ.get("OPENAI_API_KEY") or "not-needed",
         timeout=REQUEST_TIMEOUT_SECONDS,
         max_retries=0,
     )
 
     analysis = load_analysis(args.analysis)
-    metadata = analysis.metadata
     d_sae = len(analysis.feature_ptr) - 1
-    context_size = int(metadata["context_size"])
+    context_size = int(analysis.metadata["context_size"])
     requested = list(args.feature_ids or range(d_sae))
     invalid = next(
         (feature_id for feature_id in requested if feature_id >= d_sae), None
@@ -291,12 +281,11 @@ def main() -> None:
     if invalid is not None:
         raise ValueError(f"feature IDs must be below {d_sae}; got {invalid}")
 
-    tokenizer = AutoTokenizer.from_pretrained(metadata["model_id"])
+    tokenizer = AutoTokenizer.from_pretrained(analysis.metadata["model_id"])
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = output_path.with_suffix(output_path.suffix + ".tmp")
 
     completed, insufficient = resume_progress(temporary, requested)
-    remaining = requested[completed:]
 
     def interpret_feature(feature_id: int) -> tuple[int, str | None]:
         start, stop = map(int, analysis.feature_ptr[feature_id : feature_id + 2])
@@ -311,20 +300,18 @@ def main() -> None:
         )
         if examples is None:
             return feature_id, INSUFFICIENT_TITLE
-        title = request_title(
+        return feature_id, request_title(
             client,
             args.model,
             feature_prompt(examples),
             reasoning=not args.no_reasoning,
             max_tokens=args.max_tokens,
         )
-        return feature_id, title
 
-    output_mode = "a" if completed else "w"
-    with temporary.open(output_mode, encoding="utf-8") as output, ThreadPoolExecutor(
-        max_workers=args.concurrent
-    ) as executor:
-        results = executor.map(interpret_feature, remaining)
+    with temporary.open(
+        "a" if completed else "w", encoding="utf-8"
+    ) as output, ThreadPoolExecutor(max_workers=args.concurrent) as executor:
+        results = executor.map(interpret_feature, requested[completed:])
         for feature_id, title in tqdm(
             results,
             total=len(requested),
@@ -334,13 +321,8 @@ def main() -> None:
             dynamic_ncols=True,
         ):
             insufficient += title == INSUFFICIENT_TITLE
-            output.write(
-                json.dumps(
-                    {"feature_id": feature_id, "title": title},
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
+            record = {"feature_id": feature_id, "title": title}
+            output.write(json.dumps(record, ensure_ascii=False) + "\n")
             output.flush()
     os.replace(temporary, output_path)
 
