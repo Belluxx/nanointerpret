@@ -4,8 +4,10 @@ import argparse
 import json
 import os
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Callable, Iterable, Iterator, TypeVar
 
 from openai import APIConnectionError, APIStatusError, OpenAI
 from tqdm.auto import tqdm
@@ -34,6 +36,8 @@ EXAMPLE_CATEGORIES = (
     ("Low activations", "25-50"),
     ("Random activations", "Random positive"),
 )
+T = TypeVar("T")
+R = TypeVar("R")
 
 
 def nonnegative_int(value: str) -> int:
@@ -192,7 +196,7 @@ def request_title(
     prompt: str,
     reasoning: bool = True,
     max_tokens: int | None = None,
-) -> str | None:
+) -> str:
     reasoning_options = {} if reasoning else {"reasoning_effort": "none"}
     if max_tokens is None:
         max_tokens = 32_768 if reasoning else 64
@@ -231,8 +235,30 @@ def request_title(
             if not retryable:
                 raise
             if retry == MAX_RETRIES:
-                return None
+                raise
             time.sleep(RETRY_DELAY_SECONDS)
+
+
+def map_bounded(
+    executor: ThreadPoolExecutor,
+    function: Callable[[T], R],
+    items: Iterable[T],
+    max_pending: int,
+) -> Iterator[R]:
+    items = iter(items)
+    pending = deque()
+    for item in items:
+        pending.append(executor.submit(function, item))
+        if len(pending) == max_pending:
+            break
+
+    while pending:
+        yield pending.popleft().result()
+        try:
+            item = next(items)
+        except StopIteration:
+            continue
+        pending.append(executor.submit(function, item))
 
 
 def resume_progress(temporary: Path, requested: list[int]) -> tuple[int, int]:
@@ -287,7 +313,7 @@ def main() -> None:
 
     completed, insufficient = resume_progress(temporary, requested)
 
-    def interpret_feature(feature_id: int) -> tuple[int, str | None]:
+    def interpret_feature(feature_id: int) -> tuple[int, str]:
         start, stop = map(int, analysis.feature_ptr[feature_id : feature_id + 2])
         examples = choose_examples(
             feature_id,
@@ -300,30 +326,44 @@ def main() -> None:
         )
         if examples is None:
             return feature_id, INSUFFICIENT_TITLE
-        return feature_id, request_title(
-            client,
-            args.model,
-            feature_prompt(examples),
-            reasoning=not args.no_reasoning,
-            max_tokens=args.max_tokens,
-        )
+        try:
+            title = request_title(
+                client,
+                args.model,
+                feature_prompt(examples),
+                reasoning=not args.no_reasoning,
+                max_tokens=args.max_tokens,
+            )
+        except Exception as error:
+            raise RuntimeError(f"failed to interpret feature {feature_id}") from error
+        return feature_id, title
 
-    with temporary.open(
-        "a" if completed else "w", encoding="utf-8"
-    ) as output, ThreadPoolExecutor(max_workers=args.concurrent) as executor:
-        results = executor.map(interpret_feature, requested[completed:])
-        for feature_id, title in tqdm(
-            results,
-            total=len(requested),
-            initial=completed,
-            unit="feature",
-            desc="Interpret",
-            dynamic_ncols=True,
-        ):
-            insufficient += title == INSUFFICIENT_TITLE
-            record = {"feature_id": feature_id, "title": title}
-            output.write(json.dumps(record, ensure_ascii=False) + "\n")
-            output.flush()
+    executor = ThreadPoolExecutor(max_workers=args.concurrent)
+    try:
+        with temporary.open("a" if completed else "w", encoding="utf-8") as output:
+            results = map_bounded(
+                executor,
+                interpret_feature,
+                requested[completed:],
+                args.concurrent,
+            )
+            for feature_id, title in tqdm(
+                results,
+                total=len(requested),
+                initial=completed,
+                unit="feature",
+                desc="Interpret",
+                dynamic_ncols=True,
+            ):
+                insufficient += title == INSUFFICIENT_TITLE
+                record = {"feature_id": feature_id, "title": title}
+                output.write(json.dumps(record, ensure_ascii=False) + "\n")
+                output.flush()
+    except BaseException:
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+    else:
+        executor.shutdown()
     os.replace(temporary, output_path)
 
     print(f"Saved {len(requested):,} feature names to {output_path}")
