@@ -260,14 +260,38 @@ class AnalysisData:
         context_data = self._context_data(feature_id)
         _, _, _, _, peaks, _, peak_order = context_data
         ordered_peaks = peaks[peak_order]
+        minimum = ordered_peaks.dtype.type(minimum)
+        maximum = ordered_peaks.dtype.type(maximum)
         start = int(np.searchsorted(ordered_peaks, minimum, side="left"))
         stop = int(np.searchsorted(ordered_peaks, maximum, side="right"))
         ordered = peak_order[start:stop]
+        matching_count = len(ordered)
+        if matching_count > CONTEXT_LIMIT:
+            matching_peaks = peaks[ordered]
+            targets = np.linspace(
+                matching_peaks[0], matching_peaks[-1], CONTEXT_LIMIT
+            )
+            selected = []
+            for offset, target in enumerate(targets):
+                lower = selected[-1] + 1 if selected else 0
+                upper = matching_count - (CONTEXT_LIMIT - offset)
+                right = int(
+                    np.clip(np.searchsorted(matching_peaks, target), lower, upper)
+                )
+                left = max(lower, right - 1)
+                selected.append(
+                    min(
+                        (left, right),
+                        key=lambda index: abs(matching_peaks[index] - target),
+                    )
+                )
+            ordered = ordered[selected]
+
         return {
-            "matching_context_count": int(len(ordered)),
+            "matching_context_count": int(matching_count),
             "contexts": [
                 self._render_context(context_data, int(group_index))
-                for group_index in ordered[:CONTEXT_LIMIT]
+                for group_index in ordered
             ],
         }
 

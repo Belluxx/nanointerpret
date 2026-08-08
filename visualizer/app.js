@@ -264,7 +264,7 @@ function renderRangeView(content, feature, distribution) {
       const shown = payload.contexts.length;
       resultCount.textContent = shown === payload.matching_context_count
         ? `${shown.toLocaleString()} contexts · low to high`
-        : `Showing ${shown.toLocaleString()} of ${payload.matching_context_count.toLocaleString()} · low to high`;
+        : `Sampled ${shown.toLocaleString()} of ${payload.matching_context_count.toLocaleString()} · low to high`;
       if (shown) renderContextList(payload.contexts, feature, results);
       else results.replaceChildren(
         element("p", "empty-state", "No contexts fall within this activation range."),
