@@ -117,13 +117,9 @@ def render_example(
         for position, strength in activations
     ]
     context = decoded[-1][0]
-    if len(decoded) == 1:
-        _, token, strength = decoded[0]
-        activation_text = f"Activated token: `{token}` ({strength:g})"
-    else:
-        activation_text = "Activated tokens:\n" + "\n".join(
-            f"- `{token}`: {strength:g}" for _, token, strength in decoded
-        )
+    activation_text = "Activated tokens:\n" + "\n".join(
+        f"- `{token}`: {strength:.2f}" for _, token, strength in decoded
+    )
     return f"Context: {context.strip()}\n{activation_text}"
 
 
