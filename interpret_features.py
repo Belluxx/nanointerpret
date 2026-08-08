@@ -24,6 +24,7 @@ REQUEST_TIMEOUT_SECONDS = 300
 INSUFFICIENT_TITLE = "Insufficient activation data"
 UNCLEAR_TITLE = "No coherent interpretation"
 MAX_PREFIX_TOKENS = 64
+MAX_ACTIVATED_TOKENS = 5
 RETRYABLE_STATUS_CODES = {408, 409, 429}
 EXAMPLE_CATEGORIES = (
     ("Top activations", "Top"),
@@ -64,7 +65,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def decode_marked_prefix(tokenizer, token_ids) -> str:
+def decode_prefix(tokenizer, token_ids) -> tuple[str, str]:
     decode_args = {
         "skip_special_tokens": True,
         "clean_up_tokenization_spaces": False,
@@ -76,25 +77,57 @@ def decode_marked_prefix(tokenizer, token_ids) -> str:
         if through.startswith(before)
         else tokenizer.decode([int(token_ids[-1])], **decode_args)
     )
-    whitespace_length = len(target) - len(target.lstrip())
-    whitespace = target[:whitespace_length]
-    token_text = target[whitespace_length:]
+    token_text = target.lstrip()
     if not token_text:
         token_text = tokenizer.convert_ids_to_tokens(int(token_ids[-1]))
-    return f"{before}{whitespace}<<{token_text}>>"
+    return through, token_text
 
 
 def render_example(
     tokenizer,
     token_ids,
+    feature_token_positions,
+    feature_values,
     context_size: int,
     token_position: int,
 ) -> str:
     context_start = token_position // context_size * context_size
     prefix_start = max(context_start, token_position - MAX_PREFIX_TOKENS + 1)
-    return decode_marked_prefix(
+    context, _token_text = decode_prefix(
         tokenizer, token_ids[prefix_start : token_position + 1]
     )
+
+    activation_start = int(feature_token_positions.searchsorted(prefix_start))
+    activation_stop = int(
+        feature_token_positions.searchsorted(token_position, side="right")
+    )
+    activation_indices = list(range(activation_start, activation_stop))
+    if len(activation_indices) > MAX_ACTIVATED_TOKENS:
+        focal_index = activation_stop - 1
+        strongest_others = sorted(
+            activation_indices[:-1],
+            key=lambda index: float(feature_values[index]),
+            reverse=True,
+        )[: MAX_ACTIVATED_TOKENS - 1]
+        activation_indices = sorted([*strongest_others, focal_index])
+
+    activations = []
+    for index in activation_indices:
+        position = int(feature_token_positions[index])
+        _prefix, activated_token = decode_prefix(
+            tokenizer, token_ids[prefix_start : position + 1]
+        )
+        activations.append((activated_token, float(feature_values[index])))
+
+    if len(activations) == 1:
+        activated_token, strength = activations[0]
+        activation_text = f"Activated token: `{activated_token}` ({strength:g})"
+    else:
+        activation_text = "Activated tokens:\n" + "\n".join(
+            f"- `{activated_token}`: {strength:g}"
+            for activated_token, strength in activations
+        )
+    return f"Context: {context.strip()}\n{activation_text}"
 
 
 def choose_examples(
@@ -121,6 +154,8 @@ def choose_examples(
         text = render_example(
             tokenizer,
             token_ids,
+            token_positions,
+            values,
             context_size,
             selection.token_position,
         )
@@ -131,8 +166,7 @@ def choose_examples(
 def feature_prompt(examples: dict[str, list[str]]) -> str:
     sections = [
         "Infer the feature's core concept from the examples below.\n"
-        "Focus primarily on high-activation examples, but use weaker examples to detect broader meanings or polysemanticity.\n"
-        "The token inside `<< >>` is the token that activates the feature."
+        "Focus primarily on high-activation examples, but use weaker examples to detect broader meanings or polysemanticity."
     ]
     for heading, bucket in EXAMPLE_CATEGORIES:
         texts = examples.get(bucket)
