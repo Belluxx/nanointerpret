@@ -142,18 +142,20 @@ def choose_examples(
     if selections is None:
         return None
 
-    examples: dict[str, list[str]] = {}
-    for selection in selections:
-        text = render_example(
-            tokenizer,
-            token_ids,
-            token_positions,
-            values,
-            context_size,
-            selection.token_position,
-        )
-        examples.setdefault(selection.bucket, []).append(text)
-    return examples
+    return {
+        bucket: [
+            render_example(
+                tokenizer,
+                token_ids,
+                token_positions,
+                values,
+                context_size,
+                token_position,
+            )
+            for token_position in positions
+        ]
+        for bucket, positions in selections.items()
+    }
 
 
 def feature_prompt(examples: dict[str, list[str]]) -> str:

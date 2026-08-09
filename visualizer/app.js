@@ -65,7 +65,7 @@ const sorters = {
 function visibleFeatures() {
   const query = ui.search.value.trim().toLocaleLowerCase();
   const visible = features.filter((feature) => {
-    if (ui.namedOnly.checked && !feature.title?.trim()) return false;
+    if (ui.namedOnly.checked && !feature.title) return false;
     return !query
       || String(feature.id).includes(query)
       || (feature.title || "").toLocaleLowerCase().includes(query);
@@ -91,7 +91,7 @@ function renderFeatureList() {
       titleElement,
       element("span", "feature-stat", feature.activation_count.toLocaleString()),
       element("span", "feature-stat", formatActivation(feature.max_activation)),
-      element("span", "chevron"),
+      element("span", "chevron", "›"),
     );
     details.append(summary, element("div", "feature-body"));
     details.addEventListener("toggle", () => {
@@ -107,7 +107,11 @@ function renderContext(context, feature) {
   const header = element("header", "context-header");
   header.append(
     element("span", "", `Context ${context.context_id}`),
-    element("span", "context-stats", `Peak ${formatActivation(context.peak_activation)}, ${context.activation_count.toLocaleString()} active tokens`),
+    element(
+      "span",
+      "context-stats",
+      `Peak ${formatActivation(context.peak_activation)}, ${context.activation_count.toLocaleString()} active tokens`,
+    ),
   );
 
   const tokens = element("pre", "tokens");
@@ -133,22 +137,11 @@ function renderOverview(feature, payload) {
   tokenSummary.append(element("h3", "", "Characteristic tokens"));
   for (const group of payload.token_groups) {
     const row = element("div", "token-group");
-    const tier = group.percentile === 95
-      ? "High"
-      : group.percentile === 50 ? "Med" : "Low";
-    const tierLabel = element("div", "token-tier");
-    tierLabel.append(
-      element("strong", "token-tier-name", tier),
-      element("span", "token-percentile", `P${group.percentile}`),
-    );
-    row.append(tierLabel);
     const tokenList = element("div", "token-list");
     for (const token of group.tokens) {
-      const tokenName = element("code", "token-name", token.token);
-      tokenName.title = `${token.activation_count.toLocaleString()} hits, mean ${formatActivation(token.mean_activation)}, peak ${formatActivation(token.max_activation)}`;
-      tokenList.append(tokenName);
+      tokenList.append(element("code", "token-name", token));
     }
-    row.append(tokenList);
+    row.append(element("span", "token-percentile", `P${group.percentile}`), tokenList);
     tokenSummary.append(row);
   }
 
@@ -178,20 +171,17 @@ function renderContextList(contexts, feature, list = element("div", "contexts"))
 
 const RANGE_RESOLUTION = 1000;
 
-function renderRangeView(content, feature, distribution) {
+function renderRangeView(content, feature, counts) {
   const panel = element("section");
-  const heading = element("header", "range-heading");
-  heading.append(element("h3", "", "Context peak distribution"));
-
   const plot = element("div", "distribution-plot");
   plot.setAttribute("aria-hidden", "true");
-  plot.style.gridTemplateColumns = `repeat(${distribution.counts.length}, minmax(2px, 1fr))`;
-  const largestBin = Math.max(...distribution.counts, 1);
-  const bars = distribution.counts.map((count, index) => {
+  plot.style.gridTemplateColumns = `repeat(${counts.length}, minmax(2px, 1fr))`;
+  const largestBin = Math.max(...counts, 1);
+  const bars = counts.map((count, index) => {
     const bar = element("span", "distribution-bar");
     bar.style.height = `${Math.max(2, 100 * Math.sqrt(count / largestBin))}%`;
-    const lower = distribution.maximum * index / distribution.counts.length;
-    const upper = distribution.maximum * (index + 1) / distribution.counts.length;
+    const lower = feature.max_activation * index / counts.length;
+    const upper = feature.max_activation * (index + 1) / counts.length;
     bar.title = `${formatActivation(lower)}-${formatActivation(upper)}: ${count.toLocaleString()} contexts`;
     plot.append(bar);
     return bar;
@@ -223,7 +213,13 @@ function renderRangeView(content, feature, distribution) {
 
   const resultCount = element("span", "range-result-count");
   const results = element("div", "contexts");
-  panel.append(heading, plot, selector, resultCount, results);
+  panel.append(
+    element("h3", "range-heading", "Context peak distribution"),
+    plot,
+    selector,
+    resultCount,
+    results,
+  );
   content.replaceChildren(panel);
 
   let loadTimer;
@@ -242,8 +238,8 @@ function renderRangeView(content, feature, distribution) {
     selector.style.setProperty("--range-start", start);
     selector.style.setProperty("--range-end", end);
 
-    const minimum = distribution.maximum * minimumStep / RANGE_RESOLUTION;
-    const maximum = distribution.maximum * maximumStep / RANGE_RESOLUTION;
+    const minimum = feature.max_activation * minimumStep / RANGE_RESOLUTION;
+    const maximum = feature.max_activation * maximumStep / RANGE_RESOLUTION;
     for (const [label, step, value] of [
       [minimumLabel, minimumStep, minimum],
       [maximumLabel, maximumStep, maximum],
@@ -316,9 +312,9 @@ function renderContextBrowser(feature, payload) {
         viewButton.setAttribute("aria-pressed", String(selected));
       }
       if (view === "strongest") {
-        content.replaceChildren(renderContextList(payload.contexts.strongest, feature));
+        content.replaceChildren(renderContextList(payload.strongest_contexts, feature));
       } else {
-        renderRangeView(content, feature, payload.activation_distribution);
+        renderRangeView(content, feature, payload.activation_histogram);
       }
     });
     switcher.append(button);
@@ -365,7 +361,7 @@ async function initialize() {
   try {
     const payload = await fetchJson("/api/summary");
     features = payload.features;
-    const hasFeatureNames = features.some((feature) => feature.title?.trim());
+    const hasFeatureNames = features.some((feature) => feature.title);
     ui.namedFilter.hidden = !hasFeatureNames;
     ui.namedOnly.checked = hasFeatureNames;
     renderMetadata(payload.metadata);

@@ -135,37 +135,34 @@ class AnalysisData:
         group_starts = np.concatenate(
             ([0], np.flatnonzero(np.diff(context_ids)) + 1)
         )
-        grouped_context_ids = context_ids[group_starts]
         peaks = np.maximum.reduceat(activation_values, group_starts)
-        occurrences = np.diff(np.append(group_starts, len(context_ids)))
-        peak_order = np.argsort(peaks, kind="stable")
         return (
             token_positions,
             activation_values,
-            grouped_context_ids,
             group_starts,
             peaks,
-            occurrences,
-            peak_order,
+            np.argsort(peaks, kind="stable"),
         )
 
     def _render_context(self, context_data: tuple, group_index: int) -> dict:
         (
             token_positions,
             activation_values,
-            grouped_context_ids,
             group_starts,
             peaks,
-            occurrences,
             _,
         ) = context_data
-        context_id = int(grouped_context_ids[group_index])
+        activation_start = int(group_starts[group_index])
+        activation_stop = (
+            int(group_starts[group_index + 1])
+            if group_index + 1 < len(group_starts)
+            else len(token_positions)
+        )
+        context_id = int(token_positions[activation_start] // self.context_size)
         context_start = context_id * self.context_size
         context_stop = min(context_start + self.context_size, len(self.token_ids))
         token_slice = self.token_ids[context_start:context_stop]
 
-        activation_start = int(group_starts[group_index])
-        activation_stop = activation_start + int(occurrences[group_index])
         positions = token_positions[activation_start:activation_stop] - context_start
         context_activations = np.zeros(len(token_slice), dtype=np.float32)
         context_activations[positions] = activation_values[
@@ -175,54 +172,35 @@ class AnalysisData:
         return {
             "context_id": context_id,
             "peak_activation": float(peaks[group_index]),
-            "activation_count": int(occurrences[group_index]),
+            "activation_count": activation_stop - activation_start,
             "tokens": [self.decode_token(int(token_id)) for token_id in token_slice],
             "activations": context_activations.tolist(),
         }
 
     def feature(self, feature_id: int) -> dict:
         context_data = self._context_data(feature_id)
-        token_positions, activation_values, grouped_context_ids, _, peaks, _, _ = (
-            context_data
-        )
+        token_positions, activation_values, group_starts, peaks, _ = context_data
         activating_token_ids = self.token_ids[token_positions]
-        unique_token_ids, token_groups, token_counts = np.unique(
-            activating_token_ids, return_inverse=True, return_counts=True
-        )
-        token_maxima = np.zeros(len(unique_token_ids), dtype=np.float32)
-        np.maximum.at(token_maxima, token_groups, activation_values)
-        token_sums = np.bincount(token_groups, weights=activation_values)
-        token_means = token_sums / token_counts
 
         token_summaries = []
         for percentile in TOKEN_PERCENTILES:
-            percentile_activation = float(
-                np.percentile(activation_values, percentile)
-            )
-            selected_token_groups = []
+            target = np.percentile(activation_values, percentile)
+            selected_token_ids = []
             for activation_index in np.argsort(
-                np.abs(activation_values - percentile_activation), kind="stable"
+                np.abs(activation_values - target), kind="stable"
             ):
-                token_group = int(token_groups[activation_index])
-                if token_group not in selected_token_groups:
-                    selected_token_groups.append(token_group)
-                if len(selected_token_groups) == TOKENS_PER_PERCENTILE:
+                token_id = int(activating_token_ids[activation_index])
+                if token_id not in selected_token_ids:
+                    selected_token_ids.append(token_id)
+                if len(selected_token_ids) == TOKENS_PER_PERCENTILE:
                     break
 
             token_summaries.append(
                 {
                     "percentile": percentile,
                     "tokens": [
-                        {
-                            "token_id": int(unique_token_ids[index]),
-                            "token": self.decode_token(
-                                int(unique_token_ids[index])
-                            ),
-                            "activation_count": int(token_counts[index]),
-                            "mean_activation": float(token_means[index]),
-                            "max_activation": float(token_maxima[index]),
-                        }
-                        for index in selected_token_groups
+                        self.decode_token(token_id)
+                        for token_id in selected_token_ids
                     ],
                 }
             )
@@ -234,31 +212,21 @@ class AnalysisData:
 
         maximum = float(peaks.max())
         bin_count = min(ACTIVATION_HISTOGRAM_BINS, len(peaks))
-        if maximum > 0:
-            histogram, _ = np.histogram(
-                peaks, bins=bin_count, range=(0.0, maximum)
-            )
-        else:
-            histogram = np.array([len(peaks)])
+        histogram, _ = np.histogram(peaks, bins=bin_count, range=(0.0, maximum))
 
         return {
             "activation_count": int(len(token_positions)),
-            "context_count": int(len(grouped_context_ids)),
+            "context_count": int(len(group_starts)),
             "token_groups": token_summaries,
-            "activation_distribution": {
-                "maximum": maximum,
-                "counts": histogram.tolist(),
-            },
-            "contexts": {
-                "strongest": strongest,
-            },
+            "activation_histogram": histogram.tolist(),
+            "strongest_contexts": strongest,
         }
 
     def range_contexts(
         self, feature_id: int, minimum: float, maximum: float
     ) -> dict:
         context_data = self._context_data(feature_id)
-        _, _, _, _, peaks, _, peak_order = context_data
+        _, _, _, peaks, peak_order = context_data
         ordered_peaks = peaks[peak_order]
         minimum = ordered_peaks.dtype.type(minimum)
         maximum = ordered_peaks.dtype.type(maximum)
@@ -268,23 +236,18 @@ class AnalysisData:
         matching_count = len(ordered)
         if matching_count > CONTEXT_LIMIT:
             matching_peaks = peaks[ordered]
-            targets = np.linspace(
-                matching_peaks[0], matching_peaks[-1], CONTEXT_LIMIT
+            targets = np.linspace(matching_peaks[0], matching_peaks[-1], CONTEXT_LIMIT)
+            right = np.searchsorted(matching_peaks, targets).clip(0, matching_count - 1)
+            left = np.maximum(right - 1, 0)
+            nearest = np.where(
+                targets - matching_peaks[left]
+                <= matching_peaks[right] - targets,
+                left,
+                right,
             )
-            selected = []
-            for offset, target in enumerate(targets):
-                lower = selected[-1] + 1 if selected else 0
-                upper = matching_count - (CONTEXT_LIMIT - offset)
-                right = int(
-                    np.clip(np.searchsorted(matching_peaks, target), lower, upper)
-                )
-                left = max(lower, right - 1)
-                selected.append(
-                    min(
-                        (left, right),
-                        key=lambda index: abs(matching_peaks[index] - target),
-                    )
-                )
+            offsets = np.arange(CONTEXT_LIMIT)
+            nearest = np.minimum(nearest, matching_count - CONTEXT_LIMIT + offsets)
+            selected = np.maximum.accumulate(nearest - offsets) + offsets
             ordered = ordered[selected]
 
         return {

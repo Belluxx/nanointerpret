@@ -111,9 +111,13 @@ def load_sae(sae_dir: Path, config: dict, device: torch.device) -> TopKSAE:
     return sae.eval().requires_grad_(False)
 
 
-def encode_residuals(
-    sae: TopKSAE, residuals: Tensor, activation_scale: float, batch_size: int
-) -> tuple[Tensor, Tensor]:
+def encode_activations(
+    sae: TopKSAE,
+    residuals: Tensor,
+    activation_scale: float,
+    batch_size: int,
+    feature_dtype: np.dtype,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     indices = []
     values = []
     for start in range(0, len(residuals), batch_size):
@@ -122,12 +126,8 @@ def encode_residuals(
         _reconstruction, batch_indices, batch_values = sae(x)
         indices.append(batch_indices.cpu())
         values.append(batch_values.cpu())
-    return torch.cat(indices), torch.cat(values)
-
-
-def flatten_activations(
-    indices: Tensor, values: Tensor, feature_dtype: np.dtype
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    indices = torch.cat(indices)
+    values = torch.cat(values)
     firing = values > FIRING_THRESHOLD
     counts = firing.sum(dim=1).numpy().astype(np.uint32, copy=False)
     feature_ids = indices[firing].numpy().astype(feature_dtype, copy=False)
@@ -140,7 +140,7 @@ def flatten_activations(
 @torch.inference_mode()
 def write_analysis(
     output_path: Path,
-    tokenizer,
+    pad_token_id: int,
     model,
     capture: ResidualStreamCapture,
     sae: TopKSAE,
@@ -158,9 +158,11 @@ def write_analysis(
     }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    feature_temporary = output_path.with_name(output_path.name + ".feature_ids.tmp")
-    values_temporary = output_path.with_name(output_path.name + ".values.tmp")
-    row_ptr_temporary = output_path.with_name(output_path.name + ".row_ptr.tmp")
+    temporary_paths = [
+        output_path.with_name(output_path.name + suffix)
+        for suffix in (".feature_ids.tmp", ".values.tmp", ".row_ptr.tmp")
+    ]
+    feature_temporary, values_temporary, row_ptr_temporary = temporary_paths
     pointer_dtype = (
         np.uint32
         if token_count * sae.k <= np.iinfo(np.uint32).max
@@ -192,7 +194,7 @@ def write_analysis(
                 evaluation_tokens,
                 context_size,
                 model_batch_size,
-                tokenizer.pad_token_id,
+                pad_token_id,
                 shuffle=False,
                 seed=0,
             )
@@ -202,14 +204,12 @@ def write_analysis(
                 residuals = capture(
                     model, device_input_ids, device_attention_mask
                 )[device_attention_mask.bool()]
-                indices, values = encode_residuals(
+                counts, feature_ids, active_values = encode_activations(
                     sae,
                     residuals,
                     float(config["activation_scale"]),
                     int(config["sae_batch_size"]),
-                )
-                counts, feature_ids, active_values = flatten_activations(
-                    indices, values, feature_dtype
+                    feature_dtype,
                 )
                 batch_tokens = len(counts)
                 cumulative = np.cumsum(counts, dtype=pointer_dtype)
@@ -265,9 +265,8 @@ def write_analysis(
         if row_ptr is not None:
             row_ptr.flush()
             del row_ptr
-        feature_temporary.unlink(missing_ok=True)
-        values_temporary.unlink(missing_ok=True)
-        row_ptr_temporary.unlink(missing_ok=True)
+        for temporary_path in temporary_paths:
+            temporary_path.unlink(missing_ok=True)
 
 
 def main() -> None:
@@ -317,7 +316,7 @@ def main() -> None:
     with ResidualStreamCapture(layers[layer_index]) as capture:
         write_analysis(
             output_path,
-            tokenizer,
+            tokenizer.pad_token_id,
             model,
             capture,
             sae,
