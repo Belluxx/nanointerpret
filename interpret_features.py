@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
+import random
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -14,10 +16,6 @@ from tqdm.auto import tqdm
 from transformers import AutoTokenizer
 
 from src.data import load_analysis
-from src.feature_examples import (
-    DEFAULT_EXAMPLE_SEED,
-    choose_activation_examples,
-)
 
 
 MAX_RETRIES = 3
@@ -27,14 +25,15 @@ INSUFFICIENT_TITLE = "Insufficient activation data"
 UNCLEAR_TITLE = "No coherent interpretation"
 MAX_PREFIX_TOKENS = 64
 MAX_ACTIVATED_TOKENS = 5
+EXAMPLES_PER_BUCKET = 5
 RETRYABLE_STATUS_CODES = {408, 409, 429}
-EXAMPLE_CATEGORIES = (
-    ("Top activations", "Top"),
-    ("Very high activations", "90-99"),
-    ("High activations", "75-90"),
-    ("Medium activations", "50-75"),
-    ("Low activations", "25-50"),
-    ("Random activations", "Random positive"),
+TOP_BUCKET = "Top activations"
+RANDOM_BUCKET = "Random activations"
+PERCENTILE_BUCKETS = (
+    ("Very high activations", 90, 99),
+    ("High activations", 75, 90),
+    ("Medium activations", 50, 75),
+    ("Low activations", 25, 50),
 )
 T = TypeVar("T")
 R = TypeVar("R")
@@ -65,7 +64,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-reasoning", action="store_true", help="Disable model reasoning. Reasoning is enabled by default.")
     parser.add_argument("--max-tokens", type=positive_int, help="Completion-token budget. Default: 32768, or 64 with --no-reasoning.")
     parser.add_argument("--concurrent", type=positive_int, default=1, help="Number of concurrent interpretation requests. Default: 1.")
-    parser.add_argument("--seed", type=int, default=DEFAULT_EXAMPLE_SEED)
+    parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
 
@@ -132,30 +131,78 @@ def choose_examples(
     tokenizer,
     seed: int,
 ) -> dict[str, list[str]] | None:
-    selections = choose_activation_examples(
-        feature_id,
-        token_positions,
-        values,
-        context_size,
-        seed,
-    )
-    if selections is None:
-        return None
+    count = len(values)
+    ranked = values.argsort(kind="stable")
+    context_ids = token_positions // context_size
+    used_positions: set[int] = set()
+    used_contexts: set[int] = set()
+    rng = random.Random(seed + feature_id)
 
-    return {
-        bucket: [
-            render_example(
-                tokenizer,
-                token_ids,
-                token_positions,
-                values,
-                context_size,
-                token_position,
+    def available(rank: int, require_new_context: bool) -> bool:
+        local_index = int(ranked[rank])
+        return int(token_positions[local_index]) not in used_positions and (
+            not require_new_context
+            or int(context_ids[local_index]) not in used_contexts
+        )
+
+    def find(
+        ranks: range, randomize: bool, require_new_context: bool
+    ) -> int | None:
+        if randomize:
+            for _ in range(64):
+                rank = rng.choice(ranks)
+                if available(rank, require_new_context):
+                    return rank
+        return next(
+            (rank for rank in ranks if available(rank, require_new_context)),
+            None,
+        )
+
+    def select(ranks: range, *, randomize: bool) -> list[str] | None:
+        if len(ranks) < EXAMPLES_PER_BUCKET:
+            return None
+        examples = []
+        for _ in range(EXAMPLES_PER_BUCKET):
+            rank = find(ranks, randomize, require_new_context=True)
+            if rank is None:
+                rank = find(ranks, randomize, require_new_context=False)
+            if rank is None:
+                return None
+
+            local_index = int(ranked[rank])
+            token_position = int(token_positions[local_index])
+            used_positions.add(token_position)
+            used_contexts.add(int(context_ids[local_index]))
+            examples.append(
+                render_example(
+                    tokenizer,
+                    token_ids,
+                    token_positions,
+                    values,
+                    context_size,
+                    token_position,
+                )
             )
-            for token_position in positions
-        ]
-        for bucket, positions in selections.items()
-    }
+        return examples
+
+    top = select(range(count - 1, -1, -1), randomize=False)
+    if top is None:
+        return None
+    examples = {TOP_BUCKET: top}
+
+    for bucket, lower, upper in PERCENTILE_BUCKETS:
+        start = math.ceil(lower * count / 100) - 1
+        stop = math.ceil(upper * count / 100) - 1
+        selected = select(range(start, stop), randomize=True)
+        if selected is None:
+            return None
+        examples[bucket] = selected
+
+    selected = select(range(count), randomize=True)
+    if selected is None:
+        return None
+    examples[RANDOM_BUCKET] = selected
+    return examples
 
 
 def feature_prompt(examples: dict[str, list[str]]) -> str:
@@ -163,10 +210,11 @@ def feature_prompt(examples: dict[str, list[str]]) -> str:
         "Infer the feature's core concept from the examples below.\n"
         "Focus primarily on high-activation examples, but use weaker examples to detect broader meanings or polysemanticity."
     ]
-    for heading, bucket in EXAMPLE_CATEGORIES:
-        texts = examples.get(bucket)
-        if texts:
-            sections.append(f"## {heading}:\n" + "\n".join(f"```\n{text.strip()}\n```" for text in texts))
+    for heading, texts in examples.items():
+        sections.append(
+            f"## {heading}:\n"
+            + "\n".join(f"```\n{text.strip()}\n```" for text in texts)
+        )
     sections.append(
         f"If the examples do not support one coherent concept, return exactly \"{UNCLEAR_TITLE}\". "
         "Give this feature a very concise, specific title. "
