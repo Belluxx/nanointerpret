@@ -181,8 +181,7 @@ const RANGE_RESOLUTION = 1000;
 function renderRangeView(content, feature, distribution) {
   const panel = element("section");
   const heading = element("header", "range-heading");
-  const selectedRange = element("span", "selected-range");
-  heading.append(element("h3", "", "Context peak distribution"), selectedRange);
+  heading.append(element("h3", "", "Context peak distribution"));
 
   const plot = element("div", "distribution-plot");
   plot.setAttribute("aria-hidden", "true");
@@ -212,7 +211,15 @@ function renderRangeView(content, feature, distribution) {
   }
   const minimumInput = rangeInput("Minimum peak activation", 0);
   const maximumInput = rangeInput("Maximum peak activation", RANGE_RESOLUTION);
-  selector.append(track, minimumInput, maximumInput);
+  const minimumLabel = element("span", "range-value");
+  const maximumLabel = element("span", "range-value");
+  selector.append(
+    track,
+    minimumInput,
+    maximumInput,
+    minimumLabel,
+    maximumLabel,
+  );
 
   const resultCount = element("span", "range-result-count");
   const results = element("div", "contexts");
@@ -237,7 +244,14 @@ function renderRangeView(content, feature, distribution) {
 
     const minimum = distribution.maximum * minimumStep / RANGE_RESOLUTION;
     const maximum = distribution.maximum * maximumStep / RANGE_RESOLUTION;
-    selectedRange.textContent = `${formatActivation(minimum)} - ${formatActivation(maximum)}`;
+    for (const [label, step, value] of [
+      [minimumLabel, minimumStep, minimum],
+      [maximumLabel, maximumStep, maximum],
+    ]) {
+      const fraction = step / RANGE_RESOLUTION;
+      label.style.left = `calc(${100 * fraction}% + ${7 - 14 * fraction}px)`;
+      label.textContent = formatActivation(value);
+    }
     bars.forEach((bar, index) => {
       const binStart = index * RANGE_RESOLUTION / bars.length;
       const binEnd = (index + 1) * RANGE_RESOLUTION / bars.length;

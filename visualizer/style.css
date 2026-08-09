@@ -448,14 +448,7 @@ main {
   background: linear-gradient(90deg, rgb(196 79 27 / 10%), rgb(196 79 27 / 85%));
 }
 
-.range-heading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.selected-range,
+.range-value,
 .range-result-count {
   color: var(--muted);
   font-family: var(--mono);
@@ -486,7 +479,15 @@ main {
   --range-start: 0%;
   --range-end: 100%;
   position: relative;
-  height: 28px;
+  height: 48px;
+}
+
+.range-value {
+  position: absolute;
+  top: 31px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .range-track {
@@ -561,7 +562,7 @@ main {
 
 .range-result-count {
   display: block;
-  margin: 18px 0 9px;
+  margin: 10px 0 9px;
   padding-top: 14px;
   border-top: 1px solid var(--line);
 }
@@ -724,12 +725,6 @@ main {
   .context-controls {
     align-items: flex-end;
     flex-direction: column;
-  }
-
-  .range-heading {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 4px;
   }
 
   .context-header {
