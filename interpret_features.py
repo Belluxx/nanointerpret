@@ -9,7 +9,7 @@ import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Callable, Iterable, Iterator, TypeVar
+from typing import Callable, Iterable, Iterator
 
 from openai import APIConnectionError, APIStatusError, OpenAI
 from tqdm.auto import tqdm
@@ -21,12 +21,14 @@ from src.data import load_analysis
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 3
 REQUEST_TIMEOUT_SECONDS = 300
+RETRYABLE_STATUS_CODES = {408, 409, 429}
+
 INSUFFICIENT_TITLE = "Insufficient activation data"
 UNCLEAR_TITLE = "No coherent interpretation"
 MAX_PREFIX_TOKENS = 64
 MAX_ACTIVATED_TOKENS = 5
+
 EXAMPLES_PER_BUCKET = 5
-RETRYABLE_STATUS_CODES = {408, 409, 429}
 TOP_BUCKET = "Top activations"
 RANDOM_BUCKET = "Random activations"
 PERCENTILE_BUCKETS = (
@@ -35,8 +37,6 @@ PERCENTILE_BUCKETS = (
     ("Medium activations", 50, 75),
     ("Low activations", 25, 50),
 )
-T = TypeVar("T")
-R = TypeVar("R")
 
 
 def nonnegative_int(value: str) -> int:
@@ -287,10 +287,10 @@ def request_title(
 
 def map_bounded(
     executor: ThreadPoolExecutor,
-    function: Callable[[T], R],
-    items: Iterable[T],
+    function: Callable[[int], tuple[int, str]],
+    items: Iterable[int],
     max_pending: int,
-) -> Iterator[R]:
+) -> Iterator[tuple[int, str]]:
     items = iter(items)
     pending = deque()
     for item in items:
