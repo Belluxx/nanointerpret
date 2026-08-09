@@ -95,19 +95,14 @@ main {
   font-size: 11px;
 }
 
-.sandbox {
-  margin-bottom: 24px;
+.sandbox,
+.browser {
   border: 1px solid var(--line);
   background: var(--surface);
 }
 
-.sandbox-header,
-.sandbox-actions,
-.generation-results article > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+.sandbox {
+  margin-bottom: 24px;
 }
 
 .sandbox-header {
@@ -126,17 +121,6 @@ main {
   margin: 5px 0 0;
   color: var(--muted);
   font-size: 11px;
-}
-
-.sandbox-badge {
-  padding: 4px 7px;
-  border: 1px solid var(--line);
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 8px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  white-space: nowrap;
 }
 
 #intervention-form {
@@ -165,7 +149,6 @@ main {
 }
 
 #intervention-form textarea {
-  min-height: 88px;
   padding: 10px 11px;
   resize: vertical;
   line-height: 1.5;
@@ -192,7 +175,9 @@ main {
 }
 
 .sandbox-actions {
-  justify-content: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 16px;
   margin-top: 15px;
 }
 
@@ -207,18 +192,9 @@ main {
   font-weight: 600;
 }
 
-#generate-button:hover:not(:disabled) {
-  filter: brightness(0.92);
-}
-
 #generate-button:disabled {
   cursor: wait;
   opacity: 0.55;
-}
-
-#generate-button:focus-visible {
-  outline: 2px solid var(--text);
-  outline-offset: 2px;
 }
 
 #sandbox-status {
@@ -244,16 +220,9 @@ main {
 }
 
 .generation-results article > header {
-  min-height: 38px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--soft-line);
   background: var(--subtle);
-}
-
-.generation-results article > header span {
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 9px;
 }
 
 .generation-results pre {
@@ -267,14 +236,8 @@ main {
   white-space: pre-wrap;
 }
 
-.intervened-result {
-  box-shadow: inset 3px 0 var(--accent);
-}
-
 .browser {
   overflow: hidden;
-  border: 1px solid var(--line);
-  background: var(--surface);
 }
 
 .toolbar {
@@ -857,7 +820,6 @@ main {
 }
 
 @media (max-width: 380px) {
-  .sandbox-header,
   .sandbox-actions {
     align-items: flex-start;
     flex-direction: column;

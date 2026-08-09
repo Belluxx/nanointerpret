@@ -29,7 +29,6 @@ CONTEXT_LIMIT = 20
 ACTIVATION_HISTOGRAM_BINS = 40
 TOKENS_PER_PERCENTILE = 4
 TOKEN_PERCENTILES = (95, 50, 25)
-MAX_REQUEST_BYTES = 64 * 1024
 
 
 def positive_int(value: str) -> int:
@@ -62,12 +61,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--device", choices=("auto", "mps", "cuda", "cpu"), default="auto"
-    )
-    parser.add_argument(
-        "--model-dtype",
-        choices=("float32", "float16", "bfloat16"),
-        default=None,
-        help="Generation model dtype. Default: the SAE training configuration.",
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=positive_int, default=8000)
@@ -291,50 +284,22 @@ class InterventionSandbox:
         sae_dir: Path,
         data: AnalysisData,
         device_name: str,
-        model_dtype: str | None,
     ):
-        config_path = sae_dir / "config.json"
-        checkpoint_path = sae_dir / "sae_final.pt"
-        if not config_path.exists():
-            raise FileNotFoundError(f"SAE configuration not found: {config_path}")
-        if not checkpoint_path.exists():
-            raise FileNotFoundError(f"SAE checkpoint not found: {checkpoint_path}")
-
-        config = json.loads(config_path.read_text())
-        if config["model_id"] != data.metadata["model_id"]:
-            raise ValueError("analysis and SAE use different models")
-        if int(config["layer_index"]) != int(data.metadata["layer_index"]):
-            raise ValueError("analysis and SAE use different activation layers")
-
         self.sae_dir = sae_dir
         self.data = data
         self.device = choose_device(device_name)
-        self.model_dtype = model_dtype
         self.generator: InterventionGenerator | None = None
-        self.load_lock = threading.Lock()
-
-    def summary(self) -> dict:
-        return {
-            "max_new_tokens": MAX_NEW_TOKENS,
-            "model_load": "lazy",
-        }
+        self.lock = threading.Lock()
 
     def generate(self, payload: object) -> dict:
         request = InterventionRequest.from_payload(payload, self.data.d_sae)
-        if self.generator is None:
-            with self.load_lock:
-                if self.generator is None:
-                    print(
-                        f"Loading intervention model on {self.device} from "
-                        f"{self.sae_dir} ..."
-                    )
-                    self.generator = InterventionGenerator.from_sae_dir(
-                        self.sae_dir,
-                        self.device,
-                        model_dtype=self.model_dtype,
-                        tokenizer=self.data.tokenizer,
-                    )
-        return self.generator.generate_pair(request)
+        with self.lock:
+            if self.generator is None:
+                print(f"Loading intervention model on {self.device} ...")
+                self.generator = InterventionGenerator.from_sae_dir(
+                    self.sae_dir, self.device, tokenizer=self.data.tokenizer
+                )
+            return self.generator.generate_pair(request)
 
 
 class VisualizerHandler(SimpleHTTPRequestHandler):
@@ -353,7 +318,7 @@ class VisualizerHandler(SimpleHTTPRequestHandler):
         request = urlsplit(self.path)
         if request.path == "/api/summary":
             payload = self.data.summary()
-            payload["sandbox"] = self.sandbox.summary()
+            payload["max_new_tokens"] = MAX_NEW_TOKENS
             self.send_json(payload)
             return
 
@@ -392,10 +357,6 @@ class VisualizerHandler(SimpleHTTPRequestHandler):
 
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
-            if not 0 < content_length <= MAX_REQUEST_BYTES:
-                raise ValueError(
-                    f"request body must be between 1 and {MAX_REQUEST_BYTES:,} bytes"
-                )
             payload = json.loads(self.rfile.read(content_length))
             result = self.sandbox.generate(payload)
         except (json.JSONDecodeError, UnicodeDecodeError):
@@ -430,9 +391,7 @@ def main() -> None:
     print(f"Loading {args.analysis} ...")
     data = AnalysisData(args.analysis, names_path)
     sae_dir = args.sae_dir or args.analysis.parent
-    sandbox = InterventionSandbox(
-        sae_dir, data, args.device, args.model_dtype
-    )
+    sandbox = InterventionSandbox(sae_dir, data, args.device)
     handler = partial(VisualizerHandler, data=data, sandbox=sandbox)
     with ThreadingHTTPServer((args.host, args.port), handler) as server:
         url = f"http://{args.host}:{server.server_address[1]}"

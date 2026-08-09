@@ -10,7 +10,6 @@ const ui = {
   sandboxForm: document.querySelector("#intervention-form"),
   prompt: document.querySelector("#prompt-input"),
   featureInput: document.querySelector("#feature-input"),
-  featureOptions: document.querySelector("#feature-options"),
   interventionMode: document.querySelector("#intervention-mode"),
   amountLabel: document.querySelector("#amount-label"),
   amountInput: document.querySelector("#amount-input"),
@@ -20,8 +19,6 @@ const ui = {
   generationResults: document.querySelector("#generation-results"),
   baselineOutput: document.querySelector("#baseline-output"),
   intervenedOutput: document.querySelector("#intervened-output"),
-  baselineTokenCount: document.querySelector("#baseline-token-count"),
-  intervenedTokenCount: document.querySelector("#intervened-token-count"),
 };
 
 let features = [];
@@ -54,18 +51,9 @@ async function fetchJson(url, options) {
   return payload;
 }
 
-function initializeSandbox(metadata, sandbox) {
+function initializeSandbox(metadata, maxNewTokens) {
   ui.featureInput.max = String(metadata.d_sae - 1);
-  ui.tokenCount.max = String(sandbox.max_new_tokens);
-
-  const options = document.createDocumentFragment();
-  for (const feature of features) {
-    const option = document.createElement("option");
-    option.value = String(feature.id);
-    option.label = feature.title || `Feature ${feature.id}`;
-    options.append(option);
-  }
-  ui.featureOptions.replaceChildren(options);
+  ui.tokenCount.max = String(maxNewTokens);
 
   if (features.length) {
     ui.featureInput.value = String(features[0].id);
@@ -80,10 +68,6 @@ function updateInterventionMode() {
     "aria-label",
     clamping ? "Target feature activation" : "Additive steering alpha",
   );
-}
-
-function generationText(result) {
-  return result.continuation || "(No visible continuation text)";
 }
 
 ui.interventionMode.addEventListener("change", updateInterventionMode);
@@ -109,12 +93,10 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
     });
-    ui.baselineOutput.textContent = generationText(payload.baseline);
-    ui.intervenedOutput.textContent = generationText(payload.intervened);
-    ui.baselineTokenCount.textContent = `${payload.baseline.generated_tokens} tokens`;
-    ui.intervenedTokenCount.textContent = `${payload.intervened.generated_tokens} tokens`;
+    ui.baselineOutput.textContent = payload.baseline || "(No visible text)";
+    ui.intervenedOutput.textContent = payload.intervened || "(No visible text)";
     ui.generationResults.hidden = false;
-    ui.sandboxStatus.textContent = `Compared feature #${payload.feature_id}.`;
+    ui.sandboxStatus.textContent = `Compared feature #${request.feature_id}.`;
   } catch (error) {
     ui.sandboxStatus.classList.add("error");
     ui.sandboxStatus.textContent = `Could not generate: ${error.message}`;
@@ -450,7 +432,7 @@ async function initialize() {
     ui.namedFilter.hidden = !hasFeatureNames;
     ui.namedOnly.checked = hasFeatureNames;
     renderMetadata(payload.metadata);
-    initializeSandbox(payload.metadata, payload.sandbox);
+    initializeSandbox(payload.metadata, payload.max_new_tokens);
     renderFeatureList();
   } catch (error) {
     ui.count.textContent = "Could not load analysis";

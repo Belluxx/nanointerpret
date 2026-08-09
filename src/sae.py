@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
@@ -70,6 +72,21 @@ class TopKSAE(nn.Module):
     def normalize_decoder(self) -> None:
         norms = self.decoder_weight.norm(dim=1, keepdim=True).clamp_min_(1e-12)
         self.decoder_weight.div_(norms)
+
+
+def load_sae(sae_dir: Path, config: dict, device: torch.device) -> TopKSAE:
+    checkpoint_path = sae_dir / "sae_final.pt"
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    d_sae, d_model = checkpoint["sae"]["decoder_weight"].shape
+    sae = TopKSAE(
+        d_model,
+        d_sae,
+        int(config["k"]),
+        device,
+        subtract_pre_bias=bool(config["subtract_pre_bias"]),
+    )
+    sae.load_state_dict(checkpoint["sae"])
+    return sae.eval().requires_grad_(False)
 
 
 def normalized_auxk_loss(

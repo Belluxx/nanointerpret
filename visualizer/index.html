@@ -21,20 +21,16 @@
 
       <section class="sandbox" aria-labelledby="sandbox-title">
         <header class="sandbox-header">
-          <div>
-            <h2 id="sandbox-title">Intervention sandbox</h2>
-            <p>Compare an unmodified continuation with a feature intervention.</p>
-          </div>
-          <span class="sandbox-badge">Greedy decoding</span>
+          <h2 id="sandbox-title">Intervention sandbox</h2>
+          <p>Compare an unmodified continuation with a feature intervention.</p>
         </header>
 
         <form id="intervention-form">
-          <label class="prompt-field">
+          <label>
             <span>Prompt</span>
             <textarea
               id="prompt-input"
               rows="4"
-              maxlength="20000"
               placeholder="Enter a prompt to continue…"
               required
             ></textarea>
@@ -48,11 +44,9 @@
                 type="number"
                 min="0"
                 step="1"
-                list="feature-options"
                 placeholder="Feature ID"
                 required
               />
-              <datalist id="feature-options"></datalist>
             </label>
 
             <label>
@@ -84,14 +78,12 @@
           <article>
             <header>
               <h3>Unmodified</h3>
-              <span id="baseline-token-count"></span>
             </header>
             <pre id="baseline-output"></pre>
           </article>
-          <article class="intervened-result">
+          <article>
             <header>
               <h3>Intervened</h3>
-              <span id="intervened-token-count"></span>
             </header>
             <pre id="intervened-output"></pre>
           </article>

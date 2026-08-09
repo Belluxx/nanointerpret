@@ -20,7 +20,7 @@ from src.data import (
 )
 from src.experiment import ResidualStreamCapture, find_transformer_layers
 from src.runtime import choose_device
-from src.sae import FIRING_THRESHOLD, TopKSAE
+from src.sae import FIRING_THRESHOLD, TopKSAE, load_sae
 
 
 SAE_DIR = Path("artifacts/sae_gemma_3_270m")
@@ -91,24 +91,6 @@ def evaluation_cache(config: dict, cache_dir: Path) -> tuple[Path, int] | None:
     ):
         return None
     return validation_path, spec.validation_tokens
-
-
-def load_sae(sae_dir: Path, config: dict, device: torch.device) -> TopKSAE:
-    checkpoint_path = sae_dir / "sae_final.pt"
-    if not checkpoint_path.exists():
-        raise FileNotFoundError(f"SAE checkpoint not found: {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-    decoder_weight = checkpoint["sae"]["decoder_weight"]
-    d_sae, d_model = decoder_weight.shape
-    sae = TopKSAE(
-        d_model,
-        d_sae,
-        int(config["k"]),
-        device,
-        subtract_pre_bias=bool(config["subtract_pre_bias"]),
-    )
-    sae.load_state_dict(checkpoint["sae"])
-    return sae.eval().requires_grad_(False)
 
 
 def encode_activations(
