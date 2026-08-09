@@ -19,6 +19,85 @@
         </dl>
       </header>
 
+      <section class="sandbox" aria-labelledby="sandbox-title">
+        <header class="sandbox-header">
+          <div>
+            <h2 id="sandbox-title">Intervention sandbox</h2>
+            <p>Compare an unmodified continuation with a feature intervention.</p>
+          </div>
+          <span class="sandbox-badge">Greedy decoding</span>
+        </header>
+
+        <form id="intervention-form">
+          <label class="prompt-field">
+            <span>Prompt</span>
+            <textarea
+              id="prompt-input"
+              rows="4"
+              maxlength="20000"
+              placeholder="Enter a prompt to continue…"
+              required
+            ></textarea>
+          </label>
+
+          <div class="intervention-controls">
+            <label>
+              <span>Feature</span>
+              <input
+                id="feature-input"
+                type="number"
+                min="0"
+                step="1"
+                list="feature-options"
+                placeholder="Feature ID"
+                required
+              />
+              <datalist id="feature-options"></datalist>
+            </label>
+
+            <label>
+              <span>Intervention</span>
+              <select id="intervention-mode">
+                <option value="clamp">Feature clamping</option>
+                <option value="additive">Additive steering</option>
+              </select>
+            </label>
+
+            <label>
+              <span id="amount-label">Target activation</span>
+              <input id="amount-input" type="number" step="any" value="10" required />
+            </label>
+
+            <label>
+              <span>Continuation tokens</span>
+              <input id="token-count-input" type="number" min="1" value="32" required />
+            </label>
+          </div>
+
+          <div class="sandbox-actions">
+            <button id="generate-button" type="submit">Generate comparison</button>
+            <span id="sandbox-status" role="status"></span>
+          </div>
+        </form>
+
+        <div id="generation-results" class="generation-results" hidden>
+          <article>
+            <header>
+              <h3>Unmodified</h3>
+              <span id="baseline-token-count"></span>
+            </header>
+            <pre id="baseline-output"></pre>
+          </article>
+          <article class="intervened-result">
+            <header>
+              <h3>Intervened</h3>
+              <span id="intervened-token-count"></span>
+            </header>
+            <pre id="intervened-output"></pre>
+          </article>
+        </div>
+      </section>
+
       <section class="browser" aria-label="Feature browser">
         <header class="toolbar">
           <input

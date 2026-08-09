@@ -7,7 +7,7 @@ The main objectives are:
 - [x] Optimize SAE training for Apple Silicon (MPS) (works with cuda and cpu too)
 - [x] Cache LLM activations on disk for quick ablation experiments (avoid recomputing activations)
 - [x] Do some ablation experiments on different SAE training approaches to see what works best (see [experiments.md](docs/experiments.md))
-- [ ] Support for feature steering
+- [x] Support for feature clamping and additive steering
 
 Secondary objectives:
 - [ ] Use GGUF / llama.cpp to run LLM and capture acivations
