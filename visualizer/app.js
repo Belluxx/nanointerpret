@@ -193,7 +193,7 @@ function renderRangeView(content, feature, distribution) {
     bar.style.height = `${Math.max(2, 100 * Math.sqrt(count / largestBin))}%`;
     const lower = distribution.maximum * index / distribution.counts.length;
     const upper = distribution.maximum * (index + 1) / distribution.counts.length;
-    bar.title = `${formatActivation(lower)}–${formatActivation(upper)}: ${count.toLocaleString()} contexts`;
+    bar.title = `${formatActivation(lower)}-${formatActivation(upper)}: ${count.toLocaleString()} contexts`;
     plot.append(bar);
     return bar;
   });
@@ -237,7 +237,7 @@ function renderRangeView(content, feature, distribution) {
 
     const minimum = distribution.maximum * minimumStep / RANGE_RESOLUTION;
     const maximum = distribution.maximum * maximumStep / RANGE_RESOLUTION;
-    selectedRange.textContent = `${formatActivation(minimum)} – ${formatActivation(maximum)}`;
+    selectedRange.textContent = `${formatActivation(minimum)} - ${formatActivation(maximum)}`;
     bars.forEach((bar, index) => {
       const binStart = index * RANGE_RESOLUTION / bars.length;
       const binEnd = (index + 1) * RANGE_RESOLUTION / bars.length;
@@ -263,8 +263,8 @@ function renderRangeView(content, feature, distribution) {
       if (currentRequest !== requestId) return;
       const shown = payload.contexts.length;
       resultCount.textContent = shown === payload.matching_context_count
-        ? `${shown.toLocaleString()} contexts · low to high`
-        : `Sampled ${shown.toLocaleString()} of ${payload.matching_context_count.toLocaleString()} · low to high`;
+        ? `${shown.toLocaleString()} contexts (low to high)`
+        : `Sampled ${shown.toLocaleString()} of ${payload.matching_context_count.toLocaleString()} (low to high)`;
       if (shown) renderContextList(payload.contexts, feature, results);
       else results.replaceChildren(
         element("p", "empty-state", "No contexts fall within this activation range."),
