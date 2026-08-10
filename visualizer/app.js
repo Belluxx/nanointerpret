@@ -14,9 +14,7 @@ const ui = {
   interventionMode: document.querySelector("#intervention-mode"),
   amountLabel: document.querySelector("#amount-label"),
   amountInput: document.querySelector("#amount-input"),
-  samplingSettingsButton: document.querySelector("#sampling-settings-button"),
   samplingSettings: document.querySelector("#sampling-settings-dialog"),
-  samplingSettingsClose: document.querySelector("#sampling-settings-close"),
   samplingInputs: [...document.querySelectorAll(".sampling-setting input[type='number']")],
   generateButton: document.querySelector("#generate-button"),
   generationResults: document.querySelector("#generation-results"),
@@ -117,13 +115,15 @@ function updateInterventionMode() {
 }
 
 function openSamplingSettings() {
-  ui.samplingSettings.showModal();
+  if (!ui.samplingSettings.matches(":popover-open")) {
+    ui.samplingSettings.showPopover();
+  }
 }
 
 function samplingSettingsAreValid() {
   for (const input of ui.samplingInputs) {
     if (input.checkValidity()) continue;
-    if (!ui.samplingSettings.open) openSamplingSettings();
+    openSamplingSettings();
     input.reportValidity();
     return false;
   }
@@ -155,8 +155,6 @@ ui.featureInput.addEventListener("input", () => {
   ui.featureInput.setCustomValidity("");
   if (ui.interventionMode.value === "clamp") updateAmountDefault();
 });
-ui.samplingSettingsButton.addEventListener("click", openSamplingSettings);
-ui.samplingSettingsClose.addEventListener("click", () => ui.samplingSettings.close());
 ui.samplingInputs.forEach(synchronizeSetting);
 ui.sandboxForm.addEventListener("submit", async (event) => {
   event.preventDefault();

@@ -31,28 +31,22 @@
             type="button"
             aria-label="Sampling settings"
             aria-haspopup="dialog"
-            aria-controls="sampling-settings-dialog"
+            popovertarget="sampling-settings-dialog"
           >
             <span>Sampling</span>
             <span class="settings-icon" aria-hidden="true"></span>
           </button>
         </header>
 
-        <dialog
+        <div
           id="sampling-settings-dialog"
           class="sampling-settings-dialog"
+          popover
+          role="dialog"
           aria-labelledby="sampling-settings-title"
         >
           <header>
             <h3 id="sampling-settings-title">Sampling settings</h3>
-            <button
-              id="sampling-settings-close"
-              class="dialog-close-button"
-              type="button"
-              aria-label="Close sampling settings"
-            >
-              &times;
-            </button>
           </header>
 
           <div class="sampling-settings-grid">
@@ -156,7 +150,7 @@
               </div>
             </div>
           </div>
-        </dialog>
+        </div>
 
         <form id="intervention-form">
           <label>
