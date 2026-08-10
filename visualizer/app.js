@@ -468,8 +468,8 @@ function renderDistribution(feature, counts) {
       if (currentRequest !== requestId) return;
       const shown = payload.contexts.length;
       resultCount.textContent = shown === payload.matching_context_count
-        ? `${shown.toLocaleString()} contexts (low to high)`
-        : `Sampled ${shown.toLocaleString()} of ${payload.matching_context_count.toLocaleString()} (low to high)`;
+        ? `${shown.toLocaleString()} contexts (high to low)`
+        : `Sampled ${shown.toLocaleString()} of ${payload.matching_context_count.toLocaleString()} (high to low)`;
       if (shown) {
         results.replaceChildren(
           ...payload.contexts.map((context) => renderContext(context, feature)),

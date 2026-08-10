@@ -259,6 +259,8 @@ class AnalysisData:
             selected = np.maximum.accumulate(nearest - offsets) + offsets
             ordered = ordered[selected]
 
+        ordered = ordered[::-1]
+
         return {
             "matching_context_count": int(matching_count),
             "contexts": [
