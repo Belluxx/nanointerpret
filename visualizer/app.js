@@ -395,7 +395,7 @@ function renderDistribution(feature, counts) {
     input.setAttribute("aria-label", label);
     return input;
   }
-  const minimumInput = rangeInput("Minimum peak activation", 0.75 * RANGE_RESOLUTION);
+  const minimumInput = rangeInput("Minimum peak activation", 0.7 * RANGE_RESOLUTION);
   const maximumInput = rangeInput("Maximum peak activation", RANGE_RESOLUTION);
   const minimumLabel = element("span", "range-value");
   const maximumLabel = element("span", "range-value");
