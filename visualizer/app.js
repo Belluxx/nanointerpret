@@ -14,7 +14,10 @@ const ui = {
   interventionMode: document.querySelector("#intervention-mode"),
   amountLabel: document.querySelector("#amount-label"),
   amountInput: document.querySelector("#amount-input"),
-  tokenCount: document.querySelector("#token-count-input"),
+  samplingSettingsButton: document.querySelector("#sampling-settings-button"),
+  samplingSettings: document.querySelector("#sampling-settings-dialog"),
+  samplingSettingsClose: document.querySelector("#sampling-settings-close"),
+  samplingInputs: [...document.querySelectorAll(".sampling-setting input[type='number']")],
   generateButton: document.querySelector("#generate-button"),
   generationResults: document.querySelector("#generation-results"),
   baselineOutput: document.querySelector("#baseline-output"),
@@ -58,9 +61,8 @@ async function fetchJson(url, options) {
   return payload;
 }
 
-function initializeSandbox(metadata, maxNewTokens) {
+function initializeSandbox(metadata) {
   ui.featureInput.dataset.maximum = String(metadata.d_sae - 1);
-  ui.tokenCount.max = String(maxNewTokens);
 
   for (const feature of features) {
     if (!feature.title) continue;
@@ -114,13 +116,52 @@ function updateInterventionMode() {
   updateAmountDefault();
 }
 
+function openSamplingSettings() {
+  ui.samplingSettings.showModal();
+}
+
+function samplingSettingsAreValid() {
+  for (const input of ui.samplingInputs) {
+    if (input.checkValidity()) continue;
+    if (!ui.samplingSettings.open) openSamplingSettings();
+    input.reportValidity();
+    return false;
+  }
+  return true;
+}
+
+function synchronizeSetting(input) {
+  const range = input.previousElementSibling;
+  range.addEventListener("input", () => {
+    input.value = range.value;
+    updateRangeProgress(range);
+  });
+  input.addEventListener("input", () => {
+    if (!input.checkValidity()) return;
+    range.value = input.value;
+    updateRangeProgress(range);
+  });
+  updateRangeProgress(range);
+}
+
+function updateRangeProgress(range) {
+  const progress = 100 * (Number(range.value) - Number(range.min))
+    / (Number(range.max) - Number(range.min));
+  range.style.setProperty("--range-progress", `${progress}%`);
+}
+
 ui.interventionMode.addEventListener("change", updateInterventionMode);
 ui.featureInput.addEventListener("input", () => {
   ui.featureInput.setCustomValidity("");
   if (ui.interventionMode.value === "clamp") updateAmountDefault();
 });
+ui.samplingSettingsButton.addEventListener("click", openSamplingSettings);
+ui.samplingSettingsClose.addEventListener("click", () => ui.samplingSettings.close());
+ui.samplingInputs.forEach(synchronizeSetting);
 ui.sandboxForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (!samplingSettingsAreValid()) return;
+
   const featureId = Number(ui.featureInput.value);
   if (
     !Number.isInteger(featureId)
@@ -138,7 +179,7 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
     prompt: ui.prompt.value,
     feature_id: featureId,
     mode,
-    max_new_tokens: Number(ui.tokenCount.value),
+    ...Object.fromEntries(ui.samplingInputs.map((input) => [input.name, Number(input.value)])),
     [mode === "clamp" ? "clamp_value" : "alpha"]: amount,
   };
 
@@ -492,7 +533,7 @@ async function initialize() {
     ui.namedFilter.hidden = !hasFeatureNames;
     ui.namedOnly.checked = hasFeatureNames;
     renderMetadata(payload.metadata);
-    initializeSandbox(payload.metadata, payload.max_new_tokens);
+    initializeSandbox(payload.metadata);
     renderFeatureList();
   } catch (error) {
     ui.count.textContent = "Could not load analysis";

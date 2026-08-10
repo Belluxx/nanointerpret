@@ -14,11 +14,7 @@ import numpy as np
 from transformers import AutoTokenizer
 
 from src.data import load_analysis
-from src.interventions import (
-    MAX_NEW_TOKENS,
-    InterventionGenerator,
-    InterventionRequest,
-)
+from src.interventions import InterventionGenerator, InterventionRequest
 from src.runtime import choose_device
 
 
@@ -291,8 +287,8 @@ class InterventionSandbox:
         self.generator: InterventionGenerator | None = None
         self.lock = threading.Lock()
 
-    def generate(self, payload: object) -> dict:
-        request = InterventionRequest.from_payload(payload, self.data.d_sae)
+    def generate(self, payload: dict) -> dict:
+        request = InterventionRequest.from_payload(payload)
         with self.lock:
             if self.generator is None:
                 print(f"Loading intervention model on {self.device} ...")
@@ -317,9 +313,7 @@ class VisualizerHandler(SimpleHTTPRequestHandler):
     def do_GET(self) -> None:
         request = urlsplit(self.path)
         if request.path == "/api/summary":
-            payload = self.data.summary()
-            payload["max_new_tokens"] = MAX_NEW_TOKENS
-            self.send_json(payload)
+            self.send_json(self.data.summary())
             return
 
         match = FEATURE_ROUTE.fullmatch(request.path)

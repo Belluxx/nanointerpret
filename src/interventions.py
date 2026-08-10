@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,9 +14,6 @@ from .experiment import find_transformer_layers
 from .sae import TopKSAE, load_sae
 
 
-MAX_NEW_TOKENS = 256
-
-
 @dataclass(frozen=True)
 class InterventionRequest:
     prompt: str
@@ -25,40 +21,24 @@ class InterventionRequest:
     mode: str
     amount: float
     max_new_tokens: int
+    temperature: float
+    top_p: float
+    top_k: int
 
     @classmethod
-    def from_payload(cls, payload: dict, d_sae: int) -> InterventionRequest:
-        if not isinstance(payload, dict):
-            raise ValueError("request body must be a JSON object")
-
-        prompt = payload.get("prompt")
-        if not isinstance(prompt, str) or not prompt.strip():
-            raise ValueError("prompt must be a non-empty string")
-
-        feature_id = payload.get("feature_id")
-        if not isinstance(feature_id, int):
-            raise ValueError("feature_id must be an integer")
-        if not 0 <= feature_id < d_sae:
-            raise ValueError(f"feature_id must be between 0 and {d_sae - 1}")
-
-        mode = payload.get("mode")
-        if mode not in ("clamp", "additive"):
-            raise ValueError("mode must be 'clamp' or 'additive'")
+    def from_payload(cls, payload: dict) -> InterventionRequest:
+        mode = payload["mode"]
         parameter = "clamp_value" if mode == "clamp" else "alpha"
-        try:
-            amount = float(payload[parameter])
-        except (KeyError, TypeError, ValueError) as error:
-            raise ValueError(f"{parameter} must be a finite number") from error
-        if not math.isfinite(amount):
-            raise ValueError(f"{parameter} must be a finite number")
-
-        max_new_tokens = payload.get("max_new_tokens")
-        if not isinstance(max_new_tokens, int) or not 1 <= max_new_tokens <= MAX_NEW_TOKENS:
-            raise ValueError(
-                f"max_new_tokens must be between 1 and {MAX_NEW_TOKENS}"
-            )
-
-        return cls(prompt, feature_id, mode, amount, max_new_tokens)
+        return cls(
+            payload["prompt"],
+            payload["feature_id"],
+            mode,
+            payload[parameter],
+            payload["max_new_tokens"],
+            payload["temperature"],
+            payload["top_p"],
+            payload["top_k"],
+        )
 
 
 def _feature_activation(
@@ -96,10 +76,8 @@ def apply_feature_intervention(
         normalized = residual.to(sae.decoder_weight.dtype) * activation_scale
         current = _feature_activation(sae, normalized, feature_id)
         delta = (amount - current).unsqueeze(-1) * direction
-    elif mode == "additive":
-        delta = amount * direction
     else:
-        raise ValueError("mode must be 'clamp' or 'additive'")
+        delta = amount * direction
     return residual + (delta / activation_scale).to(residual.dtype)
 
 
@@ -196,13 +174,22 @@ class InterventionGenerator:
         prompt_tokens = inputs["input_ids"].shape[1]
         generation_args = {
             **inputs,
-            "do_sample": False,
+            "do_sample": request.temperature > 0,
             "min_new_tokens": request.max_new_tokens,
             "max_new_tokens": request.max_new_tokens,
             "pad_token_id": self.tokenizer.pad_token_id,
         }
+        if request.temperature > 0:
+            generation_args.update(
+                temperature=request.temperature,
+                top_p=request.top_p,
+                top_k=request.top_k,
+            )
 
+        sampling_seed = torch.seed()
+        torch.manual_seed(sampling_seed)
         baseline_ids = self.model.generate(**generation_args)
+        torch.manual_seed(sampling_seed)
         with feature_intervention_hook(
             self.layer,
             self.sae,

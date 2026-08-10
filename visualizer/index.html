@@ -21,9 +21,142 @@
 
       <section class="sandbox" aria-labelledby="sandbox-title">
         <header class="sandbox-header">
-          <h2 id="sandbox-title">Intervention sandbox</h2>
-          <p>Compare an unmodified continuation with a feature intervention.</p>
+          <div>
+            <h2 id="sandbox-title">Intervention sandbox</h2>
+            <p>Compare an unmodified continuation with a feature intervention.</p>
+          </div>
+          <button
+            id="sampling-settings-button"
+            class="settings-button"
+            type="button"
+            aria-label="Sampling settings"
+            aria-haspopup="dialog"
+            aria-controls="sampling-settings-dialog"
+          >
+            <span>Sampling</span>
+            <span class="settings-icon" aria-hidden="true"></span>
+          </button>
         </header>
+
+        <dialog
+          id="sampling-settings-dialog"
+          class="sampling-settings-dialog"
+          aria-labelledby="sampling-settings-title"
+        >
+          <header>
+            <h3 id="sampling-settings-title">Sampling settings</h3>
+            <button
+              id="sampling-settings-close"
+              class="dialog-close-button"
+              type="button"
+              aria-label="Close sampling settings"
+            >
+              &times;
+            </button>
+          </header>
+
+          <div class="sampling-settings-grid">
+            <div class="sampling-setting">
+              <label id="token-count-label" for="token-count-input">Generated tokens</label>
+              <div class="sampling-setting-control">
+                <input
+                  id="token-count-range"
+                  type="range"
+                  min="1"
+                  max="256"
+                  step="1"
+                  value="32"
+                  aria-labelledby="token-count-label"
+                />
+                <input
+                  id="token-count-input"
+                  name="max_new_tokens"
+                  type="number"
+                  min="1"
+                  max="256"
+                  step="1"
+                  value="32"
+                  required
+                />
+              </div>
+            </div>
+
+            <div class="sampling-setting">
+              <label id="temperature-label" for="temperature-input">Temperature</label>
+              <div class="sampling-setting-control">
+                <input
+                  id="temperature-range"
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.05"
+                  value="0"
+                  aria-labelledby="temperature-label"
+                />
+                <input
+                  id="temperature-input"
+                  name="temperature"
+                  type="number"
+                  min="0"
+                  max="2"
+                  step="0.05"
+                  value="0"
+                  required
+                />
+              </div>
+            </div>
+
+            <div class="sampling-setting">
+              <label id="top-p-label" for="top-p-input">Top P</label>
+              <div class="sampling-setting-control">
+                <input
+                  id="top-p-range"
+                  type="range"
+                  min="0.01"
+                  max="1"
+                  step="0.01"
+                  value="1"
+                  aria-labelledby="top-p-label"
+                />
+                <input
+                  id="top-p-input"
+                  name="top_p"
+                  type="number"
+                  min="0.01"
+                  max="1"
+                  step="0.01"
+                  value="1"
+                  required
+                />
+              </div>
+            </div>
+
+            <div class="sampling-setting">
+              <label id="top-k-label" for="top-k-input">Top K</label>
+              <div class="sampling-setting-control">
+                <input
+                  id="top-k-range"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value="50"
+                  aria-labelledby="top-k-label"
+                />
+                <input
+                  id="top-k-input"
+                  name="top_k"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value="50"
+                  required
+                />
+              </div>
+            </div>
+          </div>
+        </dialog>
 
         <form id="intervention-form">
           <label>
@@ -61,11 +194,6 @@
             <label>
               <span id="amount-label">Target activation</span>
               <input id="amount-input" type="number" step="any" value="10" required />
-            </label>
-
-            <label>
-              <span>Continuation tokens</span>
-              <input id="token-count-input" type="number" min="1" step="1" value="32" required />
             </label>
           </div>
 

@@ -106,12 +106,17 @@ main {
 }
 
 .sandbox-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   padding: 16px 18px;
   border-bottom: 1px solid var(--line);
   background: var(--subtle);
 }
 
 .sandbox-header h2,
+.sampling-settings-dialog h3,
 .generation-results h3 {
   margin: 0;
   font-size: 13px;
@@ -123,11 +128,101 @@ main {
   font-size: 11px;
 }
 
-#intervention-form {
-  padding: 16px 18px 18px;
+.settings-button,
+.dialog-close-button {
+  flex: 0 0 auto;
+  background: transparent;
+  cursor: pointer;
 }
 
-#intervention-form label {
+.settings-button {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dialog-close-button:hover {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.settings-button:hover {
+  border-color: var(--text);
+  color: var(--text);
+}
+
+.settings-button:focus-visible,
+.dialog-close-button:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
+}
+
+.settings-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  background: currentcolor;
+  mask: url("/icons/settings.svg") center / contain no-repeat;
+  -webkit-mask: url("/icons/settings.svg") center / contain no-repeat;
+}
+
+.sampling-settings-dialog {
+  width: min(380px, calc(100% - 32px));
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 18px 60px rgb(0 0 0 / 28%);
+}
+
+.sampling-settings-dialog::backdrop {
+  background: rgb(0 0 0 / 28%);
+}
+
+.sampling-settings-dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--subtle);
+}
+
+.dialog-close-button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.sampling-settings-grid {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.sampling-setting {
+  display: grid;
+  gap: 6px;
+}
+
+#intervention-form label,
+.sampling-setting > label {
   display: grid;
   gap: 6px;
   color: var(--muted);
@@ -136,9 +231,68 @@ main {
   text-transform: uppercase;
 }
 
+.sampling-setting-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sampling-setting-control input[type="range"] {
+  min-width: 0;
+  height: 16px;
+  flex: 1;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+}
+
+.sampling-setting-control input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--range-progress),
+    var(--line) var(--range-progress) 100%
+  );
+}
+
+.sampling-setting-control input[type="range"]::-webkit-slider-thumb {
+  box-sizing: border-box;
+  width: 12px;
+  height: 14px;
+  margin-top: -5px;
+  border: 2px solid var(--accent);
+  border-radius: 1px;
+  appearance: none;
+  background: #fff;
+}
+
+.sampling-setting-control input[type="range"]::-moz-range-track {
+  height: 3px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--range-progress),
+    var(--line) var(--range-progress) 100%
+  );
+}
+
+.sampling-setting-control input[type="range"]::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 12px;
+  height: 14px;
+  border: 2px solid var(--accent);
+  border-radius: 1px;
+  background: #fff;
+}
+
+#intervention-form {
+  padding: 16px 18px 18px;
+}
+
 #intervention-form textarea,
 #intervention-form input,
-#intervention-form select {
+#intervention-form select,
+.sampling-setting-control input[type="number"] {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 0;
@@ -155,21 +309,27 @@ main {
 }
 
 #intervention-form input,
-#intervention-form select {
+#intervention-form select,
+.sampling-setting-control input[type="number"] {
   height: 38px;
   padding: 0 10px;
 }
 
+.sampling-setting-control input[type="number"] {
+  width: 68px;
+}
+
 #intervention-form textarea:focus-visible,
 #intervention-form input:focus-visible,
-#intervention-form select:focus-visible {
+#intervention-form select:focus-visible,
+.sampling-setting-control input:focus-visible {
   outline: 2px solid var(--text);
   outline-offset: -2px;
 }
 
 .intervention-controls {
   display: grid;
-  grid-template-columns: 1fr 1.3fr 1fr 1fr;
+  grid-template-columns: 1fr 1.3fr 1fr;
   gap: 12px;
   margin-top: 12px;
 }
