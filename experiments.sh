@@ -5,7 +5,7 @@ python train.py \
   --checkpoint-every 250000000 \
   --activation-layer 9 \
   --width-multiplier 64 \
-  --k 16
+  --k 16 --resume
 
 python record_activations.py --sae-dir artifacts/1B_l9_w64
 

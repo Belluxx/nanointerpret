@@ -107,7 +107,6 @@ function updateAmountDefault() {
 function updateInterventionMode() {
   const clamping = ui.interventionMode.value === "clamp";
   ui.amountLabel.textContent = clamping ? "Target activation" : "Alpha";
-  ui.amountInput.step = clamping ? "0.1" : "1";
   ui.amountInput.setAttribute(
     "aria-label",
     clamping ? "Target feature activation" : "Additive steering alpha",
