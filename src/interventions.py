@@ -24,6 +24,7 @@ class InterventionRequest:
     temperature: float
     top_p: float
     top_k: int
+    repetition_penalty: float
 
     @classmethod
     def from_payload(cls, payload: dict) -> InterventionRequest:
@@ -38,6 +39,7 @@ class InterventionRequest:
             payload["temperature"],
             payload["top_p"],
             payload["top_k"],
+            payload["repetition_penalty"],
         )
 
 
@@ -92,14 +94,16 @@ def feature_intervention_hook(
 ):
     def intervene(_module, args, kwargs):
         hidden = args[0] if args else kwargs["hidden_states"]
-        modified = apply_feature_intervention(
-            hidden,
+        # Preserve the prompt's cached context; steer its final token and new tokens.
+        modified_last = apply_feature_intervention(
+            hidden[:, -1:],
             sae,
             feature_id,
             mode,
             amount,
             activation_scale=activation_scale,
         )
+        modified = torch.cat((hidden[:, :-1], modified_last), dim=1)
         if args:
             return (modified, *args[1:]), kwargs
         return args, {**kwargs, "hidden_states": modified}
@@ -175,9 +179,9 @@ class InterventionGenerator:
         generation_args = {
             **inputs,
             "do_sample": request.temperature > 0,
-            "min_new_tokens": request.max_new_tokens,
             "max_new_tokens": request.max_new_tokens,
             "pad_token_id": self.tokenizer.pad_token_id,
+            "repetition_penalty": request.repetition_penalty,
         }
         if request.temperature > 0:
             generation_args.update(

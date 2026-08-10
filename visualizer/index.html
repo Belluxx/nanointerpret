@@ -51,7 +51,7 @@
 
           <div class="sampling-settings-grid">
             <div class="sampling-setting">
-              <label id="token-count-label" for="token-count-input">Generated tokens</label>
+              <label id="token-count-label" for="token-count-input">Maximum tokens</label>
               <div class="sampling-setting-control">
                 <input
                   id="token-count-range"
@@ -145,6 +145,33 @@
                   max="100"
                   step="1"
                   value="50"
+                  required
+                />
+              </div>
+            </div>
+
+            <div class="sampling-setting">
+              <label id="repetition-penalty-label" for="repetition-penalty-input">
+                Repetition penalty
+              </label>
+              <div class="sampling-setting-control">
+                <input
+                  id="repetition-penalty-range"
+                  type="range"
+                  min="1"
+                  max="2"
+                  step="0.05"
+                  value="1.1"
+                  aria-labelledby="repetition-penalty-label"
+                />
+                <input
+                  id="repetition-penalty-input"
+                  name="repetition_penalty"
+                  type="number"
+                  min="1"
+                  max="2"
+                  step="0.05"
+                  value="1.1"
                   required
                 />
               </div>

@@ -98,7 +98,7 @@ function updateAmountDefault() {
 
   const maximum = selectedFeatureMaximum();
   if (maximum !== null) {
-    const value = String(Number(maximum.toFixed(3)));
+    const value = String(Number((maximum / 2).toFixed(3)));
     ui.amountInput.value = value;
     ui.amountInput.setAttribute("value", value);
   }
