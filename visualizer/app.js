@@ -30,6 +30,13 @@ function element(tag, className, text) {
   return result;
 }
 
+function renderGeneration(output, prompt, continuation) {
+  output.replaceChildren(
+    element("span", "generation-prompt", prompt),
+    element("span", "generation-continuation", continuation || "(No visible text)"),
+  );
+}
+
 const compactNumber = new Intl.NumberFormat("en", {
   notation: "compact",
   maximumFractionDigits: 1,
@@ -145,8 +152,8 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
     });
-    ui.baselineOutput.textContent = payload.baseline || "(No visible text)";
-    ui.intervenedOutput.textContent = payload.intervened || "(No visible text)";
+    renderGeneration(ui.baselineOutput, request.prompt, payload.baseline);
+    renderGeneration(ui.intervenedOutput, request.prompt, payload.intervened);
     ui.generationResults.hidden = false;
   } catch (error) {
     const message = element("span", "sandbox-error", `Could not generate: ${error.message}`);

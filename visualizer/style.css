@@ -221,7 +221,7 @@ main {
   background: var(--subtle);
 }
 
-.generation-results pre {
+.generation-output {
   min-height: 120px;
   margin: 0;
   padding: 14px;
@@ -230,6 +230,13 @@ main {
   line-height: 1.65;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.generation-prompt {
+  color: var(--muted);
+  background: var(--accent-soft);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .browser {
