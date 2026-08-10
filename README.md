@@ -22,7 +22,14 @@ Secondary objectives:
 1. Train the SAE:
 
 ```sh
-python3 train.py --train-tokens 500000000 --checkpoint-every 250000000 --validation-tokens 10000000
+python3 train.py \
+  --model-id google/gemma-3-270m \
+  --activation-layer 9 \
+  --width-multiplier 16 \
+  --k 16 \
+  --train-tokens 500000000 \
+  --checkpoint-every 250000000 \
+  --validation-tokens 10000000
 ```
 
 2. Extract feature activation stats:
