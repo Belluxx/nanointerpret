@@ -10,6 +10,7 @@ const ui = {
   sandboxForm: document.querySelector("#intervention-form"),
   prompt: document.querySelector("#prompt-input"),
   featureInput: document.querySelector("#feature-input"),
+  featureOptions: document.querySelector("#feature-options"),
   interventionMode: document.querySelector("#intervention-mode"),
   amountLabel: document.querySelector("#amount-label"),
   amountInput: document.querySelector("#amount-input"),
@@ -52,8 +53,16 @@ async function fetchJson(url, options) {
 }
 
 function initializeSandbox(metadata, maxNewTokens) {
-  ui.featureInput.max = String(metadata.d_sae - 1);
+  ui.featureInput.dataset.maximum = String(metadata.d_sae - 1);
   ui.tokenCount.max = String(maxNewTokens);
+
+  for (const feature of features) {
+    if (!feature.title) continue;
+    const option = document.createElement("option");
+    option.value = String(feature.id);
+    option.label = `${feature.title} (#${feature.id})`;
+    ui.featureOptions.append(option);
+  }
 
   if (features.length) {
     ui.featureInput.value = String(features[0].id);
@@ -71,13 +80,25 @@ function updateInterventionMode() {
 }
 
 ui.interventionMode.addEventListener("change", updateInterventionMode);
+ui.featureInput.addEventListener("input", () => ui.featureInput.setCustomValidity(""));
 ui.sandboxForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  const featureId = Number(ui.featureInput.value);
+  if (
+    !Number.isInteger(featureId)
+    || featureId < 0
+    || featureId > Number(ui.featureInput.dataset.maximum)
+  ) {
+    ui.featureInput.setCustomValidity("Choose a feature from the suggestions or enter its numeric ID.");
+    ui.featureInput.reportValidity();
+    return;
+  }
+
   const mode = ui.interventionMode.value;
   const amount = Number(ui.amountInput.value);
   const request = {
     prompt: ui.prompt.value,
-    feature_id: Number(ui.featureInput.value),
+    feature_id: featureId,
     mode,
     max_new_tokens: Number(ui.tokenCount.value),
     [mode === "clamp" ? "clamp_value" : "alpha"]: amount,

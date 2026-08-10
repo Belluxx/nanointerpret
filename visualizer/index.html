@@ -41,12 +41,13 @@
               <span>Feature</span>
               <input
                 id="feature-input"
-                type="number"
-                min="0"
-                step="1"
-                placeholder="Feature ID"
+                type="text"
+                list="feature-options"
+                placeholder="Feature ID or name"
+                autocomplete="off"
                 required
               />
+              <datalist id="feature-options"></datalist>
             </label>
 
             <label>
