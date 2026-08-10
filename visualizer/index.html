@@ -15,7 +15,7 @@
           <p>SAE feature visualizer</p>
         </div>
         <dl class="dataset-meta" id="dataset-meta" aria-label="Analysis metadata">
-          <div><dt>Model</dt><dd>Loading…</dd></div>
+          <div><dt>Model</dt><dd>Loading...</dd></div>
         </dl>
       </header>
 
@@ -31,7 +31,7 @@
             <textarea
               id="prompt-input"
               rows="4"
-              placeholder="Enter a prompt to continue…"
+              placeholder="Enter a prompt to continue..."
               required
             ></textarea>
           </label>
@@ -60,12 +60,12 @@
 
             <label>
               <span id="amount-label">Target activation</span>
-              <input id="amount-input" type="number" step="any" value="10" required />
+              <input id="amount-input" type="number" step="0.1" value="10" required />
             </label>
 
             <label>
               <span>Continuation tokens</span>
-              <input id="token-count-input" type="number" min="1" value="32" required />
+              <input id="token-count-input" type="number" min="32" step="32" value="32" required />
             </label>
           </div>
 
@@ -118,7 +118,7 @@
         </header>
 
         <div class="list-heading">
-          <span id="result-count" role="status">Loading analysis…</span>
+          <span id="result-count" role="status">Loading analysis...</span>
           <span class="column-labels" aria-hidden="true">
             <span>Activations</span><span>Peak</span>
           </span>

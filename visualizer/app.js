@@ -66,21 +66,53 @@ function initializeSandbox(metadata, maxNewTokens) {
 
   if (features.length) {
     ui.featureInput.value = String(features[0].id);
-    ui.amountInput.value = String(Number(features[0].max_activation.toPrecision(4)));
+    updateAmountDefault();
+  }
+}
+
+function selectedFeatureMaximum() {
+  const value = ui.featureInput.value.trim();
+  if (!value) return null;
+  const featureId = Number(value);
+  if (
+    !Number.isInteger(featureId)
+    || featureId < 0
+    || featureId > Number(ui.featureInput.dataset.maximum)
+  ) return null;
+
+  return features.find((feature) => feature.id === featureId)?.max_activation ?? 0;
+}
+
+function updateAmountDefault() {
+  if (ui.interventionMode.value === "additive") {
+    ui.amountInput.value = "1";
+    return;
+  }
+
+  const maximum = selectedFeatureMaximum();
+  if (maximum !== null) {
+    const value = String(Number(maximum.toFixed(3)));
+    ui.amountInput.value = value;
+    ui.amountInput.setAttribute("value", value);
   }
 }
 
 function updateInterventionMode() {
   const clamping = ui.interventionMode.value === "clamp";
   ui.amountLabel.textContent = clamping ? "Target activation" : "Alpha";
+  ui.amountInput.step = clamping ? "0.1" : "any";
   ui.amountInput.setAttribute(
     "aria-label",
     clamping ? "Target feature activation" : "Additive steering alpha",
   );
+  updateAmountDefault();
 }
 
 ui.interventionMode.addEventListener("change", updateInterventionMode);
-ui.featureInput.addEventListener("input", () => ui.featureInput.setCustomValidity(""));
+ui.featureInput.addEventListener("input", () => {
+  ui.featureInput.setCustomValidity("");
+  if (ui.interventionMode.value === "clamp") updateAmountDefault();
+});
 ui.sandboxForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const featureId = Number(ui.featureInput.value);
@@ -107,7 +139,7 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
   ui.generateButton.disabled = true;
   ui.generationResults.hidden = true;
   ui.sandboxStatus.classList.remove("error");
-  ui.sandboxStatus.textContent = "Loading model if needed, then generating both continuations…";
+  ui.sandboxStatus.textContent = "Loading model if needed, then generating both continuations...";
   try {
     const payload = await fetchJson("/api/interventions/generate", {
       method: "POST",
@@ -351,9 +383,9 @@ function renderRangeView(content, feature, counts) {
   }
 
   async function loadContexts(minimum, maximum, currentRequest) {
-    resultCount.textContent = "Loading…";
+    resultCount.textContent = "Loading...";
     if (!results.childElementCount) {
-      results.append(element("p", "loading", "Loading contexts…"));
+      results.append(element("p", "loading", "Loading contexts..."));
     }
     const query = new URLSearchParams({ min: minimum, max: maximum });
     try {
@@ -420,7 +452,7 @@ function renderContextBrowser(feature, payload) {
 
 async function loadFeature(details, feature) {
   const body = details.querySelector(".feature-body");
-  body.replaceChildren(element("p", "loading", "Loading feature…"));
+  body.replaceChildren(element("p", "loading", "Loading feature..."));
   try {
     const payload = await fetchJson(`/api/features/${feature.id}`);
     body.replaceChildren(renderOverview(feature, payload), renderContextBrowser(feature, payload));
