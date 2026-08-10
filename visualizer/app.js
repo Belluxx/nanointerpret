@@ -75,12 +75,6 @@ function initializeSandbox(metadata) {
     option.label = `${feature.title} (#${feature.id})`;
     ui.featureOptions.append(option);
   }
-
-  if (features.length) {
-    ui.featureInput.value = String(features[0].id);
-    updateSelectedFeatureTitle();
-    updateAmountControl();
-  }
 }
 
 function selectedFeatureId() {

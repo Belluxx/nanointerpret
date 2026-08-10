@@ -329,8 +329,8 @@ main {
 }
 
 .feature-control #feature-input {
-  width: 90px;
-  flex: 0 0 90px;
+  width: 120px;
+  flex: 0 0 120px;
 }
 
 .selected-feature-title {
