@@ -219,17 +219,32 @@
             <div class="amount-field">
               <span id="amount-label">Target activation</span>
               <div id="amount-control" class="amount-control">
-                <select id="amount-preset" aria-labelledby="amount-label">
-                  <option value="1">Max (100%)</option>
-                  <option value="0.75">75%</option>
-                  <option value="0.5" selected>50%</option>
-                  <option value="0.25">25%</option>
-                  <option value="custom">Custom value</option>
-                </select>
+                <div class="amount-preset-control">
+                  <input
+                    id="amount-multiplier"
+                    type="range"
+                    min="0"
+                    max="5"
+                    step="1"
+                    value="1"
+                    aria-label="Multiplier of maximum activation"
+                    aria-valuetext="0.5 times maximum activation"
+                  />
+                  <div class="amount-step-labels" aria-hidden="true">
+                    <span>0.25×</span>
+                    <span>0.5×</span>
+                    <span>0.75×</span>
+                    <span>1×</span>
+                    <span>2×</span>
+                    <span>5×</span>
+                  </div>
+                  <div class="amount-scale-caption">× feature max</div>
+                </div>
                 <input
                   id="amount-input"
                   type="number"
                   step="any"
+                  title="Custom value"
                   aria-label="Target activation value"
                   required
                 />

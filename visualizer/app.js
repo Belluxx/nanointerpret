@@ -14,7 +14,7 @@ const ui = {
   selectedFeatureTitle: document.querySelector("#selected-feature-title"),
   interventionMode: document.querySelector("#intervention-mode"),
   amountLabel: document.querySelector("#amount-label"),
-  amountPreset: document.querySelector("#amount-preset"),
+  amountMultiplier: document.querySelector("#amount-multiplier"),
   amountInput: document.querySelector("#amount-input"),
   samplingSettings: document.querySelector("#sampling-settings-dialog"),
   samplingInputs: [...document.querySelectorAll(".sampling-setting input[type='number']")],
@@ -27,6 +27,9 @@ const ui = {
 let features = [];
 let featuresById = new Map();
 let featureCount = 0;
+let customAmount = false;
+
+const amountMultipliers = [0.25, 0.5, 0.75, 1, 2, 5];
 
 function element(tag, className, text) {
   const result = document.createElement(tag);
@@ -119,16 +122,22 @@ function selectedFeatureMaximum() {
 
 function updateAmountControl() {
   const clamping = ui.interventionMode.value === "clamp";
+  const multiplier = amountMultipliers[Number(ui.amountMultiplier.value)];
   ui.amountLabel.textContent = clamping ? "Target activation" : "Alpha";
   ui.amountInput.setAttribute(
     "aria-label",
     clamping ? "Target feature activation" : "Additive steering alpha",
   );
-  if (ui.amountPreset.value !== "custom") {
+  ui.amountMultiplier.setAttribute(
+    "aria-valuetext",
+    `${multiplier} times maximum activation`,
+  );
+  updateRangeProgress(ui.amountMultiplier);
+  if (!customAmount) {
     const maximum = selectedFeatureMaximum();
     ui.amountInput.value = maximum === null
       ? ""
-      : String(Number((maximum * Number(ui.amountPreset.value)).toPrecision(4)));
+      : String(Number((maximum * multiplier).toPrecision(4)));
   }
 }
 
@@ -169,15 +178,18 @@ function updateRangeProgress(range) {
 }
 
 ui.interventionMode.addEventListener("change", updateAmountControl);
-ui.amountPreset.addEventListener("change", updateAmountControl);
+ui.amountMultiplier.addEventListener("input", () => {
+  customAmount = false;
+  updateAmountControl();
+});
 ui.amountInput.addEventListener("input", () => {
-  ui.amountPreset.value = "custom";
+  customAmount = true;
 });
 ui.prompt.addEventListener("input", () => ui.prompt.setCustomValidity(""));
 ui.featureInput.addEventListener("input", () => {
   ui.featureInput.setCustomValidity("");
   updateSelectedFeatureTitle();
-  if (ui.amountPreset.value !== "custom") updateAmountControl();
+  if (!customAmount) updateAmountControl();
 });
 ui.selectedFeatureTitle.addEventListener("click", (event) => {
   event.preventDefault();
