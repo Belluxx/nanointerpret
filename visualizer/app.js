@@ -141,6 +141,27 @@ function updateAmountControl() {
   }
 }
 
+function updateAmountMultiplierFromCustomValue() {
+  const maximum = selectedFeatureMaximum();
+  const amount = Number(ui.amountInput.value);
+  if (maximum === null || maximum === 0 || !ui.amountInput.value || !Number.isFinite(amount)) {
+    return;
+  }
+
+  const multiplier = amount / maximum;
+  let closestIndex = 0;
+  for (let index = 1; index < amountMultipliers.length; index += 1) {
+    if (
+      Math.abs(amountMultipliers[index] - multiplier)
+      < Math.abs(amountMultipliers[closestIndex] - multiplier)
+    ) {
+      closestIndex = index;
+    }
+  }
+  ui.amountMultiplier.value = String(closestIndex);
+  updateAmountControl();
+}
+
 function openSamplingSettings() {
   if (!ui.samplingSettings.matches(":popover-open")) {
     ui.samplingSettings.showPopover();
@@ -184,12 +205,14 @@ ui.amountMultiplier.addEventListener("input", () => {
 });
 ui.amountInput.addEventListener("input", () => {
   customAmount = true;
+  updateAmountMultiplierFromCustomValue();
 });
 ui.prompt.addEventListener("input", () => ui.prompt.setCustomValidity(""));
 ui.featureInput.addEventListener("input", () => {
   ui.featureInput.setCustomValidity("");
   updateSelectedFeatureTitle();
-  if (!customAmount) updateAmountControl();
+  if (customAmount) updateAmountMultiplierFromCustomValue();
+  else updateAmountControl();
 });
 ui.selectedFeatureTitle.addEventListener("click", (event) => {
   event.preventDefault();
