@@ -16,7 +16,6 @@ const ui = {
   amountLabel: document.querySelector("#amount-label"),
   amountControl: document.querySelector("#amount-control"),
   amountPreset: document.querySelector("#amount-preset"),
-  amountValue: document.querySelector("#amount-value"),
   amountInput: document.querySelector("#amount-input"),
   samplingSettings: document.querySelector("#sampling-settings-dialog"),
   samplingInputs: [...document.querySelectorAll(".sampling-setting input[type='number']")],
@@ -27,6 +26,8 @@ const ui = {
 };
 
 let features = [];
+let featuresById = new Map();
+let featureCount = 0;
 
 function element(tag, className, text) {
   const result = document.createElement(tag);
@@ -64,7 +65,8 @@ async function fetchJson(url, options) {
 }
 
 function initializeSandbox(metadata) {
-  ui.featureInput.dataset.maximum = String(metadata.d_sae - 1);
+  featureCount = metadata.d_sae;
+  featuresById = new Map(features.map((feature) => [feature.id, feature]));
 
   for (const feature of features) {
     if (!feature.title) continue;
@@ -81,27 +83,28 @@ function initializeSandbox(metadata) {
   }
 }
 
-function updateSelectedFeatureTitle() {
-  const featureId = Number(ui.featureInput.value.trim());
-  const feature = Number.isInteger(featureId)
-    ? features.find((item) => item.id === featureId)
+function selectedFeatureId() {
+  const value = ui.featureInput.value.trim();
+  const featureId = Number(value);
+  return value
+    && Number.isInteger(featureId)
+    && featureId >= 0
+    && featureId < featureCount
+    ? featureId
     : null;
-  const title = feature?.title || "";
+}
+
+function updateSelectedFeatureTitle() {
+  const title = featuresById.get(selectedFeatureId())?.title || "";
   ui.selectedFeatureTitle.textContent = title;
   ui.selectedFeatureTitle.title = title;
 }
 
 function selectedFeatureMaximum() {
-  const value = ui.featureInput.value.trim();
-  if (!value) return null;
-  const featureId = Number(value);
-  if (
-    !Number.isInteger(featureId)
-    || featureId < 0
-    || featureId > Number(ui.featureInput.dataset.maximum)
-  ) return null;
-
-  return features.find((feature) => feature.id === featureId)?.max_activation ?? 0;
+  const featureId = selectedFeatureId();
+  return featureId === null
+    ? null
+    : featuresById.get(featureId)?.max_activation ?? 0;
 }
 
 function updateAmountControl() {
@@ -110,31 +113,18 @@ function updateAmountControl() {
   ui.amountPreset.hidden = !clamping;
   ui.amountPreset.disabled = !clamping;
   ui.amountControl.classList.toggle("additive", !clamping);
-
-  const custom = clamping && ui.amountPreset.value === "custom";
-  ui.amountValue.hidden = !clamping || custom;
-  ui.amountInput.hidden = clamping && !custom;
-  ui.amountInput.disabled = clamping && !custom;
-  ui.amountInput.required = !ui.amountInput.disabled;
+  ui.amountInput.setAttribute(
+    "aria-label",
+    clamping ? "Target feature activation" : "Additive steering alpha",
+  );
   if (!clamping) {
     ui.amountInput.value = "1";
-    ui.amountInput.setAttribute("aria-label", "Additive steering alpha");
-  } else if (!custom) {
+  } else if (ui.amountPreset.value !== "custom") {
     const maximum = selectedFeatureMaximum();
-    ui.amountValue.textContent = maximum === null
+    ui.amountInput.value = maximum === null
       ? ""
-      : formatActivation(maximum * Number(ui.amountPreset.value));
-  } else {
-    ui.amountInput.setAttribute("aria-label", "Custom target activation");
+      : String(Number((maximum * Number(ui.amountPreset.value)).toPrecision(4)));
   }
-}
-
-function interventionAmount() {
-  if (
-    ui.interventionMode.value === "clamp"
-    && ui.amountPreset.value !== "custom"
-  ) return selectedFeatureMaximum() * Number(ui.amountPreset.value);
-  return Number(ui.amountInput.value);
 }
 
 function openSamplingSettings() {
@@ -175,6 +165,10 @@ function updateRangeProgress(range) {
 
 ui.interventionMode.addEventListener("change", updateAmountControl);
 ui.amountPreset.addEventListener("change", updateAmountControl);
+ui.amountInput.addEventListener("input", () => {
+  if (ui.interventionMode.value === "clamp") ui.amountPreset.value = "custom";
+});
+ui.prompt.addEventListener("input", () => ui.prompt.setCustomValidity(""));
 ui.featureInput.addEventListener("input", () => {
   ui.featureInput.setCustomValidity("");
   updateSelectedFeatureTitle();
@@ -184,26 +178,26 @@ ui.samplingInputs.forEach(synchronizeSetting);
 ui.sandboxForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!samplingSettingsAreValid()) return;
+  if (!ui.prompt.value.trim()) {
+    ui.prompt.setCustomValidity("Enter a prompt to continue.");
+    ui.prompt.reportValidity();
+    return;
+  }
 
-  const featureId = Number(ui.featureInput.value);
-  if (
-    !Number.isInteger(featureId)
-    || featureId < 0
-    || featureId > Number(ui.featureInput.dataset.maximum)
-  ) {
+  const featureId = selectedFeatureId();
+  if (featureId === null) {
     ui.featureInput.setCustomValidity("Choose a feature from the suggestions or enter its numeric ID.");
     ui.featureInput.reportValidity();
     return;
   }
 
   const mode = ui.interventionMode.value;
-  const amount = interventionAmount();
   const request = {
     prompt: ui.prompt.value,
     feature_id: featureId,
     mode,
+    amount: Number(ui.amountInput.value),
     ...Object.fromEntries(ui.samplingInputs.map((input) => [input.name, Number(input.value)])),
-    [mode === "clamp" ? "clamp_value" : "alpha"]: amount,
   };
 
   ui.generateButton.disabled = true;

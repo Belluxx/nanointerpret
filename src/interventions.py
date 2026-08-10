@@ -26,22 +26,6 @@ class InterventionRequest:
     top_k: int
     repetition_penalty: float
 
-    @classmethod
-    def from_payload(cls, payload: dict) -> InterventionRequest:
-        mode = payload["mode"]
-        parameter = "clamp_value" if mode == "clamp" else "alpha"
-        return cls(
-            payload["prompt"],
-            payload["feature_id"],
-            mode,
-            payload[parameter],
-            payload["max_new_tokens"],
-            payload["temperature"],
-            payload["top_p"],
-            payload["top_k"],
-            payload["repetition_penalty"],
-        )
-
 
 def _feature_activation(
     sae: TopKSAE, normalized_residual: Tensor, feature_id: int
@@ -51,9 +35,7 @@ def _feature_activation(
     if sae.subtract_pre_bias:
         x = x - sae.decoder_bias
     pre_activations = x @ sae.encoder_weight + sae.encoder_bias
-    values, indices = torch.topk(
-        F.relu(pre_activations), sae.k, dim=-1, sorted=False
-    )
+    values, indices = torch.topk(F.relu(pre_activations), sae.k, dim=-1, sorted=False)
     activation = (values * (indices == feature_id)).sum(dim=-1)
     return activation.reshape(shape)
 
@@ -78,8 +60,10 @@ def apply_feature_intervention(
         normalized = residual.to(sae.decoder_weight.dtype) * activation_scale
         current = _feature_activation(sae, normalized, feature_id)
         delta = (amount - current).unsqueeze(-1) * direction
-    else:
+    elif mode == "additive":
         delta = amount * direction
+    else:
+        raise AssertionError(f"unexpected intervention mode: {mode}")
     return residual + (delta / activation_scale).to(residual.dtype)
 
 

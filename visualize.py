@@ -288,7 +288,7 @@ class InterventionSandbox:
         self.lock = threading.Lock()
 
     def generate(self, payload: dict) -> dict:
-        request = InterventionRequest.from_payload(payload)
+        request = InterventionRequest(**payload)
         with self.lock:
             if self.generator is None:
                 print(f"Loading intervention model on {self.device} ...")
@@ -355,8 +355,6 @@ class VisualizerHandler(SimpleHTTPRequestHandler):
             result = self.sandbox.generate(payload)
         except (json.JSONDecodeError, UnicodeDecodeError):
             self.send_json({"error": "request body must be valid JSON"}, status=400)
-        except ValueError as error:
-            self.send_json({"error": str(error)}, status=400)
         except Exception as error:
             self.log_error("intervention generation failed: %s", error)
             self.send_json({"error": str(error)}, status=500)
