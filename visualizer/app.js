@@ -27,7 +27,7 @@ const ui = {
 let features = [];
 let featuresById = new Map();
 let featureCount = 0;
-let customAmount = false;
+let amountIsCustom = false;
 
 const amountMultipliers = [0.25, 0.5, 0.75, 1, 2, 5];
 
@@ -133,7 +133,7 @@ function updateAmountControl() {
     `${multiplier} times maximum activation`,
   );
   updateRangeProgress(ui.amountMultiplier);
-  if (!customAmount) {
+  if (!amountIsCustom) {
     const maximum = selectedFeatureMaximum();
     ui.amountInput.value = maximum === null
       ? ""
@@ -143,10 +143,8 @@ function updateAmountControl() {
 
 function updateAmountMultiplierFromCustomValue() {
   const maximum = selectedFeatureMaximum();
-  const amount = Number(ui.amountInput.value);
-  if (maximum === null || maximum === 0 || !ui.amountInput.value || !Number.isFinite(amount)) {
-    return;
-  }
+  const amount = ui.amountInput.valueAsNumber;
+  if (!maximum || !Number.isFinite(amount)) return;
 
   const multiplier = amount / maximum;
   let closestIndex = 0;
@@ -200,18 +198,18 @@ function updateRangeProgress(range) {
 
 ui.interventionMode.addEventListener("change", updateAmountControl);
 ui.amountMultiplier.addEventListener("input", () => {
-  customAmount = false;
+  amountIsCustom = false;
   updateAmountControl();
 });
 ui.amountInput.addEventListener("input", () => {
-  customAmount = true;
+  amountIsCustom = true;
   updateAmountMultiplierFromCustomValue();
 });
 ui.prompt.addEventListener("input", () => ui.prompt.setCustomValidity(""));
 ui.featureInput.addEventListener("input", () => {
   ui.featureInput.setCustomValidity("");
   updateSelectedFeatureTitle();
-  if (customAmount) updateAmountMultiplierFromCustomValue();
+  if (amountIsCustom) updateAmountMultiplierFromCustomValue();
   else updateAmountControl();
 });
 ui.selectedFeatureTitle.addEventListener("click", (event) => {

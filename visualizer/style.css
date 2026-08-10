@@ -223,17 +223,30 @@ main {
   gap: 12px;
 }
 
-.sampling-setting-control input[type="range"] {
+.sampling-setting-control input[type="range"],
+.amount-preset-control input[type="range"] {
   min-width: 0;
   height: 16px;
-  flex: 1;
   appearance: none;
   background: transparent;
   cursor: pointer;
   outline: none;
 }
 
-.sampling-setting-control input[type="range"]::-webkit-slider-runnable-track {
+.sampling-setting-control input[type="range"] {
+  flex: 1;
+}
+
+.amount-preset-control input[type="range"] {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.sampling-setting-control input[type="range"]::-webkit-slider-runnable-track,
+.amount-preset-control input[type="range"]::-webkit-slider-runnable-track {
   height: 3px;
   background: linear-gradient(
     to right,
@@ -243,6 +256,7 @@ main {
 }
 
 .sampling-setting-control input[type="range"]::-webkit-slider-thumb,
+.amount-preset-control input[type="range"]::-webkit-slider-thumb,
 .range-selector input[type="range"]::-webkit-slider-thumb {
   box-sizing: border-box;
   width: 12px;
@@ -256,7 +270,8 @@ main {
   pointer-events: auto;
 }
 
-.sampling-setting-control input[type="range"]::-moz-range-track {
+.sampling-setting-control input[type="range"]::-moz-range-track,
+.amount-preset-control input[type="range"]::-moz-range-track {
   height: 3px;
   background: linear-gradient(
     to right,
@@ -266,6 +281,7 @@ main {
 }
 
 .sampling-setting-control input[type="range"]::-moz-range-thumb,
+.amount-preset-control input[type="range"]::-moz-range-thumb,
 .range-selector input[type="range"]::-moz-range-thumb {
   box-sizing: border-box;
   width: 12px;
@@ -282,7 +298,7 @@ main {
 }
 
 #intervention-form textarea,
-#intervention-form input,
+#intervention-form input:not([type="range"]),
 #intervention-form select,
 .sampling-setting-control input[type="number"] {
   width: 100%;
@@ -300,7 +316,7 @@ main {
   line-height: 1.5;
 }
 
-#intervention-form input,
+#intervention-form input:not([type="range"]),
 #intervention-form select,
 .sampling-setting-control input[type="number"] {
   height: 38px;
@@ -374,60 +390,17 @@ main {
   min-width: 0;
 }
 
-#intervention-form .amount-preset-control input[type="range"] {
-  display: block;
-  width: 100%;
-  height: 16px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  appearance: none;
-  background: transparent;
-  cursor: pointer;
-  outline: none;
-}
-
 #intervention-form .amount-preset-control input[type="range"]:focus-visible {
   outline: 2px solid var(--text);
   outline-offset: 2px;
 }
 
-.amount-preset-control input[type="range"]::-webkit-slider-runnable-track {
-  height: 3px;
-  background: linear-gradient(
-    to right,
-    var(--accent) 0 var(--range-progress),
-    var(--line) var(--range-progress) 100%
-  );
-}
-
-.amount-preset-control input[type="range"]::-webkit-slider-thumb {
-  box-sizing: border-box;
-  width: 12px;
-  height: 14px;
-  margin-top: -5px;
-  border: 2px solid var(--accent);
-  border-radius: 1px;
-  appearance: none;
-  background: #fff;
-}
-
-.amount-preset-control input[type="range"]::-moz-range-track {
-  height: 3px;
-  background: linear-gradient(
-    to right,
-    var(--accent) 0 var(--range-progress),
-    var(--line) var(--range-progress) 100%
-  );
-}
-
-.amount-preset-control input[type="range"]::-moz-range-thumb {
-  box-sizing: border-box;
-  width: 12px;
-  height: 14px;
-  border: 2px solid var(--accent);
-  border-radius: 1px;
-  background: #fff;
+.amount-step-labels,
+.amount-scale-caption {
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0;
+  line-height: 1;
 }
 
 .amount-step-labels {
@@ -435,11 +408,7 @@ main {
   height: 8px;
   margin: 4px 6px 0;
   color: var(--muted);
-  font-family: var(--mono);
-  font-size: 8px;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0;
-  line-height: 1;
 }
 
 .amount-step-labels span {
@@ -459,10 +428,6 @@ main {
 .amount-scale-caption {
   margin-top: 5px;
   color: var(--accent);
-  font-family: var(--mono);
-  font-size: 8px;
-  letter-spacing: 0;
-  line-height: 1;
   text-align: center;
   text-transform: none;
 }
