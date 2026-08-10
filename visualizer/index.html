@@ -202,6 +202,11 @@
                 required
               />
               <datalist id="feature-options"></datalist>
+              <small
+                id="selected-feature-title"
+                class="selected-feature-title"
+                aria-live="polite"
+              ></small>
             </label>
 
             <label>
@@ -212,10 +217,27 @@
               </select>
             </label>
 
-            <label>
+            <div class="amount-field">
               <span id="amount-label">Target activation</span>
-              <input id="amount-input" type="number" step="any" value="10" required />
-            </label>
+              <div id="amount-control" class="amount-control">
+                <select id="amount-preset" aria-labelledby="amount-label">
+                  <option value="1">Max (100%)</option>
+                  <option value="0.75">75%</option>
+                  <option value="0.5" selected>50%</option>
+                  <option value="0.25">25%</option>
+                  <option value="custom">Custom value</option>
+                </select>
+                <output id="amount-value" class="amount-value"></output>
+                <input
+                  id="amount-input"
+                  type="number"
+                  step="any"
+                  aria-label="Target activation value"
+                  hidden
+                  disabled
+                />
+              </div>
+            </div>
           </div>
 
           <div class="sandbox-actions">

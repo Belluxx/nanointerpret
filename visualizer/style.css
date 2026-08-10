@@ -207,6 +207,7 @@ main {
 }
 
 #intervention-form label,
+.amount-field,
 .sampling-setting > label {
   display: grid;
   gap: 6px;
@@ -315,8 +316,44 @@ main {
 .intervention-controls {
   display: grid;
   grid-template-columns: 1fr 1.3fr 1fr;
+  align-items: start;
   gap: 12px;
   margin-top: 12px;
+}
+
+.selected-feature-title {
+  overflow: hidden;
+  min-height: 13px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.amount-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  gap: 0;
+}
+
+.amount-control.additive {
+  grid-template-columns: 1fr;
+}
+
+.amount-control:not(.additive) #amount-input {
+  border-left: 0;
+}
+
+.amount-value {
+  align-self: center;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-align: right;
 }
 
 .sandbox-actions {

@@ -11,8 +11,12 @@ const ui = {
   prompt: document.querySelector("#prompt-input"),
   featureInput: document.querySelector("#feature-input"),
   featureOptions: document.querySelector("#feature-options"),
+  selectedFeatureTitle: document.querySelector("#selected-feature-title"),
   interventionMode: document.querySelector("#intervention-mode"),
   amountLabel: document.querySelector("#amount-label"),
+  amountControl: document.querySelector("#amount-control"),
+  amountPreset: document.querySelector("#amount-preset"),
+  amountValue: document.querySelector("#amount-value"),
   amountInput: document.querySelector("#amount-input"),
   samplingSettings: document.querySelector("#sampling-settings-dialog"),
   samplingInputs: [...document.querySelectorAll(".sampling-setting input[type='number']")],
@@ -72,8 +76,19 @@ function initializeSandbox(metadata) {
 
   if (features.length) {
     ui.featureInput.value = String(features[0].id);
-    updateAmountDefault();
+    updateSelectedFeatureTitle();
+    updateAmountControl();
   }
+}
+
+function updateSelectedFeatureTitle() {
+  const featureId = Number(ui.featureInput.value.trim());
+  const feature = Number.isInteger(featureId)
+    ? features.find((item) => item.id === featureId)
+    : null;
+  const title = feature?.title || "";
+  ui.selectedFeatureTitle.textContent = title;
+  ui.selectedFeatureTitle.title = title;
 }
 
 function selectedFeatureMaximum() {
@@ -89,29 +104,37 @@ function selectedFeatureMaximum() {
   return features.find((feature) => feature.id === featureId)?.max_activation ?? 0;
 }
 
-function updateAmountDefault() {
-  if (ui.interventionMode.value === "additive") {
-    ui.amountInput.value = "1";
-    ui.amountInput.setAttribute("value", "1");
-    return;
-  }
+function updateAmountControl() {
+  const clamping = ui.interventionMode.value === "clamp";
+  ui.amountLabel.textContent = clamping ? "Target activation" : "Alpha";
+  ui.amountPreset.hidden = !clamping;
+  ui.amountPreset.disabled = !clamping;
+  ui.amountControl.classList.toggle("additive", !clamping);
 
-  const maximum = selectedFeatureMaximum();
-  if (maximum !== null) {
-    const value = String(Number((maximum / 2).toFixed(3)));
-    ui.amountInput.value = value;
-    ui.amountInput.setAttribute("value", value);
+  const custom = clamping && ui.amountPreset.value === "custom";
+  ui.amountValue.hidden = !clamping || custom;
+  ui.amountInput.hidden = clamping && !custom;
+  ui.amountInput.disabled = clamping && !custom;
+  ui.amountInput.required = !ui.amountInput.disabled;
+  if (!clamping) {
+    ui.amountInput.value = "1";
+    ui.amountInput.setAttribute("aria-label", "Additive steering alpha");
+  } else if (!custom) {
+    const maximum = selectedFeatureMaximum();
+    ui.amountValue.textContent = maximum === null
+      ? ""
+      : formatActivation(maximum * Number(ui.amountPreset.value));
+  } else {
+    ui.amountInput.setAttribute("aria-label", "Custom target activation");
   }
 }
 
-function updateInterventionMode() {
-  const clamping = ui.interventionMode.value === "clamp";
-  ui.amountLabel.textContent = clamping ? "Target activation" : "Alpha";
-  ui.amountInput.setAttribute(
-    "aria-label",
-    clamping ? "Target feature activation" : "Additive steering alpha",
-  );
-  updateAmountDefault();
+function interventionAmount() {
+  if (
+    ui.interventionMode.value === "clamp"
+    && ui.amountPreset.value !== "custom"
+  ) return selectedFeatureMaximum() * Number(ui.amountPreset.value);
+  return Number(ui.amountInput.value);
 }
 
 function openSamplingSettings() {
@@ -150,10 +173,12 @@ function updateRangeProgress(range) {
   range.style.setProperty("--range-progress", `${progress}%`);
 }
 
-ui.interventionMode.addEventListener("change", updateInterventionMode);
+ui.interventionMode.addEventListener("change", updateAmountControl);
+ui.amountPreset.addEventListener("change", updateAmountControl);
 ui.featureInput.addEventListener("input", () => {
   ui.featureInput.setCustomValidity("");
-  if (ui.interventionMode.value === "clamp") updateAmountDefault();
+  updateSelectedFeatureTitle();
+  if (ui.amountPreset.value !== "custom") updateAmountControl();
 });
 ui.samplingInputs.forEach(synchronizeSetting);
 ui.sandboxForm.addEventListener("submit", async (event) => {
@@ -172,7 +197,7 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
   }
 
   const mode = ui.interventionMode.value;
-  const amount = Number(ui.amountInput.value);
+  const amount = interventionAmount();
   const request = {
     prompt: ui.prompt.value,
     feature_id: featureId,
@@ -203,7 +228,7 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
     ui.generateButton.textContent = "Generate comparison";
   }
 });
-updateInterventionMode();
+updateAmountControl();
 
 function renderMetadata(metadata) {
   const items = [
