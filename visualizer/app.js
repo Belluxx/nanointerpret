@@ -92,6 +92,7 @@ function selectedFeatureMaximum() {
 function updateAmountDefault() {
   if (ui.interventionMode.value === "additive") {
     ui.amountInput.value = "1";
+    ui.amountInput.setAttribute("value", "1");
     return;
   }
 
@@ -106,7 +107,7 @@ function updateAmountDefault() {
 function updateInterventionMode() {
   const clamping = ui.interventionMode.value === "clamp";
   ui.amountLabel.textContent = clamping ? "Target activation" : "Alpha";
-  ui.amountInput.step = clamping ? "0.1" : "any";
+  ui.amountInput.step = clamping ? "0.1" : "1";
   ui.amountInput.setAttribute(
     "aria-label",
     clamping ? "Target feature activation" : "Additive steering alpha",
