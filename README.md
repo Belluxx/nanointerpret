@@ -2,6 +2,8 @@
 
 This repo offers a minimal self-contained playground where you can play with sparse autoencoders, training many versions of them with different params and see some basic but cool interpretability results.
 
+![example with tree feature clamping](assets/example_trees.svg)
+
 The main objectives are:
 - [x] Take different SAE training ideas from [OpenAI](https://arxiv.org/abs/2406.04093) and [Anthropic](https://transformer-circuits.pub/2024/scaling-monosemanticity/index.html)
 - [x] Optimize SAE training for Apple Silicon (MPS) (works with cuda and cpu too)
