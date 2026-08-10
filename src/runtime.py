@@ -5,6 +5,9 @@ import sys
 import torch
 
 
+ATTENTION_IMPLEMENTATION = "sdpa"
+
+
 def choose_device(requested: str) -> torch.device:
     if requested == "auto":
         if torch.backends.mps.is_available():

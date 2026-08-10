@@ -11,6 +11,7 @@ from torch import Tensor, nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from .experiment import find_transformer_layers
+from .runtime import ATTENTION_IMPLEMENTATION
 from .sae import TopKSAE, load_sae
 
 
@@ -135,7 +136,7 @@ class InterventionGenerator:
         model = AutoModelForCausalLM.from_pretrained(
             config["model_id"],
             dtype=getattr(torch, config["model_dtype"]),
-            attn_implementation="eager",
+            attn_implementation=ATTENTION_IMPLEMENTATION,
         ).to(device)
         model.eval().requires_grad_(False)
 

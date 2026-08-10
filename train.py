@@ -33,7 +33,7 @@ from src.experiment import (
     iter_captured_residual_batches,
     train_sae,
 )
-from src.runtime import choose_device
+from src.runtime import ATTENTION_IMPLEMENTATION, choose_device
 from src.sae import TopKSAE
 
 
@@ -55,8 +55,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--aux-k", type=int, default=None, help="Dead latents used by AuxK. Default: nearest power of two to d_model / 2.")
     parser.add_argument("--aux-k-coef", type=float, default=1 / 32)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
-    parser.add_argument("--model-batch-size", type=int, default=32, help="Contexts processed together; lower this if memory is limited.")
-    parser.add_argument("--sae-batch-size", type=int, default=4096, help="SAE token microbatch; lower this if memory is limited.")
+    parser.add_argument("--model-batch-size", type=int, default=128, help="Contexts processed together; lower this if memory is limited.")
+    parser.add_argument("--sae-batch-size", type=int, default=8192, help="SAE token microbatch; lower this if memory is limited.")
     parser.add_argument("--normalization-tokens", type=int, default=1_000_000, help="Training-token sample used to estimate one global activation scale.")
     parser.add_argument("--log-every", type=int, default=100_000)
     parser.add_argument("--checkpoint-every", type=int, default=50_000_000, help="Save and evaluate a checkpoint after this many training tokens.")
@@ -106,7 +106,7 @@ def load_capture_inputs(
     model = AutoModelForCausalLM.from_pretrained(
         args.model_id,
         dtype=model_dtype,
-        attn_implementation="eager",
+        attn_implementation=ATTENTION_IMPLEMENTATION,
     ).to(device)
     model.eval().requires_grad_(False)
     layer_path, layers = find_transformer_layers(model)

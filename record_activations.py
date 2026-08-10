@@ -19,7 +19,7 @@ from src.data import (
     token_cache_paths,
 )
 from src.experiment import ResidualStreamCapture, find_transformer_layers
-from src.runtime import choose_device
+from src.runtime import ATTENTION_IMPLEMENTATION, choose_device
 from src.sae import FIRING_THRESHOLD, TopKSAE, load_sae
 
 
@@ -279,7 +279,7 @@ def main() -> None:
     model = AutoModelForCausalLM.from_pretrained(
         config["model_id"],
         dtype=getattr(torch, config["model_dtype"]),
-        attn_implementation="eager",
+        attn_implementation=ATTENTION_IMPLEMENTATION,
     ).to(device)
     model.eval().requires_grad_(False)
     _layer_path, layers = find_transformer_layers(model)
