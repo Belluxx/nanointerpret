@@ -14,7 +14,6 @@ const ui = {
   selectedFeatureTitle: document.querySelector("#selected-feature-title"),
   interventionMode: document.querySelector("#intervention-mode"),
   amountLabel: document.querySelector("#amount-label"),
-  amountControl: document.querySelector("#amount-control"),
   amountPreset: document.querySelector("#amount-preset"),
   amountInput: document.querySelector("#amount-input"),
   samplingSettings: document.querySelector("#sampling-settings-dialog"),
@@ -121,16 +120,11 @@ function selectedFeatureMaximum() {
 function updateAmountControl() {
   const clamping = ui.interventionMode.value === "clamp";
   ui.amountLabel.textContent = clamping ? "Target activation" : "Alpha";
-  ui.amountPreset.hidden = !clamping;
-  ui.amountPreset.disabled = !clamping;
-  ui.amountControl.classList.toggle("additive", !clamping);
   ui.amountInput.setAttribute(
     "aria-label",
     clamping ? "Target feature activation" : "Additive steering alpha",
   );
-  if (!clamping) {
-    ui.amountInput.value = "1";
-  } else if (ui.amountPreset.value !== "custom") {
+  if (ui.amountPreset.value !== "custom") {
     const maximum = selectedFeatureMaximum();
     ui.amountInput.value = maximum === null
       ? ""
@@ -177,7 +171,7 @@ function updateRangeProgress(range) {
 ui.interventionMode.addEventListener("change", updateAmountControl);
 ui.amountPreset.addEventListener("change", updateAmountControl);
 ui.amountInput.addEventListener("input", () => {
-  if (ui.interventionMode.value === "clamp") ui.amountPreset.value = "custom";
+  ui.amountPreset.value = "custom";
 });
 ui.prompt.addEventListener("input", () => ui.prompt.setCustomValidity(""));
 ui.featureInput.addEventListener("input", () => {

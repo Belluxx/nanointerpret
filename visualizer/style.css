@@ -369,11 +369,7 @@ main {
   gap: 0;
 }
 
-.amount-control.additive {
-  grid-template-columns: 1fr;
-}
-
-.amount-control:not(.additive) #amount-input {
+.amount-control #amount-input {
   border-left: 0;
 }
 
