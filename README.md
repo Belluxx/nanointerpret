@@ -1,6 +1,6 @@
 ![nanointerpret](assets/banner.svg)
 
-This repo offers a minimal self-contained playground where you can play with sparse autoencoders, training many versions of them with different params and see some basic but cool interpretability results.
+This repo offers a minimal self-contained playground where you can play with sparse autoencoders, training many versions of them with different params and see some simple but cool interpretability results.
 
 ![example with tree feature clamping](assets/example_trees.svg)
 
@@ -13,9 +13,9 @@ The main objectives are:
 
 Secondary objectives:
 - [ ] Use GGUF / llama.cpp to run LLM and capture acivations
-- [ ] Implement Matryoshka BatchTopK ([paper](https://arxiv.org/abs/2503.17547), [repo](https://github.com/bartbussmann/matryoshka_sae))
 - [ ] Instead of the current `1e-3`, use a learned-threshold (like JumpReLU SAE from [GemmaScope](https://arxiv.org/abs/2408.05147))
-- [ ] Test not just on base but also on Gemma3-270M instruct (chat version, useful to steer behaviour in interactive mode)
+- [ ] Test on bigger models (Gemma3-270M is VERY small)
+- [ ] Test on interactive chat tuned models (the repo uses pretrained base Gemma)
 
 ## Main experiment reproduction
 
@@ -53,4 +53,4 @@ Then open [http://127.0.0.1:8000](http://127.0.0.1:8000).
 ## Disclaimer
 
 > [!NOTE]
-> I am by no means an expert in interpretability, I just wanted to get started with an hands-on approach and share the results publicly.
+> I am not an expert in interpretability. I made this project just to get started with an hands-on approach and share the results publicly.
