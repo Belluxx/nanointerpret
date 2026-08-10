@@ -16,7 +16,6 @@ const ui = {
   amountInput: document.querySelector("#amount-input"),
   tokenCount: document.querySelector("#token-count-input"),
   generateButton: document.querySelector("#generate-button"),
-  sandboxStatus: document.querySelector("#sandbox-status"),
   generationResults: document.querySelector("#generation-results"),
   baselineOutput: document.querySelector("#baseline-output"),
   intervenedOutput: document.querySelector("#intervened-output"),
@@ -137,9 +136,9 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
   };
 
   ui.generateButton.disabled = true;
+  ui.generateButton.textContent = "Generating...";
+  ui.sandboxForm.querySelector(".sandbox-error")?.remove();
   ui.generationResults.hidden = true;
-  ui.sandboxStatus.classList.remove("error");
-  ui.sandboxStatus.textContent = "Loading model if needed, then generating both continuations...";
   try {
     const payload = await fetchJson("/api/interventions/generate", {
       method: "POST",
@@ -149,12 +148,13 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
     ui.baselineOutput.textContent = payload.baseline || "(No visible text)";
     ui.intervenedOutput.textContent = payload.intervened || "(No visible text)";
     ui.generationResults.hidden = false;
-    ui.sandboxStatus.textContent = `Compared feature #${request.feature_id}.`;
   } catch (error) {
-    ui.sandboxStatus.classList.add("error");
-    ui.sandboxStatus.textContent = `Could not generate: ${error.message}`;
+    const message = element("span", "sandbox-error", `Could not generate: ${error.message}`);
+    message.setAttribute("role", "alert");
+    ui.generateButton.after(message);
   } finally {
     ui.generateButton.disabled = false;
+    ui.generateButton.textContent = "Generate comparison";
   }
 });
 updateInterventionMode();

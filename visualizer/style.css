@@ -197,13 +197,9 @@ main {
   opacity: 0.55;
 }
 
-#sandbox-status {
-  color: var(--muted);
-  font-size: 10px;
-}
-
-#sandbox-status.error {
+.sandbox-error {
   color: var(--accent);
+  font-size: 10px;
 }
 
 .generation-results {
