@@ -23,7 +23,6 @@ from src.runtime import ATTENTION_IMPLEMENTATION, choose_device
 from src.sae import FIRING_THRESHOLD, TopKSAE, load_sae
 
 
-SAE_DIR = Path("artifacts/sae_gemma_3_270m")
 CACHE_DIR = Path("artifacts/token_cache")
 
 
@@ -41,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sae-dir",
         type=Path,
-        default=SAE_DIR,
+        required=True,
         help="Training output directory containing config.json and sae_final.pt.",
     )
     parser.add_argument("--cache-dir", type=Path, default=CACHE_DIR)

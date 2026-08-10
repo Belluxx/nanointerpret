@@ -22,13 +22,15 @@ Secondary objectives:
 1. Train the SAE:
 
 ```sh
-python3 train.py --output-dir artifacts/500M --train-tokens 500000000 --checkpoint-every 250000000 --validation-tokens 10000000
+python3 train.py --train-tokens 500000000 --checkpoint-every 250000000 --validation-tokens 10000000
 ```
+
+The output directory is named automatically from the run configuration, for example `artifacts/gemma_3_270m_l9_w16_k16_500m`. Pass `--output-dir PATH` to choose it manually.
 
 2. Extract feature activation stats:
 
 ```sh
-python3 record_activations.py --sae-dir artifacts/500M
+python3 record_activations.py --sae-dir artifacts/gemma_3_270m_l9_w16_k16_500m
 ```
 
 3. Name the features with an LLM:
@@ -36,7 +38,7 @@ python3 record_activations.py --sae-dir artifacts/500M
 ```sh
 # Around $2-$5 in API cost for 10K features
 
-python3 interpret_features.py --analysis artifacts/500M/analysis --base-url https://openrouter.ai/api/v1 --api-key [API_KEY] --model openai/gpt-5.6-luna --no-reasoning --concurrent 8
+python3 interpret_features.py --analysis artifacts/gemma_3_270m_l9_w16_k16_500m/analysis --base-url https://openrouter.ai/api/v1 --api-key [API_KEY] --model openai/gpt-5.6-luna --no-reasoning --concurrent 8
 ```
 
 > [!TIP]
@@ -45,7 +47,7 @@ python3 interpret_features.py --analysis artifacts/500M/analysis --base-url http
 4. Browse the features and their activation contexts:
 
 ```sh
-python3 visualize.py --analysis artifacts/500M/analysis
+python3 visualize.py --analysis artifacts/gemma_3_270m_l9_w16_k16_500m/analysis
 ```
 
 Then open [http://127.0.0.1:8000](http://127.0.0.1:8000).

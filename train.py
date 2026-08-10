@@ -33,6 +33,7 @@ from src.experiment import (
     iter_captured_residual_batches,
     train_sae,
 )
+from src.misc import experiment_output_dir
 from src.runtime import ATTENTION_IMPLEMENTATION, choose_device
 from src.sae import TopKSAE
 
@@ -67,7 +68,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-subtract-pre-bias", action="store_false", dest="subtract_pre_bias", help="Do not subtract the learned decoder bias from activations before encoding.")
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
     parser.add_argument("--model-dtype", choices=("float32", "float16", "bfloat16"), default="float32")
-    parser.add_argument("--output-dir", type=Path, default=Path("artifacts/sae_gemma_3_270m"))
+    parser.add_argument("--output-dir", type=Path, default=None, help="Training output directory. Default: generated automatically under artifacts/.",)
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"))
     parser.add_argument("--residual-cache-dir", type=Path, default=Path("artifacts/residual_cache"))
     parser.add_argument("--resume", action="store_true")
@@ -165,6 +166,14 @@ def run_training(
     d_model = int(metadata["d_model"])
     d_sae = args.width_multiplier * d_model
     aux_k = default_aux_k(d_model) if args.aux_k is None else args.aux_k
+    if args.output_dir is None:
+        args.output_dir = experiment_output_dir(
+            args.model_id,
+            int(metadata["layer_index"]),
+            args.width_multiplier,
+            args.k,
+            args.train_tokens,
+        )
     print(
         f"Device: {device} | Mode: {'cached' if args.cache_activations else 'streaming'} | "
         f"Model batch: {args.model_batch_size} | SAE batch: {args.sae_batch_size} | "
@@ -172,6 +181,7 @@ def run_training(
         f"SAE width: {d_sae:,} | k: {args.k} | "
         f"AuxK: {'off' if args.aux_k_coef == 0 else aux_k}"
     )
+    print(f"Output: {args.output_dir}")
 
     if args.normalization_tokens <= 0:
         raise ValueError("--normalization-tokens must be positive")
@@ -191,8 +201,8 @@ def run_training(
     else:
         if checkpoint_path.exists():
             raise FileExistsError(
-                f"{checkpoint_path} already exists; pass --resume or choose "
-                "another --output-dir"
+                f"{checkpoint_path} already exists; pass --resume or choose another "
+                "--output-dir"
             )
         activation_scale, initial_pre_bias = estimate_activation_normalization(
             train_batches,
