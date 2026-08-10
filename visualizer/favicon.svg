@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>nanointerpret</title>
+  <style>
+    .source, .branch { fill: #171717; stroke: #171717; }
+    .result { fill: #c44f1b; }
+
+    @media (prefers-color-scheme: dark) {
+      .source, .branch { fill: #f2f2f2; stroke: #f2f2f2; }
+    }
+  </style>
+  <path
+    class="branch"
+    d="M13 32c17 0 18-15 37-15M13 32c17 0 18 15 37 15"
+    fill="none"
+    stroke-linecap="round"
+    stroke-width="5"
+  />
+  <circle class="source" cx="13" cy="32" r="8" />
+  <circle class="result" cx="50" cy="17" r="8" />
+  <circle class="result" cx="50" cy="47" r="8" />
+</svg>
