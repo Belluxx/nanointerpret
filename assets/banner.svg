@@ -60,11 +60,6 @@
       .faint-stroke { stroke: #383836; }
       .foreground-stroke { stroke: #f0f0ec; }
     }</style>
-  <rect
-     class="background"
-     width="1400"
-     height="420"
-     id="rect1" />
   <g
      id="g39"
      transform="matrix(0.88918323,0,0,0.88918323,41.575878,-4.3482167)">
