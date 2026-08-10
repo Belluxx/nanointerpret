@@ -25,8 +25,6 @@ Secondary objectives:
 python3 train.py --train-tokens 500000000 --checkpoint-every 250000000 --validation-tokens 10000000
 ```
 
-The output directory is named automatically from the run configuration, for example `artifacts/gemma_3_270m_l9_w16_k16_500m`. Pass `--output-dir PATH` to choose it manually.
-
 2. Extract feature activation stats:
 
 ```sh
