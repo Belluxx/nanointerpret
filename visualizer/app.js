@@ -89,9 +89,26 @@ function selectedFeatureId() {
 }
 
 function updateSelectedFeatureTitle() {
-  const title = featuresById.get(selectedFeatureId())?.title || "";
+  const featureId = selectedFeatureId();
+  const title = featuresById.get(featureId)?.title || "";
   ui.selectedFeatureTitle.textContent = title;
   ui.selectedFeatureTitle.title = title;
+  ui.selectedFeatureTitle.hidden = !title;
+  if (title) ui.selectedFeatureTitle.href = `#feature-${featureId}`;
+  else ui.selectedFeatureTitle.removeAttribute("href");
+}
+
+function openFeature(featureId) {
+  let details = document.getElementById(`feature-${featureId}`);
+  if (!details) {
+    ui.search.value = "";
+    renderFeatureList();
+    details = document.getElementById(`feature-${featureId}`);
+  }
+  if (!details) return;
+
+  details.open = true;
+  details.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function selectedFeatureMaximum() {
@@ -167,6 +184,11 @@ ui.featureInput.addEventListener("input", () => {
   ui.featureInput.setCustomValidity("");
   updateSelectedFeatureTitle();
   if (ui.amountPreset.value !== "custom") updateAmountControl();
+});
+ui.selectedFeatureTitle.addEventListener("click", (event) => {
+  event.preventDefault();
+  const featureId = selectedFeatureId();
+  if (featureId !== null) openFeature(featureId);
 });
 ui.samplingInputs.forEach(synchronizeSetting);
 ui.sandboxForm.addEventListener("submit", async (event) => {
@@ -261,6 +283,7 @@ function renderFeatureList() {
   const fragment = document.createDocumentFragment();
   for (const feature of visible) {
     const details = element("details", "feature");
+    details.id = `feature-${feature.id}`;
     const summary = element("summary");
     const title = feature.title || `Feature ${feature.id}`;
     const titleElement = element("span", "feature-title", title);
@@ -342,15 +365,9 @@ function renderOverview(feature, payload) {
   return overview;
 }
 
-function renderContextList(contexts, feature, list = element("div", "contexts")) {
-  list.replaceChildren();
-  for (const context of contexts) list.append(renderContext(context, feature));
-  return list;
-}
-
 const RANGE_RESOLUTION = 1000;
 
-function renderRangeView(content, feature, counts) {
+function renderDistribution(feature, counts) {
   const panel = element("section");
   const plot = element("div", "distribution-plot");
   plot.setAttribute("aria-hidden", "true");
@@ -399,7 +416,6 @@ function renderRangeView(content, feature, counts) {
     resultCount,
     results,
   );
-  content.replaceChildren(panel);
 
   let loadTimer;
   let requestId = 0;
@@ -454,10 +470,15 @@ function renderRangeView(content, feature, counts) {
       resultCount.textContent = shown === payload.matching_context_count
         ? `${shown.toLocaleString()} contexts (low to high)`
         : `Sampled ${shown.toLocaleString()} of ${payload.matching_context_count.toLocaleString()} (low to high)`;
-      if (shown) renderContextList(payload.contexts, feature, results);
-      else results.replaceChildren(
-        element("p", "empty-state", "No contexts fall within this activation range."),
-      );
+      if (shown) {
+        results.replaceChildren(
+          ...payload.contexts.map((context) => renderContext(context, feature)),
+        );
+      } else {
+        results.replaceChildren(
+          element("p", "empty-state", "No contexts fall within this activation range."),
+        );
+      }
     } catch (error) {
       if (currentRequest !== requestId) return;
       resultCount.textContent = "Could not load contexts";
@@ -470,43 +491,7 @@ function renderRangeView(content, feature, counts) {
   minimumInput.addEventListener("input", () => updateSelection(minimumInput));
   maximumInput.addEventListener("input", () => updateSelection(maximumInput));
   updateSelection();
-}
-
-function renderContextBrowser(feature, payload) {
-  const browser = element("section");
-  const toolbar = element("header", "context-toolbar");
-  const title = element("h3");
-  const switcher = element("div", "view-switch");
-  const content = element("div");
-  switcher.setAttribute("role", "group");
-  switcher.setAttribute("aria-label", "Context view");
-  for (const [view, label] of [["strongest", "Strongest"], ["range", "Range"]]) {
-    const button = element("button", "view-button", label);
-    button.type = "button";
-    button.addEventListener("click", () => {
-      title.textContent = `${label} contexts`;
-      for (const viewButton of switcher.children) {
-        const selected = viewButton === button;
-        viewButton.classList.toggle("selected", selected);
-        viewButton.setAttribute("aria-pressed", String(selected));
-      }
-      if (view === "strongest") {
-        content.replaceChildren(renderContextList(payload.strongest_contexts, feature));
-      } else {
-        renderRangeView(content, feature, payload.activation_histogram);
-      }
-    });
-    switcher.append(button);
-  }
-
-  const controls = element("div", "context-controls");
-  const legend = element("span", "legend", `0 - ${formatActivation(feature.max_activation)}`);
-  legend.prepend(element("span", "legend-ramp"));
-  controls.append(switcher, legend);
-  toolbar.append(title, controls);
-  browser.append(toolbar, content);
-  switcher.firstElementChild.click();
-  return browser;
+  return panel;
 }
 
 async function loadFeature(details, feature) {
@@ -514,7 +499,10 @@ async function loadFeature(details, feature) {
   body.replaceChildren(element("p", "loading", "Loading feature..."));
   try {
     const payload = await fetchJson(`/api/features/${feature.id}`);
-    body.replaceChildren(renderOverview(feature, payload), renderContextBrowser(feature, payload));
+    body.replaceChildren(
+      renderOverview(feature, payload),
+      renderDistribution(feature, payload.activation_histogram),
+    );
     details.dataset.loaded = "true";
   } catch (error) {
     body.replaceChildren(element("p", "empty-state", `Could not load feature: ${error.message}`));

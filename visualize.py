@@ -220,11 +220,6 @@ class AnalysisData:
                 }
             )
 
-        strongest = [
-            self._render_context(context_data, int(group_index))
-            for group_index in np.argsort(-peaks, kind="stable")[:CONTEXT_LIMIT]
-        ]
-
         maximum = float(peaks.max())
         bin_count = min(ACTIVATION_HISTOGRAM_BINS, len(peaks))
         histogram, _ = np.histogram(peaks, bins=bin_count, range=(0.0, maximum))
@@ -234,7 +229,6 @@ class AnalysisData:
             "context_count": int(len(group_starts)),
             "token_groups": token_summaries,
             "activation_histogram": histogram.tolist(),
-            "strongest_contexts": strongest,
         }
 
     def range_contexts(

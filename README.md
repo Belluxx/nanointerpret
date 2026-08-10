@@ -42,7 +42,7 @@ python3 interpret_features.py --analysis artifacts/500M/analysis --base-url http
 > [!TIP]
 > If you want you can run it without `--no-reasoning` and it will produce higher quality feature titles but at a **MUCH** higher API cost (up to $200 depending on how long the model thinks)
 
-4. Browse the features and their strongest activation contexts:
+4. Browse the features and their activation contexts:
 
 ```sh
 python3 visualize.py --analysis artifacts/500M/analysis
