@@ -9,6 +9,11 @@
   --subtle: #f7f7f7;
   --accent: #c44f1b;
   --accent-soft: #ececec;
+  --activation-highlight: #c44f1b;
+  --on-accent: #fff;
+  --control-height: 38px;
+  --range-thumb-width: 12px;
+  --range-thumb-height: 14px;
   --mono: "SFMono-Regular", Consolas, monospace;
   color: var(--text);
   background: var(--background);
@@ -154,7 +159,7 @@ main {
 
 .sandbox:has(.sampling-settings-dialog:popover-open) .settings-button {
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   background: var(--accent);
 }
 
@@ -206,7 +211,7 @@ main {
   gap: 6px;
 }
 
-#intervention-form label,
+.intervention-form label,
 .amount-field,
 .sampling-setting > label {
   display: grid;
@@ -223,8 +228,7 @@ main {
   gap: 12px;
 }
 
-.sampling-setting-control input[type="range"],
-.amount-preset-control input[type="range"] {
+input.progress-range {
   min-width: 0;
   height: 16px;
   appearance: none;
@@ -233,11 +237,11 @@ main {
   outline: none;
 }
 
-.sampling-setting-control input[type="range"] {
+.sampling-setting-control .progress-range {
   flex: 1;
 }
 
-.amount-preset-control input[type="range"] {
+.amount-preset-control .progress-range {
   display: block;
   width: 100%;
   margin: 0;
@@ -245,8 +249,7 @@ main {
   border: 0;
 }
 
-.sampling-setting-control input[type="range"]::-webkit-slider-runnable-track,
-.amount-preset-control input[type="range"]::-webkit-slider-runnable-track {
+input.progress-range::-webkit-slider-runnable-track {
   height: 3px;
   background: linear-gradient(
     to right,
@@ -255,12 +258,11 @@ main {
   );
 }
 
-.sampling-setting-control input[type="range"]::-webkit-slider-thumb,
-.amount-preset-control input[type="range"]::-webkit-slider-thumb,
+input.progress-range::-webkit-slider-thumb,
 .range-selector input[type="range"]::-webkit-slider-thumb {
   box-sizing: border-box;
-  width: 12px;
-  height: 14px;
+  width: var(--range-thumb-width);
+  height: var(--range-thumb-height);
   margin-top: -5px;
   border: 2px solid var(--accent);
   border-radius: 1px;
@@ -270,8 +272,7 @@ main {
   pointer-events: auto;
 }
 
-.sampling-setting-control input[type="range"]::-moz-range-track,
-.amount-preset-control input[type="range"]::-moz-range-track {
+input.progress-range::-moz-range-track {
   height: 3px;
   background: linear-gradient(
     to right,
@@ -280,12 +281,11 @@ main {
   );
 }
 
-.sampling-setting-control input[type="range"]::-moz-range-thumb,
-.amount-preset-control input[type="range"]::-moz-range-thumb,
+input.progress-range::-moz-range-thumb,
 .range-selector input[type="range"]::-moz-range-thumb {
   box-sizing: border-box;
-  width: 12px;
-  height: 14px;
+  width: var(--range-thumb-width);
+  height: var(--range-thumb-height);
   border: 2px solid var(--accent);
   border-radius: 1px;
   background: #fff;
@@ -293,13 +293,13 @@ main {
   pointer-events: auto;
 }
 
-#intervention-form {
+.intervention-form {
   padding: 16px 18px 18px;
 }
 
-#intervention-form textarea,
-#intervention-form input:not([type="range"]),
-#intervention-form select,
+.intervention-form textarea,
+.intervention-form input:not([type="range"]),
+.intervention-form select,
 .sampling-setting-control input[type="number"] {
   width: 100%;
   border: 1px solid var(--line);
@@ -310,16 +310,16 @@ main {
   font-size: 12px;
 }
 
-#intervention-form textarea {
+.intervention-form textarea {
   padding: 10px 11px;
   resize: vertical;
   line-height: 1.5;
 }
 
-#intervention-form input:not([type="range"]),
-#intervention-form select,
+.intervention-form input:not([type="range"]),
+.intervention-form select,
 .sampling-setting-control input[type="number"] {
-  height: 38px;
+  height: var(--control-height);
   padding: 0 10px;
 }
 
@@ -327,9 +327,9 @@ main {
   width: 68px;
 }
 
-#intervention-form textarea:focus-visible,
-#intervention-form input:focus-visible,
-#intervention-form select:focus-visible,
+.intervention-form textarea:focus-visible,
+.intervention-form input:focus-visible,
+.intervention-form select:focus-visible,
 .sampling-setting-control input:focus-visible {
   outline: 2px solid var(--text);
   outline-offset: -2px;
@@ -350,7 +350,7 @@ main {
   gap: 10px;
 }
 
-.feature-control #feature-input {
+.feature-control > input {
   width: 120px;
   flex: 0 0 120px;
 }
@@ -390,7 +390,7 @@ main {
   min-width: 0;
 }
 
-#intervention-form .amount-preset-control input[type="range"]:focus-visible {
+.amount-preset-control input[type="range"]:focus-visible {
   outline: 2px solid var(--text);
   outline-offset: 2px;
 }
@@ -434,18 +434,18 @@ main {
   margin-top: 15px;
 }
 
-#generate-button {
-  min-height: 38px;
+.primary-button {
+  min-height: var(--control-height);
   padding: 0 14px;
   border: 1px solid var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   background: var(--accent);
   cursor: pointer;
   font-size: 11px;
   font-weight: 600;
 }
 
-#generate-button:disabled {
+.primary-button:disabled {
   cursor: wait;
   opacity: 0.55;
 }
@@ -493,6 +493,10 @@ main {
 }
 
 .browser {
+  --feature-activation-column: 110px;
+  --feature-id-column: 64px;
+  --feature-peak-column: 90px;
+  --feature-toggle-column: 52px;
   overflow: hidden;
 }
 
@@ -508,7 +512,7 @@ main {
 
 .toolbar input[type="search"],
 .toolbar select {
-  height: 38px;
+  height: var(--control-height);
   border: 1px solid var(--line);
   outline: none;
   color: var(--text);
@@ -517,7 +521,6 @@ main {
 }
 
 .toolbar input[type="search"] {
-  width: min(520px, 100%);
   padding: 0 12px;
 }
 
@@ -564,7 +567,7 @@ main {
   grid-template-columns: 1fr auto;
   align-items: center;
   min-height: 38px;
-  padding: 0 52px 0 16px;
+  padding: 0 var(--feature-toggle-column) 0 16px;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
   background: var(--subtle);
@@ -575,7 +578,9 @@ main {
 
 .column-labels {
   display: grid;
-  grid-template-columns: 110px 90px;
+  grid-template-columns:
+    var(--feature-activation-column)
+    var(--feature-peak-column);
   text-align: right;
 }
 
@@ -589,7 +594,12 @@ main {
 
 .feature > summary {
   display: grid;
-  grid-template-columns: 64px minmax(180px, 1fr) 110px 90px 52px;
+  grid-template-columns:
+    var(--feature-id-column)
+    minmax(180px, 1fr)
+    var(--feature-activation-column)
+    var(--feature-peak-column)
+    var(--feature-toggle-column);
   align-items: center;
   min-height: 58px;
   padding: 0 0 0 16px;
@@ -656,7 +666,7 @@ main {
 }
 
 .feature-body {
-  padding: 22px 24px 26px 80px;
+  padding: 22px 24px 26px calc(16px + var(--feature-id-column));
   border-top: 1px solid var(--line);
   background: var(--subtle);
 }
@@ -761,6 +771,7 @@ main {
 
 .distribution-plot {
   display: grid;
+  grid-template-columns: repeat(var(--distribution-bin-count), minmax(2px, 1fr));
   height: 92px;
   align-items: end;
   gap: 2px;
@@ -785,6 +796,12 @@ main {
   height: 48px;
 }
 
+.range-value-track {
+  position: absolute;
+  right: 7px;
+  left: 7px;
+}
+
 .range-value {
   position: absolute;
   top: 31px;
@@ -793,7 +810,8 @@ main {
   pointer-events: none;
 }
 
-.range-track {
+.range-selector::before {
+  content: "";
   position: absolute;
   top: 12px;
   right: 0;
@@ -895,6 +913,11 @@ main {
 }
 
 .token.active {
+  background-color: color-mix(
+    in srgb,
+    var(--activation-highlight) var(--activation-opacity),
+    transparent
+  );
   box-shadow: inset 0 -1px rgb(140 49 10 / 28%);
 }
 
@@ -959,16 +982,12 @@ main {
     width: 100%;
   }
 
-  .toolbar input[type="checkbox"] {
-    width: 15px;
-  }
-
   .named-filter {
     justify-self: start;
     margin-left: 0;
   }
 
-  .toolbar > label:last-child {
+  .sort-control {
     grid-column: 2;
     justify-self: end;
   }
@@ -983,7 +1002,11 @@ main {
   }
 
   .feature > summary {
-    grid-template-columns: 52px minmax(0, 1fr) 52px;
+    --feature-id-column: 52px;
+    grid-template-columns:
+      var(--feature-id-column)
+      minmax(0, 1fr)
+      var(--feature-toggle-column);
   }
 
   .feature-body {
@@ -1000,7 +1023,6 @@ main {
   }
 
   .feature-facts {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
     width: 100%;
     justify-self: stretch;
   }
@@ -1028,11 +1050,11 @@ main {
 
   .toolbar > input[type="search"],
   .named-filter,
-  .toolbar > label:last-child {
+  .sort-control {
     grid-column: 1;
   }
 
-  .toolbar > label:last-child {
+  .sort-control {
     width: 100%;
     justify-content: space-between;
     justify-self: stretch;

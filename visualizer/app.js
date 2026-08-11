@@ -1,3 +1,7 @@
+const sandboxForm = document.querySelector(".intervention-form");
+const formFields = sandboxForm.elements;
+const samplingSettings = document.querySelector("#sampling-settings-dialog");
+
 const ui = {
   list: document.querySelector("#feature-list"),
   count: document.querySelector("#result-count"),
@@ -7,18 +11,19 @@ const ui = {
   sort: document.querySelector("#sort-select"),
   metadata: document.querySelector("#dataset-meta"),
   error: document.querySelector("#error-message"),
-  sandboxForm: document.querySelector("#intervention-form"),
-  prompt: document.querySelector("#prompt-input"),
-  featureInput: document.querySelector("#feature-input"),
-  featureOptions: document.querySelector("#feature-options"),
-  selectedFeatureTitle: document.querySelector("#selected-feature-title"),
-  interventionMode: document.querySelector("#intervention-mode"),
-  amountLabel: document.querySelector("#amount-label"),
-  amountMultiplier: document.querySelector("#amount-multiplier"),
-  amountInput: document.querySelector("#amount-input"),
-  samplingSettings: document.querySelector("#sampling-settings-dialog"),
-  samplingInputs: [...document.querySelectorAll(".sampling-setting input[type='number']")],
-  generateButton: document.querySelector("#generate-button"),
+  sandboxForm,
+  prompt: formFields.prompt,
+  featureInput: formFields.feature_id,
+  featureOptions: formFields.feature_id.list,
+  selectedFeatureTitle: sandboxForm.querySelector(".selected-feature-title"),
+  interventionMode: formFields.mode,
+  amountLabel: sandboxForm.querySelector(".amount-label"),
+  amountMultiplier: sandboxForm.querySelector(".amount-preset-control input"),
+  amountStepLabels: sandboxForm.querySelector(".amount-step-labels"),
+  amountInput: formFields.amount,
+  samplingSettings,
+  samplingInputs: [...samplingSettings.querySelectorAll("input[type='number']")],
+  generateButton: sandboxForm.querySelector("[type='submit']"),
   generationResults: document.querySelector("#generation-results"),
   baselineOutput: document.querySelector("#baseline-output"),
   intervenedOutput: document.querySelector("#intervened-output"),
@@ -29,7 +34,9 @@ let featuresById = new Map();
 let featureCount = 0;
 let amountIsCustom = false;
 
-const amountMultipliers = [0.25, 0.5, 0.75, 1];
+const DEFAULT_CONTEXT_RANGE_START = 0.7;
+const CONTEXT_LOAD_DELAY_MS = 120;
+const generateButtonLabel = ui.generateButton.textContent.trim();
 
 function element(tag, className, text) {
   const result = document.createElement(tag);
@@ -55,6 +62,10 @@ function formatActivation(value) {
   if (value >= 10) return value.toFixed(1);
   if (value >= 1) return value.toFixed(2);
   return value.toPrecision(3);
+}
+
+function formatPercentage(value) {
+  return value.toLocaleString("en", { style: "percent" });
 }
 
 async function fetchJson(url, options) {
@@ -122,7 +133,7 @@ function selectedFeatureMaximum() {
 
 function updateAmountControl() {
   const clamping = ui.interventionMode.value === "clamp";
-  const multiplier = amountMultipliers[Number(ui.amountMultiplier.value)];
+  const multiplier = ui.amountMultiplier.valueAsNumber;
   ui.amountLabel.textContent = clamping ? "Target activation" : "Alpha";
   ui.amountInput.setAttribute(
     "aria-label",
@@ -130,7 +141,7 @@ function updateAmountControl() {
   );
   ui.amountMultiplier.setAttribute(
     "aria-valuetext",
-    `${multiplier * 100}% of maximum activation`,
+    `${formatPercentage(multiplier)} of maximum activation`,
   );
   updateRangeProgress(ui.amountMultiplier);
   if (!amountIsCustom) {
@@ -146,38 +157,30 @@ function updateAmountMultiplierFromCustomValue() {
   const amount = ui.amountInput.valueAsNumber;
   if (!maximum || !Number.isFinite(amount)) return;
 
-  const multiplier = amount / maximum;
-  let closestIndex = 0;
-  for (let index = 1; index < amountMultipliers.length; index += 1) {
-    if (
-      Math.abs(amountMultipliers[index] - multiplier)
-      < Math.abs(amountMultipliers[closestIndex] - multiplier)
-    ) {
-      closestIndex = index;
-    }
-  }
-  ui.amountMultiplier.value = String(closestIndex);
+  ui.amountMultiplier.value = String(amount / maximum);
   updateAmountControl();
 }
 
-function openSamplingSettings() {
+function samplingSettingsAreValid() {
+  const invalidInput = ui.samplingInputs.find((input) => !input.checkValidity());
+  if (!invalidInput) return true;
   if (!ui.samplingSettings.matches(":popover-open")) {
     ui.samplingSettings.showPopover();
   }
+  invalidInput.reportValidity();
+  return false;
 }
 
-function samplingSettingsAreValid() {
-  for (const input of ui.samplingInputs) {
-    if (input.checkValidity()) continue;
-    openSamplingSettings();
-    input.reportValidity();
-    return false;
-  }
-  return true;
-}
+function addSynchronizedRange(input) {
+  const range = input.cloneNode();
+  range.type = "range";
+  range.className = "progress-range";
+  range.removeAttribute("id");
+  range.removeAttribute("name");
+  range.removeAttribute("required");
+  range.setAttribute("aria-label", input.labels[0].textContent.trim());
+  input.before(range);
 
-function synchronizeSetting(input) {
-  const range = input.previousElementSibling;
   range.addEventListener("input", () => {
     input.value = range.value;
     updateRangeProgress(range);
@@ -194,6 +197,14 @@ function updateRangeProgress(range) {
   const progress = 100 * (Number(range.value) - Number(range.min))
     / (Number(range.max) - Number(range.min));
   range.style.setProperty("--range-progress", `${progress}%`);
+}
+
+for (
+  let value = Number(ui.amountMultiplier.min);
+  value <= Number(ui.amountMultiplier.max);
+  value += Number(ui.amountMultiplier.step)
+) {
+  ui.amountStepLabels.append(element("span", "", formatPercentage(value)));
 }
 
 ui.interventionMode.addEventListener("change", updateAmountControl);
@@ -217,7 +228,7 @@ ui.selectedFeatureTitle.addEventListener("click", (event) => {
   const featureId = selectedFeatureId();
   if (featureId !== null) openFeature(featureId);
 });
-ui.samplingInputs.forEach(synchronizeSetting);
+ui.samplingInputs.forEach(addSynchronizedRange);
 ui.sandboxForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!samplingSettingsAreValid()) return;
@@ -234,14 +245,11 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  const mode = ui.interventionMode.value;
-  const request = {
-    prompt: ui.prompt.value,
-    feature_id: featureId,
-    mode,
-    amount: Number(ui.amountInput.value),
-    ...Object.fromEntries(ui.samplingInputs.map((input) => [input.name, Number(input.value)])),
-  };
+  const request = Object.fromEntries(new FormData(ui.sandboxForm));
+  request.feature_id = featureId;
+  for (const input of [ui.amountInput, ...ui.samplingInputs]) {
+    request[input.name] = input.valueAsNumber;
+  }
 
   ui.generateButton.disabled = true;
   ui.generateButton.textContent = "Generating...";
@@ -262,7 +270,7 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
     ui.generateButton.after(message);
   } finally {
     ui.generateButton.disabled = false;
-    ui.generateButton.textContent = "Generate comparison";
+    ui.generateButton.textContent = generateButtonLabel;
   }
 });
 updateAmountControl();
@@ -318,13 +326,23 @@ function renderFeatureList() {
     summary.append(
       element("span", "feature-id", `#${feature.id}`),
       titleElement,
-      element("span", "feature-stat", feature.activation_count.toLocaleString()),
-      element("span", "feature-stat", formatActivation(feature.max_activation)),
+      element(
+        "span",
+        "feature-stat",
+        feature.activation_count.toLocaleString(),
+      ),
+      element(
+        "span",
+        "feature-stat",
+        formatActivation(feature.max_activation),
+      ),
       element("span", "chevron", "›"),
     );
     details.append(summary, element("div", "feature-body"));
     details.addEventListener("toggle", () => {
-      if (details.open && !details.dataset.loaded) loadFeature(details, feature);
+      if (details.open && !details.dataset.loaded) {
+        loadFeature(details, feature);
+      }
     });
     fragment.append(details);
   }
@@ -350,7 +368,10 @@ function renderContext(context, feature) {
     if (activation > 0) {
       const strength = Math.sqrt(Math.min(1, activation / feature.max_activation));
       token.classList.add("active");
-      token.style.backgroundColor = `rgba(196, 79, 27, ${0.1 + 0.75 * strength})`;
+      token.style.setProperty(
+        "--activation-opacity",
+        `${100 * (0.1 + 0.75 * strength)}%`,
+      );
       token.title = `Activation ${formatActivation(activation)}`;
     }
     tokens.append(token);
@@ -392,17 +413,15 @@ function renderOverview(feature, payload) {
   return overview;
 }
 
-const RANGE_RESOLUTION = 1000;
-
 function renderDistribution(feature, counts) {
   const panel = element("section");
   const plot = element("div", "distribution-plot");
   plot.setAttribute("aria-hidden", "true");
-  plot.style.gridTemplateColumns = `repeat(${counts.length}, minmax(2px, 1fr))`;
+  plot.style.setProperty("--distribution-bin-count", counts.length);
   const largestBin = Math.max(...counts, 1);
   const bars = counts.map((count, index) => {
     const bar = element("span", "distribution-bar");
-    bar.style.height = `${Math.max(2, 100 * Math.sqrt(count / largestBin))}%`;
+    bar.style.height = `${100 * Math.sqrt(count / largestBin)}%`;
     const lower = feature.max_activation * index / counts.length;
     const upper = feature.max_activation * (index + 1) / counts.length;
     bar.title = `${formatActivation(lower)}-${formatActivation(upper)}: ${count.toLocaleString()} contexts`;
@@ -411,27 +430,26 @@ function renderDistribution(feature, counts) {
   });
 
   const selector = element("div", "range-selector");
-  const track = element("div", "range-track");
   function rangeInput(label, value) {
     const input = document.createElement("input");
     input.type = "range";
     input.min = "0";
-    input.max = String(RANGE_RESOLUTION);
-    input.step = "1";
+    input.max = "1";
+    input.step = "0.001";
     input.value = String(value);
     input.setAttribute("aria-label", label);
     return input;
   }
-  const minimumInput = rangeInput("Minimum peak activation", 0.7 * RANGE_RESOLUTION);
-  const maximumInput = rangeInput("Maximum peak activation", RANGE_RESOLUTION);
+  const minimumInput = rangeInput("Minimum peak activation", DEFAULT_CONTEXT_RANGE_START);
+  const maximumInput = rangeInput("Maximum peak activation", 1);
   const minimumLabel = element("span", "range-value");
   const maximumLabel = element("span", "range-value");
+  const valueLabels = element("div", "range-value-track");
+  valueLabels.append(minimumLabel, maximumLabel);
   selector.append(
-    track,
     minimumInput,
     maximumInput,
-    minimumLabel,
-    maximumLabel,
+    valueLabels,
   );
 
   const resultCount = element("button", "range-result-count");
@@ -457,34 +475,34 @@ function renderDistribution(feature, counts) {
       else minimumInput.value = maximumInput.value;
     }
 
-    const minimumStep = Number(minimumInput.value);
-    const maximumStep = Number(maximumInput.value);
-    const start = `${100 * minimumStep / RANGE_RESOLUTION}%`;
-    const end = `${100 * maximumStep / RANGE_RESOLUTION}%`;
-    selector.style.setProperty("--range-start", start);
-    selector.style.setProperty("--range-end", end);
+    const minimumFraction = minimumInput.valueAsNumber;
+    const maximumFraction = maximumInput.valueAsNumber;
+    selector.style.setProperty("--range-start", `${100 * minimumFraction}%`);
+    selector.style.setProperty("--range-end", `${100 * maximumFraction}%`);
 
-    const minimum = feature.max_activation * minimumStep / RANGE_RESOLUTION;
-    const maximum = feature.max_activation * maximumStep / RANGE_RESOLUTION;
-    for (const [label, step, value] of [
-      [minimumLabel, minimumStep, minimum],
-      [maximumLabel, maximumStep, maximum],
+    const minimum = feature.max_activation * minimumFraction;
+    const maximum = feature.max_activation * maximumFraction;
+    for (const [label, fraction, value] of [
+      [minimumLabel, minimumFraction, minimum],
+      [maximumLabel, maximumFraction, maximum],
     ]) {
-      const fraction = step / RANGE_RESOLUTION;
-      label.style.left = `calc(${100 * fraction}% + ${7 - 14 * fraction}px)`;
+      label.style.left = `${100 * fraction}%`;
       label.textContent = formatActivation(value);
     }
     bars.forEach((bar, index) => {
-      const binStart = index * RANGE_RESOLUTION / bars.length;
-      const binEnd = (index + 1) * RANGE_RESOLUTION / bars.length;
-      bar.classList.toggle("selected", binEnd >= minimumStep && binStart <= maximumStep);
+      const binStart = index / bars.length;
+      const binEnd = (index + 1) / bars.length;
+      bar.classList.toggle(
+        "selected",
+        binEnd >= minimumFraction && binStart <= maximumFraction,
+      );
     });
 
     clearTimeout(loadTimer);
     const currentRequest = ++requestId;
     loadTimer = setTimeout(
       () => loadContexts(minimum, maximum, currentRequest),
-      120,
+      CONTEXT_LOAD_DELAY_MS,
     );
   }
 
@@ -497,7 +515,7 @@ function renderDistribution(feature, counts) {
     try {
       const payload = await fetchJson(`/api/features/${feature.id}?${query}`);
       if (currentRequest !== requestId) return;
-      const contexts = descending ? payload.contexts : payload.contexts.toReversed();
+      const contexts = descending ? payload.contexts : [...payload.contexts].reverse();
       const shown = contexts.length;
       const label = shown === payload.matching_context_count
         ? `${shown.toLocaleString()} contexts`
@@ -535,6 +553,7 @@ function renderDistribution(feature, counts) {
 
 async function loadFeature(details, feature) {
   const body = details.querySelector(".feature-body");
+  details.dataset.loaded = "loading";
   body.replaceChildren(element("p", "loading", "Loading feature..."));
   try {
     const payload = await fetchJson(`/api/features/${feature.id}`);
@@ -544,6 +563,7 @@ async function loadFeature(details, feature) {
     );
     details.dataset.loaded = "true";
   } catch (error) {
+    delete details.dataset.loaded;
     body.replaceChildren(element("p", "empty-state", `Could not load feature: ${error.message}`));
   }
 }

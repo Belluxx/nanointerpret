@@ -52,16 +52,8 @@
 
           <div class="sampling-settings-grid">
             <div class="sampling-setting">
-              <label id="token-count-label" for="token-count-input">Maximum tokens</label>
+              <label for="token-count-input">Maximum tokens</label>
               <div class="sampling-setting-control">
-                <input
-                  type="range"
-                  min="1"
-                  max="256"
-                  step="1"
-                  value="64"
-                  aria-labelledby="token-count-label"
-                />
                 <input
                   id="token-count-input"
                   name="max_new_tokens"
@@ -76,16 +68,8 @@
             </div>
 
             <div class="sampling-setting">
-              <label id="temperature-label" for="temperature-input">Temperature</label>
+              <label for="temperature-input">Temperature</label>
               <div class="sampling-setting-control">
-                <input
-                  type="range"
-                  min="0"
-                  max="2"
-                  step="0.05"
-                  value="0"
-                  aria-labelledby="temperature-label"
-                />
                 <input
                   id="temperature-input"
                   name="temperature"
@@ -100,16 +84,8 @@
             </div>
 
             <div class="sampling-setting">
-              <label id="top-p-label" for="top-p-input">Top P</label>
+              <label for="top-p-input">Top P</label>
               <div class="sampling-setting-control">
-                <input
-                  type="range"
-                  min="0.01"
-                  max="1"
-                  step="0.01"
-                  value="0.95"
-                  aria-labelledby="top-p-label"
-                />
                 <input
                   id="top-p-input"
                   name="top_p"
@@ -124,16 +100,8 @@
             </div>
 
             <div class="sampling-setting">
-              <label id="top-k-label" for="top-k-input">Top K</label>
+              <label for="top-k-input">Top K</label>
               <div class="sampling-setting-control">
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  value="64"
-                  aria-labelledby="top-k-label"
-                />
                 <input
                   id="top-k-input"
                   name="top_k"
@@ -148,18 +116,10 @@
             </div>
 
             <div class="sampling-setting">
-              <label id="repetition-penalty-label" for="repetition-penalty-input">
+              <label for="repetition-penalty-input">
                 Repetition penalty
               </label>
               <div class="sampling-setting-control">
-                <input
-                  type="range"
-                  min="1"
-                  max="2"
-                  step="0.05"
-                  value="1.1"
-                  aria-labelledby="repetition-penalty-label"
-                />
                 <input
                   id="repetition-penalty-input"
                   name="repetition_penalty"
@@ -175,11 +135,11 @@
           </div>
         </div>
 
-        <form id="intervention-form">
+        <form class="intervention-form">
           <label>
             <span>Prompt</span>
             <textarea
-              id="prompt-input"
+              name="prompt"
               rows="4"
               placeholder="Enter a prompt to continue..."
               required
@@ -191,7 +151,7 @@
               <span>Feature</span>
               <div class="feature-control">
                 <input
-                  id="feature-input"
+                  name="feature_id"
                   type="text"
                   list="feature-options"
                   placeholder="ID or title"
@@ -199,7 +159,6 @@
                   required
                 />
                 <a
-                  id="selected-feature-title"
                   class="selected-feature-title"
                   aria-live="polite"
                   hidden
@@ -210,36 +169,30 @@
 
             <label class="intervention-field">
               <span>Intervention</span>
-              <select id="intervention-mode">
+              <select name="mode">
                 <option value="clamp">Feature clamping</option>
                 <option value="additive">Additive steering</option>
               </select>
             </label>
 
             <div class="amount-field">
-              <span id="amount-label">Target activation</span>
+              <span class="amount-label">Target activation</span>
               <div class="amount-control">
                 <div class="amount-preset-control">
                   <input
-                    id="amount-multiplier"
+                    class="progress-range"
                     type="range"
-                    min="0"
-                    max="3"
-                    step="1"
-                    value="1"
+                    min="0.25"
+                    max="1"
+                    step="0.25"
+                    value="0.5"
                     aria-label="Percentage of maximum activation"
-                    aria-valuetext="50% of maximum activation"
                   />
-                  <div class="amount-step-labels" aria-hidden="true">
-                    <span>25%</span>
-                    <span>50%</span>
-                    <span>75%</span>
-                    <span>100%</span>
-                  </div>
+                  <div class="amount-step-labels" aria-hidden="true"></div>
                   <div class="amount-scale-caption">of feature max</div>
                 </div>
                 <input
-                  id="amount-input"
+                  name="amount"
                   type="number"
                   step="any"
                   title="Custom value"
@@ -251,7 +204,9 @@
           </div>
 
           <div class="sandbox-actions">
-            <button id="generate-button" type="submit">Generate comparison</button>
+            <button class="primary-button" type="submit">
+              Generate comparison
+            </button>
           </div>
         </form>
 
@@ -286,7 +241,7 @@
             <span>Named only</span>
           </label>
 
-          <label>
+          <label class="sort-control">
             <span>Sort</span>
             <select id="sort-select">
               <option value="id">Feature ID</option>
@@ -300,7 +255,8 @@
         <div class="list-heading">
           <span id="result-count" role="status">Loading analysis...</span>
           <span class="column-labels" aria-hidden="true">
-            <span>Activations</span><span>Peak</span>
+            <span>Activations</span>
+            <span>Peak</span>
           </span>
         </div>
 
