@@ -434,7 +434,10 @@ function renderDistribution(feature, counts) {
     maximumLabel,
   );
 
-  const resultCount = element("span", "range-result-count");
+  const resultCount = element("button", "range-result-count");
+  resultCount.type = "button";
+  resultCount.setAttribute("aria-label", "Reverse context order");
+  const orderLabel = element("span");
   const results = element("div", "contexts");
   panel.append(
     element("h3", "range-heading", "Context peak distribution"),
@@ -446,6 +449,7 @@ function renderDistribution(feature, counts) {
 
   let loadTimer;
   let requestId = 0;
+  let descending = true;
 
   function updateSelection(changedInput) {
     if (Number(minimumInput.value) > Number(maximumInput.value)) {
@@ -493,13 +497,16 @@ function renderDistribution(feature, counts) {
     try {
       const payload = await fetchJson(`/api/features/${feature.id}?${query}`);
       if (currentRequest !== requestId) return;
-      const shown = payload.contexts.length;
-      resultCount.textContent = shown === payload.matching_context_count
-        ? `${shown.toLocaleString()} contexts (high to low)`
-        : `Sampled ${shown.toLocaleString()} of ${payload.matching_context_count.toLocaleString()} (high to low)`;
+      const contexts = descending ? payload.contexts : payload.contexts.toReversed();
+      const shown = contexts.length;
+      const label = shown === payload.matching_context_count
+        ? `${shown.toLocaleString()} contexts`
+        : `Sampled ${shown.toLocaleString()} of ${payload.matching_context_count.toLocaleString()}`;
+      orderLabel.textContent = descending ? "(high to low)" : "(low to high)";
+      resultCount.replaceChildren(label, orderLabel);
       if (shown) {
         results.replaceChildren(
-          ...payload.contexts.map((context) => renderContext(context, feature)),
+          ...contexts.map((context) => renderContext(context, feature)),
         );
       } else {
         results.replaceChildren(
@@ -517,6 +524,11 @@ function renderDistribution(feature, counts) {
 
   minimumInput.addEventListener("input", () => updateSelection(minimumInput));
   maximumInput.addEventListener("input", () => updateSelection(maximumInput));
+  resultCount.addEventListener("click", () => {
+    descending = !descending;
+    orderLabel.textContent = descending ? "(high to low)" : "(low to high)";
+    results.replaceChildren(...[...results.children].reverse());
+  });
   updateSelection();
   return panel;
 }

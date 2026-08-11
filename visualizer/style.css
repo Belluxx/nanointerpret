@@ -837,10 +837,25 @@ main {
 }
 
 .range-result-count {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
   margin: 10px 0 9px;
-  padding-top: 14px;
+  padding: 14px 0 0;
+  border: 0;
   border-top: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+}
+
+.range-result-count::after {
+  content: "";
+  width: 13px;
+  height: 13px;
+  background: currentcolor;
+  mask: url("/icons/switch.svg") center / contain no-repeat;
+  -webkit-mask: url("/icons/switch.svg") center / contain no-repeat;
 }
 
 .contexts {
