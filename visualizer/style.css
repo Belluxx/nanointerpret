@@ -495,7 +495,6 @@ input.progress-range::-moz-range-thumb,
 .browser {
   --feature-activation-column: 110px;
   --feature-id-column: 64px;
-  --feature-peak-column: 90px;
   --feature-toggle-column: 52px;
   overflow: hidden;
 }
@@ -578,9 +577,7 @@ input.progress-range::-moz-range-thumb,
 
 .column-labels {
   display: grid;
-  grid-template-columns:
-    var(--feature-activation-column)
-    var(--feature-peak-column);
+  grid-template-columns: var(--feature-activation-column);
   text-align: right;
 }
 
@@ -598,7 +595,6 @@ input.progress-range::-moz-range-thumb,
     var(--feature-id-column)
     minmax(180px, 1fr)
     var(--feature-activation-column)
-    var(--feature-peak-column)
     var(--feature-toggle-column);
   align-items: center;
   min-height: 58px;

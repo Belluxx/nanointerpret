@@ -293,7 +293,6 @@ function renderMetadata(metadata) {
 
 const sorters = {
   id: (a, b) => a.id - b.id,
-  max: (a, b) => b.max_activation - a.max_activation || a.id - b.id,
   count: (a, b) => b.activation_count - a.activation_count || a.id - b.id,
   title: (a, b) => (a.title || `Feature ${a.id}`).localeCompare(b.title || `Feature ${b.id}`),
 };
@@ -330,11 +329,6 @@ function renderFeatureList() {
         "span",
         "feature-stat",
         feature.activation_count.toLocaleString(),
-      ),
-      element(
-        "span",
-        "feature-stat",
-        formatActivation(feature.max_activation),
       ),
       element("span", "chevron", "›"),
     );
