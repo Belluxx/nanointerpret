@@ -29,7 +29,7 @@ let featuresById = new Map();
 let featureCount = 0;
 let amountIsCustom = false;
 
-const amountMultipliers = [0.25, 0.5, 0.75, 1, 2, 5];
+const amountMultipliers = [0.25, 0.5, 0.75, 1];
 
 function element(tag, className, text) {
   const result = document.createElement(tag);

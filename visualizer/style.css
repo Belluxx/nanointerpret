@@ -337,7 +337,7 @@ main {
 
 .intervention-controls {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 180px minmax(200px, 360px);
+  grid-template-columns: minmax(220px, 1fr) 180px max-content;
   align-items: start;
   gap: 12px;
   margin-top: 12px;
@@ -381,7 +381,7 @@ main {
 
 .amount-control {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 82px;
+  grid-template-columns: minmax(0, 160px) 82px;
   align-items: center;
   gap: 12px;
 }
@@ -404,7 +404,8 @@ main {
 }
 
 .amount-step-labels {
-  position: relative;
+  display: flex;
+  justify-content: space-between;
   height: 8px;
   margin: 4px 6px 0;
   color: var(--muted);
@@ -412,18 +413,12 @@ main {
 }
 
 .amount-step-labels span {
-  position: absolute;
-  top: 0;
-  transform: translateX(-50%);
+  display: flex;
+  flex: 0 0 0;
+  min-width: 0;
+  justify-content: center;
   white-space: nowrap;
 }
-
-.amount-step-labels span:nth-child(1) { left: 0; }
-.amount-step-labels span:nth-child(2) { left: 20%; }
-.amount-step-labels span:nth-child(3) { left: 40%; }
-.amount-step-labels span:nth-child(4) { left: 60%; }
-.amount-step-labels span:nth-child(5) { left: 80%; }
-.amount-step-labels span:nth-child(6) { left: 100%; }
 
 .amount-scale-caption {
   margin-top: 5px;
