@@ -130,7 +130,7 @@ function updateAmountControl() {
   );
   ui.amountMultiplier.setAttribute(
     "aria-valuetext",
-    `${multiplier} times maximum activation`,
+    `${multiplier * 100}% of maximum activation`,
   );
   updateRangeProgress(ui.amountMultiplier);
   if (!amountIsCustom) {
