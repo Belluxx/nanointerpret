@@ -1,7 +1,7 @@
 # Experiments
 
 > [!CAUTION]
-> Using the `--cache-activation` flag saves LLM activations to disk to reuse them across runs, however they take up a LOT of space (~1.3GB for each 1M tokens), be careful with it. If you don't have a lot of space, remove the flag.
+> Using `--cache-activations` saves LLM activations to disk for reuse across runs. The default fp16 cache takes up a LOT of space (about 1.3GB every 1M tokens for the 270m Gemma model). `--residual-cache-format int8` takes about half as much space.
 
 ## Pre-bias subtraction and AuxK
 

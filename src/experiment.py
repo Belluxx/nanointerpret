@@ -15,14 +15,18 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 from tqdm.auto import tqdm
 
-from .data import RESIDUAL_DTYPE, RESIDUAL_STORAGE_SCALE, iter_context_batches
+from .data import (
+    RESIDUAL_FP16_SCALE,
+    create_residual_cache,
+    encode_int8_residuals,
+    iter_context_batches,
+)
 from .sae import (
     FIRING_THRESHOLD,
     RunningMetrics,
     TopKSAE,
     normalized_auxk_loss,
 )
-
 
 ResidualBatchFactory = Callable[..., Iterator[Tensor]]
 
@@ -49,6 +53,7 @@ class ExperimentConfig:
     sae_batch_size: int
     seed: int
     model_dtype: str
+    residual_cache_format: str | None
     normalization_tokens: int = 0
     activation_scale: float = 1.0
     subtract_pre_bias: bool = True
@@ -239,10 +244,8 @@ def capture_residual_cache(
     train_path, validation_path, metadata_path = cache_paths
     train_path.parent.mkdir(parents=True, exist_ok=True)
     d_model = int(metadata["d_model"])
+    cache_format = metadata["cache_format"]
     float16_max = torch.finfo(torch.float16).max
-    raw_storage_limit = float16_max / RESIDUAL_STORAGE_SCALE
-    saturated_values = 0
-    maximum_activation = 0.0
     total_tokens = len(train_tokens) + len(validation_tokens)
     progress = tqdm(
         total=total_tokens,
@@ -252,13 +255,9 @@ def capture_residual_cache(
     )
 
     def capture_split(tokens: np.memmap, path: Path) -> None:
-        nonlocal maximum_activation, saturated_values
         temporary = path.with_suffix(path.suffix + ".tmp")
-        output = np.memmap(
-            temporary,
-            mode="w+",
-            dtype=RESIDUAL_DTYPE,
-            shape=(len(tokens), d_model),
+        output = create_residual_cache(
+            temporary, len(tokens), d_model, cache_format
         )
         written = 0
         batches = iter_context_batches(
@@ -275,16 +274,15 @@ def capture_residual_cache(
                 model, capture, input_ids, attention_mask, batch_tokens, device
             )
             residual = residual.float()
-            batch_maximum = float(residual.abs().max().item())
-            maximum_activation = max(maximum_activation, batch_maximum)
-            stored = residual.mul(RESIDUAL_STORAGE_SCALE)
-            if batch_maximum > raw_storage_limit:
-                saturated_values += int(
-                    (residual.abs() > raw_storage_limit).sum().item()
-                )
+            output_slice = slice(written, written + batch_tokens)
+            if cache_format == "fp16":
+                stored = residual.mul(RESIDUAL_FP16_SCALE)
                 stored.clamp_(-float16_max, float16_max)
-            stored = stored.cpu().numpy()
-            output[written : written + batch_tokens] = stored
+                output[output_slice] = stored.cpu().numpy()
+            else:
+                codes, scales = encode_int8_residuals(residual)
+                output["codes"][output_slice] = codes.cpu().numpy()
+                output["scales"][output_slice] = scales.cpu().numpy()
             written += batch_tokens
             progress.update(batch_tokens)
         output.flush()
@@ -294,12 +292,6 @@ def capture_residual_cache(
     capture_split(train_tokens, train_path)
     capture_split(validation_tokens, validation_path)
     progress.close()
-    metadata.update(
-        {
-            "maximum_activation": maximum_activation,
-            "saturated_values": saturated_values,
-        }
-    )
     metadata_temporary = metadata_path.with_suffix(metadata_path.suffix + ".tmp")
     metadata_temporary.write_text(json.dumps(metadata, indent=2) + "\n")
     os.replace(metadata_temporary, metadata_path)

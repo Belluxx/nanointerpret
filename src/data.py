@@ -4,18 +4,18 @@ import json
 import math
 import os
 import shutil
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterator
 
 import numpy as np
 import torch
 from torch import Tensor
 from tqdm.auto import tqdm
 
-
-RESIDUAL_DTYPE = np.float16
-RESIDUAL_STORAGE_SCALE = 1 / 256
+RESIDUAL_CACHE_FORMATS = ("fp16", "int8")
+RESIDUAL_FP16_SCALE = 1 / 256
+RESIDUAL_INT8_GROUP_SIZE = 128
 ANALYSIS_VALUE_DTYPE = np.float16
 TRANSPOSE_TOKENS = 1_000_000
 
@@ -41,6 +41,7 @@ class ResidualCacheSpec:
     context_size: int
     activation_layer: int | None
     model_dtype: str
+    cache_format: str
 
 
 @dataclass(frozen=True)
@@ -194,14 +195,52 @@ def residual_cache_paths(spec: ResidualCacheSpec) -> tuple[Path, Path, Path]:
     stem = (
         f"{safe_model}_{safe_dataset}_{safe_config}_"
         f"{spec.train_tokens}_{spec.validation_tokens}_ctx{spec.context_size}_"
-        f"layer{layer}_{spec.model_dtype}"
+        f"layer{layer}_{spec.model_dtype}_{spec.cache_format}"
     )
-    dtype_name = np.dtype(RESIDUAL_DTYPE).name
     return (
-        spec.cache_dir / f"{stem}_train.{dtype_name}",
-        spec.cache_dir / f"{stem}_validation.{dtype_name}",
+        spec.cache_dir / f"{stem}_train.npy",
+        spec.cache_dir / f"{stem}_validation.npy",
         spec.cache_dir / f"{stem}_metadata.json",
     )
+
+
+def residual_cache_layout(
+    cache_format: str, token_count: int, d_model: int
+) -> tuple[np.dtype, tuple[int, ...]]:
+    if cache_format == "fp16":
+        return np.dtype(np.float16), (token_count, d_model)
+    if cache_format == "int8":
+        if d_model % RESIDUAL_INT8_GROUP_SIZE:
+            raise ValueError(
+                f"INT8 residual caching requires d_model to be divisible by "
+                f"{RESIDUAL_INT8_GROUP_SIZE}, got {d_model}"
+            )
+        dtype = np.dtype(
+            [
+                ("codes", np.int8, (d_model,)),
+                ("scales", np.float16, (d_model // RESIDUAL_INT8_GROUP_SIZE,)),
+            ]
+        )
+        return dtype, (token_count,)
+    raise ValueError(f"unknown residual cache format: {cache_format}")
+
+
+def create_residual_cache(
+    path: Path, token_count: int, d_model: int, cache_format: str
+) -> np.memmap:
+    dtype, shape = residual_cache_layout(cache_format, token_count, d_model)
+    return np.lib.format.open_memmap(path, mode="w+", dtype=dtype, shape=shape)
+
+
+def encode_int8_residuals(residuals: Tensor) -> tuple[Tensor, Tensor]:
+    groups = residuals.reshape(len(residuals), -1, RESIDUAL_INT8_GROUP_SIZE)
+    scales = (groups.abs().amax(dim=2) / 127).clamp_max(
+        torch.finfo(torch.float16).max
+    )
+    scales = scales.to(torch.float16)
+    divisors = torch.where(scales == 0, 1.0, scales.float())
+    codes = torch.round(groups / divisors.unsqueeze(2)).clamp_(-127, 127)
+    return codes.reshape_as(residuals).to(torch.int8), scales
 
 
 def load_residual_cache_metadata(spec: ResidualCacheSpec) -> dict | None:
@@ -218,13 +257,14 @@ def load_residual_cache_metadata(spec: ResidualCacheSpec) -> dict | None:
     d_model = metadata.get("d_model")
     if not isinstance(d_model, int) or d_model <= 0:
         return None
-    item_size = np.dtype(RESIDUAL_DTYPE).itemsize
-    if (
-        train_path.stat().st_size != spec.train_tokens * d_model * item_size
-        or validation_path.stat().st_size
-        != spec.validation_tokens * d_model * item_size
+    for path, token_count in (
+        (train_path, spec.train_tokens),
+        (validation_path, spec.validation_tokens),
     ):
-        return None
+        dtype, shape = residual_cache_layout(spec.cache_format, token_count, d_model)
+        cache = np.load(path, mmap_mode="r")
+        if cache.dtype != dtype or cache.shape != shape:
+            return None
     return metadata
 
 
@@ -365,6 +405,14 @@ def iter_residual_batches(
 
     for batch_id in order[skip_batches:]:
         start = int(batch_id) * batch_size
-        batch = np.asarray(residuals[start : start + batch_size]).astype(np.float32)
-        batch /= RESIDUAL_STORAGE_SCALE
+        rows = residuals[start : start + batch_size]
+        if rows.dtype.fields is None:
+            batch = np.asarray(rows, dtype=np.float32)
+            batch /= RESIDUAL_FP16_SCALE
+        else:
+            codes = np.asarray(rows["codes"], dtype=np.float32)
+            scales = np.asarray(rows["scales"], dtype=np.float32)
+            groups = codes.reshape(len(rows), -1, RESIDUAL_INT8_GROUP_SIZE)
+            groups *= scales[:, :, None]
+            batch = groups.reshape(len(rows), -1)
         yield torch.from_numpy(batch)

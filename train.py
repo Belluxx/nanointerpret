@@ -12,7 +12,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src.data import (
-    RESIDUAL_DTYPE,
+    RESIDUAL_CACHE_FORMATS,
     ResidualCacheSpec,
     TokenCacheSpec,
     build_token_cache,
@@ -36,7 +36,6 @@ from src.experiment import (
 from src.misc import experiment_output_dir
 from src.runtime import ATTENTION_IMPLEMENTATION, choose_device
 from src.sae import TopKSAE
-
 
 MODEL_ID = "google/gemma-3-270m"
 DATASET_ID = "HuggingFaceFW/fineweb-edu"
@@ -71,6 +70,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=None, help="Training output directory. Default: generated automatically under artifacts/.",)
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"))
     parser.add_argument("--residual-cache-dir", type=Path, default=Path("artifacts/residual_cache"))
+    parser.add_argument("--residual-cache-format", choices=RESIDUAL_CACHE_FORMATS, default="fp16", help="Residual cache storage: scaled FP16, or groupwise INT8 with 128 values per FP16 scale.",)
     parser.add_argument("--resume", action="store_true")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--cache-activations", action="store_true", help="Cache residual activations before training instead of streaming them.")
@@ -174,8 +174,9 @@ def run_training(
             args.k,
             args.train_tokens,
         )
+    mode = f"cached/{args.residual_cache_format}" if args.cache_activations else "streaming"
     print(
-        f"Device: {device} | Mode: {'cached' if args.cache_activations else 'streaming'} | "
+        f"Device: {device} | Mode: {mode} | "
         f"Model batch: {args.model_batch_size} | SAE batch: {args.sae_batch_size} | "
         f"Layer: {metadata['layer_index']} | Model width: {d_model} | "
         f"SAE width: {d_sae:,} | k: {args.k} | "
@@ -233,6 +234,9 @@ def run_training(
         subtract_pre_bias=args.subtract_pre_bias,
         seed=args.seed,
         model_dtype=args.model_dtype,
+        residual_cache_format=(
+            args.residual_cache_format if args.cache_activations else None
+        ),
     )
     sae = TopKSAE(
         d_model,
@@ -316,6 +320,7 @@ def main() -> None:
         context_size=args.context_size,
         activation_layer=args.activation_layer,
         model_dtype=args.model_dtype,
+        cache_format=args.residual_cache_format,
     )
     cache_paths = residual_cache_paths(spec)
     train_path, validation_path, _ = cache_paths
@@ -330,22 +335,11 @@ def main() -> None:
         if metadata is None:
             raise RuntimeError("the residual cache failed validation after capture")
     if args.cache_only:
-        print(f"Residual cache: {args.residual_cache_dir}")
+        print(f"Residual cache ({args.residual_cache_format}): {args.residual_cache_dir}")
         return
 
-    d_model = int(metadata["d_model"])
-    train_data = np.memmap(
-        train_path,
-        mode="r",
-        dtype=RESIDUAL_DTYPE,
-        shape=(args.train_tokens, d_model),
-    )
-    validation_data = np.memmap(
-        validation_path,
-        mode="r",
-        dtype=RESIDUAL_DTYPE,
-        shape=(args.validation_tokens, d_model),
-    )
+    train_data = np.load(train_path, mmap_mode="r")
+    validation_data = np.load(validation_path, mmap_mode="r")
     batch_function = partial(
         iter_residual_batches,
         batch_size=args.context_size * args.model_batch_size,
