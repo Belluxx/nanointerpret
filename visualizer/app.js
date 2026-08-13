@@ -134,10 +134,10 @@ function selectedFeatureMaximum() {
 function updateAmountControl() {
   const clamping = ui.interventionMode.value === "clamp";
   const multiplier = ui.amountMultiplier.valueAsNumber;
-  ui.amountLabel.textContent = clamping ? "Target activation" : "Alpha";
+  ui.amountLabel.textContent = clamping ? "Target activation" : "Steering strength";
   ui.amountInput.setAttribute(
     "aria-label",
-    clamping ? "Target feature activation" : "Additive steering alpha",
+    clamping ? "Target feature activation" : "Additive steering strength",
   );
   ui.amountMultiplier.setAttribute(
     "aria-valuetext",
