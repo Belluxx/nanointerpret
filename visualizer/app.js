@@ -8,7 +8,14 @@ const ui = {
   search: document.querySelector("#search-input"),
   namedFilter: document.querySelector(".named-filter"),
   namedOnly: document.querySelector("#named-only-input"),
+  activationCountRange: document.querySelector("#activation-count-range"),
+  minimumActivationCount: document.querySelector("#minimum-activation-count"),
+  maximumActivationCount: document.querySelector("#maximum-activation-count"),
+  activationCountOutput: document.querySelector("#activation-count-output"),
+  minimumActivationBound: document.querySelector("#minimum-activation-bound"),
+  maximumActivationBound: document.querySelector("#maximum-activation-bound"),
   sort: document.querySelector("#sort-select"),
+  sortDirection: document.querySelector("#sort-direction-button"),
   metadata: document.querySelector("#dataset-meta"),
   error: document.querySelector("#error-message"),
   sandboxForm,
@@ -34,6 +41,9 @@ let featuresById = new Map();
 let featureCount = 0;
 let amountIsCustom = false;
 let renderedBaselineKey = null;
+let minimumActivationCount = 0;
+let maximumActivationCount = 0;
+let reverseFeatureOrder = false;
 
 const DEFAULT_CONTEXT_RANGE_START = 0.7;
 const CONTEXT_LOAD_DELAY_MS = 120;
@@ -320,13 +330,57 @@ const sorters = {
 
 function visibleFeatures() {
   const query = ui.search.value.trim().toLocaleLowerCase();
+  const selectedMinimumActivationCount = activationCountAt(
+    ui.minimumActivationCount.valueAsNumber,
+  );
+  const selectedMaximumActivationCount = activationCountAt(
+    ui.maximumActivationCount.valueAsNumber,
+  );
   const visible = features.filter((feature) => {
     if (ui.namedOnly.checked && !feature.title) return false;
+    if (
+      feature.activation_count < selectedMinimumActivationCount
+      || feature.activation_count > selectedMaximumActivationCount
+    ) return false;
     return !query
       || String(feature.id).includes(query)
       || (feature.title || "").toLocaleLowerCase().includes(query);
   });
-  return visible.sort(sorters[ui.sort.value]);
+  visible.sort(sorters[ui.sort.value]);
+  return reverseFeatureOrder ? visible.reverse() : visible;
+}
+
+function activationCountAt(position) {
+  const logarithmicMinimum = Math.log1p(minimumActivationCount);
+  const logarithmicMaximum = Math.log1p(maximumActivationCount);
+  return Math.round(Math.expm1(
+    logarithmicMinimum + position * (logarithmicMaximum - logarithmicMinimum),
+  ));
+}
+
+function updateActivationCountRange(changedInput) {
+  if (ui.minimumActivationCount.valueAsNumber > ui.maximumActivationCount.valueAsNumber) {
+    if (changedInput === ui.minimumActivationCount) {
+      ui.maximumActivationCount.value = ui.minimumActivationCount.value;
+    } else {
+      ui.minimumActivationCount.value = ui.maximumActivationCount.value;
+    }
+  }
+
+  const minimumPosition = ui.minimumActivationCount.valueAsNumber;
+  const maximumPosition = ui.maximumActivationCount.valueAsNumber;
+  const selectedMinimum = activationCountAt(minimumPosition);
+  const selectedMaximum = activationCountAt(maximumPosition);
+  ui.activationCountRange.style.setProperty(
+    "--range-start",
+    `${100 * minimumPosition}%`,
+  );
+  ui.activationCountRange.style.setProperty(
+    "--range-end",
+    `${100 * maximumPosition}%`,
+  );
+  ui.activationCountOutput.value =
+    `${selectedMinimum.toLocaleString()}–${selectedMaximum.toLocaleString()}`;
 }
 
 function renderFeatureList() {
@@ -444,7 +498,7 @@ function renderDistribution(feature, counts) {
     return bar;
   });
 
-  const selector = element("div", "range-selector");
+  const selector = element("div", "dual-range range-selector");
   function rangeInput(label, value) {
     const input = document.createElement("input");
     input.type = "range";
@@ -589,7 +643,15 @@ ui.search.addEventListener("input", () => {
   renderFrame = requestAnimationFrame(renderFeatureList);
 });
 ui.namedOnly.addEventListener("change", renderFeatureList);
+for (const input of [ui.minimumActivationCount, ui.maximumActivationCount]) {
+  input.addEventListener("input", () => updateActivationCountRange(input));
+  input.addEventListener("change", renderFeatureList);
+}
 ui.sort.addEventListener("change", renderFeatureList);
+ui.sortDirection.addEventListener("click", () => {
+  reverseFeatureOrder = !reverseFeatureOrder;
+  renderFeatureList();
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && ui.search.value) {
     ui.search.value = "";
@@ -603,10 +665,20 @@ async function initialize() {
     const payload = await fetchJson("/api/summary");
     features = payload.features;
     const hasFeatureNames = features.some((feature) => feature.title);
+    const activationCounts = features.map((feature) => feature.activation_count);
+    minimumActivationCount = activationCounts.length
+      ? Math.min(...activationCounts)
+      : 0;
+    maximumActivationCount = activationCounts.length
+      ? Math.max(...activationCounts)
+      : 0;
+    ui.minimumActivationBound.textContent = minimumActivationCount.toLocaleString();
+    ui.maximumActivationBound.textContent = maximumActivationCount.toLocaleString();
     ui.namedFilter.hidden = !hasFeatureNames;
     ui.namedOnly.checked = hasFeatureNames;
     renderMetadata(payload.metadata);
     initializeSandbox(payload.metadata);
+    updateActivationCountRange();
     renderFeatureList();
   } catch (error) {
     ui.count.textContent = "Could not load analysis";

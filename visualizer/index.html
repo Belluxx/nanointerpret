@@ -28,7 +28,7 @@
           </div>
           <button
             id="sampling-settings-button"
-            class="settings-button"
+            class="popover-button settings-button"
             type="button"
             aria-label="Sampling settings"
             aria-haspopup="dialog"
@@ -41,7 +41,7 @@
 
         <div
           id="sampling-settings-dialog"
-          class="sampling-settings-dialog"
+          class="popover-dialog sampling-settings-dialog"
           popover
           role="dialog"
           aria-labelledby="sampling-settings-title"
@@ -236,19 +236,84 @@
             autocomplete="off"
           />
 
-          <label class="named-filter" hidden>
-            <input id="named-only-input" type="checkbox" />
-            <span>Named only</span>
-          </label>
+          <button
+            id="filter-button"
+            class="popover-button filter-button"
+            type="button"
+            aria-label="Filter features"
+            aria-haspopup="dialog"
+            popovertarget="filter-popover"
+          >
+            <span class="filter-icon" aria-hidden="true"></span>
+          </button>
 
-          <label class="sort-control">
-            <span>Sort</span>
-            <select id="sort-select">
-              <option value="id">Feature ID</option>
-              <option value="count">Activation count</option>
-              <option value="title">Title</option>
-            </select>
-          </label>
+          <div
+            id="filter-popover"
+            class="popover-dialog filter-popover"
+            popover
+            role="dialog"
+            aria-labelledby="filter-title"
+          >
+            <header>
+              <h3 id="filter-title">Filters</h3>
+            </header>
+            <div class="filter-options">
+              <label class="named-filter" hidden>
+                <input id="named-only-input" type="checkbox" />
+                <span>Named only</span>
+              </label>
+              <section
+                class="activation-count-filter"
+                aria-labelledby="activation-count-title"
+              >
+                <div class="activation-count-heading">
+                  <span id="activation-count-title">Activation count</span>
+                  <output id="activation-count-output"></output>
+                </div>
+                <div id="activation-count-range" class="dual-range activation-count-range">
+                  <input
+                    id="minimum-activation-count"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.001"
+                    value="0"
+                    aria-label="Minimum activation count"
+                  />
+                  <input
+                    id="maximum-activation-count"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.001"
+                    value="1"
+                    aria-label="Maximum activation count"
+                  />
+                </div>
+                <div class="activation-count-bounds" aria-hidden="true">
+                  <span id="minimum-activation-bound"></span>
+                  <span id="maximum-activation-bound"></span>
+                </div>
+              </section>
+            </div>
+          </div>
+
+          <div class="sort-group">
+            <label class="sort-control">
+              <span>Sort</span>
+              <select id="sort-select">
+                <option value="id">Feature ID</option>
+                <option value="count">Activation count</option>
+                <option value="title">Title</option>
+              </select>
+            </label>
+            <button
+              id="sort-direction-button"
+              class="sort-direction-button"
+              type="button"
+              aria-label="Reverse feature order"
+            ></button>
+          </div>
         </header>
 
         <div class="list-heading">
