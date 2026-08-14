@@ -26,7 +26,6 @@ const ui = {
   interventionMode: formFields.mode,
   amountLabel: sandboxForm.querySelector(".amount-label"),
   amountMultiplier: sandboxForm.querySelector(".amount-preset-control input"),
-  amountStepLabels: sandboxForm.querySelector(".amount-step-labels"),
   amountInput: formFields.amount,
   samplingSettings,
   samplingInputs: [...samplingSettings.querySelectorAll("input[type='number']")],
@@ -60,7 +59,7 @@ function renderGeneration(output, prompt, continuation) {
   output.classList.remove("is-loading");
   output.replaceChildren(
     element("span", "generation-prompt", prompt),
-    element("span", "generation-continuation", continuation || "(No visible text)"),
+    continuation || "(No visible text)",
   );
 }
 
@@ -135,6 +134,7 @@ function openFeature(featureId) {
   let details = document.getElementById(`feature-${featureId}`);
   if (!details) {
     ui.search.value = "";
+    resetActivationCountRange();
     renderFeatureList();
     details = document.getElementById(`feature-${featureId}`);
   }
@@ -181,21 +181,12 @@ function updateAmountMultiplierFromCustomValue() {
   updateAmountControl();
 }
 
-function samplingSettingsAreValid() {
-  const invalidInput = ui.samplingInputs.find((input) => !input.checkValidity());
-  if (!invalidInput) return true;
-  if (!ui.samplingSettings.matches(":popover-open")) {
-    ui.samplingSettings.showPopover();
-  }
-  invalidInput.reportValidity();
-  return false;
-}
-
 function addSynchronizedRange(input) {
   const range = input.cloneNode();
   range.type = "range";
   range.className = "progress-range";
   range.removeAttribute("id");
+  range.removeAttribute("form");
   range.removeAttribute("name");
   range.removeAttribute("required");
   range.setAttribute("aria-label", input.labels[0].textContent.trim());
@@ -217,14 +208,6 @@ function updateRangeProgress(range) {
   const progress = 100 * (Number(range.value) - Number(range.min))
     / (Number(range.max) - Number(range.min));
   range.style.setProperty("--range-progress", `${progress}%`);
-}
-
-for (
-  let value = Number(ui.amountMultiplier.min);
-  value <= Number(ui.amountMultiplier.max);
-  value += Number(ui.amountMultiplier.step)
-) {
-  ui.amountStepLabels.append(element("span", "", formatPercentage(value)));
 }
 
 ui.interventionMode.addEventListener("change", updateAmountControl);
@@ -249,9 +232,13 @@ ui.selectedFeatureTitle.addEventListener("click", (event) => {
   if (featureId !== null) openFeature(featureId);
 });
 ui.samplingInputs.forEach(addSynchronizedRange);
+ui.samplingSettings.addEventListener("invalid", () => {
+  if (!ui.samplingSettings.matches(":popover-open")) {
+    ui.samplingSettings.showPopover();
+  }
+}, true);
 ui.sandboxForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!samplingSettingsAreValid()) return;
   if (!ui.prompt.value.trim()) {
     ui.prompt.setCustomValidity("Enter a prompt to continue.");
     ui.prompt.reportValidity();
@@ -267,8 +254,8 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
 
   const request = Object.fromEntries(new FormData(ui.sandboxForm));
   request.feature_id = featureId;
-  for (const input of [ui.amountInput, ...ui.samplingInputs]) {
-    request[input.name] = input.valueAsNumber;
+  for (const input of ui.sandboxForm.elements) {
+    if (input.type === "number") request[input.name] = input.valueAsNumber;
   }
 
   const baselineKey = JSON.stringify([
@@ -308,10 +295,10 @@ updateAmountControl();
 
 function renderMetadata(metadata) {
   const items = [
-    ["Model", metadata.model_id || "-"],
-    ["Tokens", metadata.processed_tokens ? compactNumber.format(metadata.processed_tokens) : "-"],
-    ["Layer", metadata.layer_index ?? "-"],
-    ["SAE width", metadata.d_sae ? compactNumber.format(metadata.d_sae) : "-"],
+    ["Model", metadata.model_id],
+    ["Tokens", compactNumber.format(metadata.processed_tokens)],
+    ["Layer", metadata.layer_index],
+    ["SAE width", compactNumber.format(metadata.d_sae)],
   ];
 
   ui.metadata.replaceChildren();
@@ -357,30 +344,34 @@ function activationCountAt(position) {
   ));
 }
 
-function updateActivationCountRange(changedInput) {
-  if (ui.minimumActivationCount.valueAsNumber > ui.maximumActivationCount.valueAsNumber) {
-    if (changedInput === ui.minimumActivationCount) {
-      ui.maximumActivationCount.value = ui.minimumActivationCount.value;
-    } else {
-      ui.minimumActivationCount.value = ui.maximumActivationCount.value;
-    }
-  }
+function keepRangeOrdered(minimumInput, maximumInput, changedInput) {
+  if (minimumInput.valueAsNumber <= maximumInput.valueAsNumber) return;
+  const source = changedInput || maximumInput;
+  const target = source === minimumInput ? maximumInput : minimumInput;
+  target.value = source.value;
+}
 
+function updateActivationCountRange(changedInput) {
+  keepRangeOrdered(
+    ui.minimumActivationCount,
+    ui.maximumActivationCount,
+    changedInput,
+  );
   const minimumPosition = ui.minimumActivationCount.valueAsNumber;
   const maximumPosition = ui.maximumActivationCount.valueAsNumber;
   const selectedMinimum = activationCountAt(minimumPosition);
   const selectedMaximum = activationCountAt(maximumPosition);
-  ui.activationCountRange.style.setProperty(
-    "--range-start",
-    `${100 * minimumPosition}%`,
-  );
-  ui.activationCountRange.style.setProperty(
-    "--range-end",
-    `${100 * maximumPosition}%`,
-  );
+  ui.activationCountRange.style.setProperty("--range-start", `${100 * minimumPosition}%`);
+  ui.activationCountRange.style.setProperty("--range-end", `${100 * maximumPosition}%`);
   ui.activationCountOutput.value =
     `${selectedMinimum.toLocaleString()}–${selectedMaximum.toLocaleString()}`;
   ui.clearFiltersButton.disabled = minimumPosition === 0 && maximumPosition === 1;
+}
+
+function resetActivationCountRange() {
+  ui.minimumActivationCount.value = ui.minimumActivationCount.min;
+  ui.maximumActivationCount.value = ui.maximumActivationCount.max;
+  updateActivationCountRange();
 }
 
 function renderFeatureList() {
@@ -539,11 +530,7 @@ function renderDistribution(feature, counts) {
   let descending = true;
 
   function updateSelection(changedInput) {
-    if (Number(minimumInput.value) > Number(maximumInput.value)) {
-      if (changedInput === minimumInput) maximumInput.value = minimumInput.value;
-      else minimumInput.value = maximumInput.value;
-    }
-
+    keepRangeOrdered(minimumInput, maximumInput, changedInput);
     const minimumFraction = minimumInput.valueAsNumber;
     const maximumFraction = maximumInput.valueAsNumber;
     selector.style.setProperty("--range-start", `${100 * minimumFraction}%`);
@@ -647,9 +634,7 @@ for (const input of [ui.minimumActivationCount, ui.maximumActivationCount]) {
   input.addEventListener("change", renderFeatureList);
 }
 ui.clearFiltersButton.addEventListener("click", () => {
-  ui.minimumActivationCount.value = ui.minimumActivationCount.min;
-  ui.maximumActivationCount.value = ui.maximumActivationCount.max;
-  updateActivationCountRange();
+  resetActivationCountRange();
   renderFeatureList();
   ui.filterPopover.hidePopover();
 });

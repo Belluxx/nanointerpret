@@ -5,9 +5,10 @@ import json
 import math
 import re
 import threading
-from functools import lru_cache, partial
+from functools import cache, lru_cache, partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import parse_qs, urlsplit
 
 import numpy as np
@@ -16,7 +17,6 @@ from transformers import AutoTokenizer
 from src.data import load_analysis
 from src.interventions import InterventionGenerator, InterventionRequest
 from src.runtime import choose_device
-
 
 STATIC_DIR = Path(__file__).with_name("visualizer")
 FEATURE_ROUTE = re.compile(r"^/api/features/(\d+)$")
@@ -85,6 +85,14 @@ def load_titles(path: Path | None) -> dict[int, str | None]:
     return titles
 
 
+class FeatureContexts(NamedTuple):
+    token_positions: np.ndarray
+    activation_values: np.ndarray
+    group_starts: np.ndarray
+    peaks: np.ndarray
+    peak_order: np.ndarray
+
+
 class AnalysisData:
     def __init__(self, analysis_path: Path, names_path: Path | None, tokenizer=None):
         analysis = load_analysis(analysis_path)
@@ -93,7 +101,6 @@ class AnalysisData:
         self.feature_ptr = analysis.feature_ptr
         self.token_positions = analysis.token_positions
         self.values = analysis.values
-        self.feature_max = analysis.feature_max
 
         self.d_sae = len(self.feature_ptr) - 1
         self.context_size = int(self.metadata["context_size"])
@@ -108,7 +115,7 @@ class AnalysisData:
                 "id": int(feature_id),
                 "title": titles.get(int(feature_id)),
                 "activation_count": int(counts[feature_id]),
-                "max_activation": float(self.feature_max[feature_id]),
+                "max_activation": float(analysis.feature_max[feature_id]),
             }
             for feature_id in np.flatnonzero(counts)
         ]
@@ -124,7 +131,7 @@ class AnalysisData:
             "features": self.features,
         }
 
-    @lru_cache(maxsize=None)
+    @cache
     def decode_token(self, token_id: int) -> str:
         text = self.tokenizer.decode(
             [token_id],
@@ -136,7 +143,7 @@ class AnalysisData:
         return str(self.tokenizer.convert_ids_to_tokens(token_id))
 
     @lru_cache(maxsize=32)
-    def _context_data(self, feature_id: int) -> tuple:
+    def _feature_contexts(self, feature_id: int) -> FeatureContexts:
         if not 0 <= feature_id < self.d_sae:
             raise KeyError(feature_id)
 
@@ -147,11 +154,9 @@ class AnalysisData:
         token_positions = self.token_positions[start:stop]
         activation_values = self.values[start:stop]
         context_ids = token_positions // self.context_size
-        group_starts = np.concatenate(
-            ([0], np.flatnonzero(np.diff(context_ids)) + 1)
-        )
+        group_starts = np.concatenate(([0], np.flatnonzero(np.diff(context_ids)) + 1))
         peaks = np.maximum.reduceat(activation_values, group_starts)
-        return (
+        return FeatureContexts(
             token_positions,
             activation_values,
             group_starts,
@@ -159,50 +164,45 @@ class AnalysisData:
             np.argsort(peaks, kind="stable"),
         )
 
-    def _render_context(self, context_data: tuple, group_index: int) -> dict:
-        (
-            token_positions,
-            activation_values,
-            group_starts,
-            peaks,
-            _,
-        ) = context_data
-        activation_start = int(group_starts[group_index])
+    def _render_context(self, contexts: FeatureContexts, group_index: int) -> dict:
+        activation_start = int(contexts.group_starts[group_index])
         activation_stop = (
-            int(group_starts[group_index + 1])
-            if group_index + 1 < len(group_starts)
-            else len(token_positions)
+            int(contexts.group_starts[group_index + 1])
+            if group_index + 1 < len(contexts.group_starts)
+            else len(contexts.token_positions)
         )
-        context_id = int(token_positions[activation_start] // self.context_size)
+        context_id = int(
+            contexts.token_positions[activation_start] // self.context_size
+        )
         context_start = context_id * self.context_size
         context_stop = min(context_start + self.context_size, len(self.token_ids))
         token_slice = self.token_ids[context_start:context_stop]
 
-        positions = token_positions[activation_start:activation_stop] - context_start
+        positions = (
+            contexts.token_positions[activation_start:activation_stop] - context_start
+        )
         context_activations = np.zeros(len(token_slice), dtype=np.float32)
-        context_activations[positions] = activation_values[
+        context_activations[positions] = contexts.activation_values[
             activation_start:activation_stop
         ]
 
         return {
             "context_id": context_id,
-            "peak_activation": float(peaks[group_index]),
-            "activation_count": activation_stop - activation_start,
+            "peak_activation": float(contexts.peaks[group_index]),
             "tokens": [self.decode_token(int(token_id)) for token_id in token_slice],
             "activations": context_activations.tolist(),
         }
 
     def feature(self, feature_id: int) -> dict:
-        context_data = self._context_data(feature_id)
-        token_positions, activation_values, group_starts, peaks, _ = context_data
-        activating_token_ids = self.token_ids[token_positions]
+        contexts = self._feature_contexts(feature_id)
+        activating_token_ids = self.token_ids[contexts.token_positions]
 
         token_summaries = []
         for percentile in TOKEN_PERCENTILES:
-            target = np.percentile(activation_values, percentile)
+            target = np.percentile(contexts.activation_values, percentile)
             selected_token_ids = []
             for activation_index in np.argsort(
-                np.abs(activation_values - target), kind="stable"
+                np.abs(contexts.activation_values - target), kind="stable"
             ):
                 token_id = int(activating_token_ids[activation_index])
                 if token_id not in selected_token_ids:
@@ -214,57 +214,45 @@ class AnalysisData:
                 {
                     "percentile": percentile,
                     "tokens": [
-                        self.decode_token(token_id)
-                        for token_id in selected_token_ids
+                        self.decode_token(token_id) for token_id in selected_token_ids
                     ],
                 }
             )
 
-        maximum = float(peaks.max())
-        bin_count = min(ACTIVATION_HISTOGRAM_BINS, len(peaks))
-        histogram, _ = np.histogram(peaks, bins=bin_count, range=(0.0, maximum))
+        maximum = float(contexts.peaks.max())
+        bin_count = min(ACTIVATION_HISTOGRAM_BINS, len(contexts.peaks))
+        histogram, _ = np.histogram(
+            contexts.peaks, bins=bin_count, range=(0.0, maximum)
+        )
 
         return {
-            "activation_count": int(len(token_positions)),
-            "context_count": int(len(group_starts)),
+            "activation_count": len(contexts.token_positions),
+            "context_count": len(contexts.group_starts),
             "token_groups": token_summaries,
             "activation_histogram": histogram.tolist(),
         }
 
-    def range_contexts(
-        self, feature_id: int, minimum: float, maximum: float
-    ) -> dict:
-        context_data = self._context_data(feature_id)
-        _, _, _, peaks, peak_order = context_data
-        ordered_peaks = peaks[peak_order]
+    def range_contexts(self, feature_id: int, minimum: float, maximum: float) -> dict:
+        contexts = self._feature_contexts(feature_id)
+        ordered_peaks = contexts.peaks[contexts.peak_order]
         minimum = ordered_peaks.dtype.type(minimum)
         maximum = ordered_peaks.dtype.type(maximum)
         start = int(np.searchsorted(ordered_peaks, minimum, side="left"))
         stop = int(np.searchsorted(ordered_peaks, maximum, side="right"))
-        ordered = peak_order[start:stop]
+        ordered = contexts.peak_order[start:stop]
         matching_count = len(ordered)
         if matching_count > CONTEXT_LIMIT:
-            matching_peaks = peaks[ordered]
-            targets = np.linspace(matching_peaks[0], matching_peaks[-1], CONTEXT_LIMIT)
-            right = np.searchsorted(matching_peaks, targets).clip(0, matching_count - 1)
-            left = np.maximum(right - 1, 0)
-            nearest = np.where(
-                targets - matching_peaks[left]
-                <= matching_peaks[right] - targets,
-                left,
-                right,
+            sample_indices = np.linspace(
+                0, matching_count - 1, CONTEXT_LIMIT, dtype=int
             )
-            offsets = np.arange(CONTEXT_LIMIT)
-            nearest = np.minimum(nearest, matching_count - CONTEXT_LIMIT + offsets)
-            selected = np.maximum.accumulate(nearest - offsets) + offsets
-            ordered = ordered[selected]
+            ordered = ordered[sample_indices]
 
         ordered = ordered[::-1]
 
         return {
-            "matching_context_count": int(matching_count),
+            "matching_context_count": matching_count,
             "contexts": [
-                self._render_context(context_data, int(group_index))
+                self._render_context(contexts, int(group_index))
                 for group_index in ordered
             ],
         }
@@ -324,9 +312,7 @@ class VisualizerHandler(SimpleHTTPRequestHandler):
                         raise ValueError
                     if minimum > maximum:
                         raise ValueError
-                    payload = self.data.range_contexts(
-                        feature_id, minimum, maximum
-                    )
+                    payload = self.data.range_contexts(feature_id, minimum, maximum)
                 else:
                     payload = self.data.feature(feature_id)
             except (TypeError, ValueError):
@@ -358,9 +344,9 @@ class VisualizerHandler(SimpleHTTPRequestHandler):
             self.send_json(result)
 
     def send_json(self, payload: dict, status: int = 200) -> None:
-        content = json.dumps(
-            payload, ensure_ascii=False, separators=(",", ":")
-        ).encode("utf-8")
+        content = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode(
+            "utf-8"
+        )
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))
