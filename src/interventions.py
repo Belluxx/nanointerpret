@@ -116,6 +116,7 @@ class InterventionGenerator:
         self.sae = sae
         self.activation_scale = activation_scale
         self.device = device
+        self._baseline_cache: tuple[tuple, str, int] | None = None
 
     @classmethod
     def from_sae_dir(
@@ -175,9 +176,23 @@ class InterventionGenerator:
                 top_k=request.top_k,
             )
 
-        sampling_seed = torch.seed()
-        torch.manual_seed(sampling_seed)
-        baseline_ids = self.model.generate(**generation_args)
+        baseline_key = (
+            request.prompt,
+            request.max_new_tokens,
+            request.temperature,
+            request.top_p,
+            request.top_k,
+            request.repetition_penalty,
+        )
+        if self._baseline_cache is None or self._baseline_cache[0] != baseline_key:
+            sampling_seed = torch.seed()
+            torch.manual_seed(sampling_seed)
+            baseline_ids = self.model.generate(**generation_args)
+            baseline = self._decode_generation(baseline_ids[0], prompt_tokens)
+            self._baseline_cache = baseline_key, baseline, sampling_seed
+        else:
+            _, baseline, sampling_seed = self._baseline_cache
+
         torch.manual_seed(sampling_seed)
         with feature_intervention_hook(
             self.layer,
@@ -190,7 +205,7 @@ class InterventionGenerator:
             intervened_ids = self.model.generate(**generation_args)
 
         return {
-            "baseline": self._decode_generation(baseline_ids[0], prompt_tokens),
+            "baseline": baseline,
             "intervened": self._decode_generation(intervened_ids[0], prompt_tokens),
         }
 
