@@ -3,9 +3,30 @@ from __future__ import annotations
 import sys
 
 import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 ATTENTION_IMPLEMENTATION = "sdpa"
+
+
+def load_tokenizer(model_id: str, tokenizer=None):
+    tokenizer = tokenizer or AutoTokenizer.from_pretrained(model_id)
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    return tokenizer
+
+
+def load_causal_lm(
+    model_id: str,
+    dtype: torch.dtype,
+    device: torch.device,
+):
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        dtype=dtype,
+        attn_implementation=ATTENTION_IMPLEMENTATION,
+    ).to(device)
+    return model.eval().requires_grad_(False)
 
 
 def choose_device(requested: str) -> torch.device:

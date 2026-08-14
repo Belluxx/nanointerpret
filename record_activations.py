@@ -8,7 +8,6 @@ import numpy as np
 import torch
 from torch import Tensor
 from tqdm.auto import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src.data import (
     ANALYSIS_VALUE_DTYPE,
@@ -19,7 +18,7 @@ from src.data import (
     token_cache_paths,
 )
 from src.experiment import ResidualStreamCapture, find_transformer_layers
-from src.runtime import ATTENTION_IMPLEMENTATION, choose_device
+from src.runtime import choose_device, load_causal_lm, load_tokenizer
 from src.sae import FIRING_THRESHOLD, TopKSAE, load_sae
 
 
@@ -84,9 +83,9 @@ def evaluation_cache(config: dict, cache_dir: Path) -> tuple[Path, int] | None:
         train_tokens=int(config["train_tokens"]),
         validation_tokens=int(config["validation_tokens"]),
     )
-    train_path, validation_path, metadata_path = token_cache_paths(spec)
+    _, validation_path, _ = token_cache_paths(spec)
     if spec.validation_tokens <= 0 or not token_cache_is_valid(
-        train_path, validation_path, metadata_path, spec
+        spec, validation_only=True
     ):
         return None
     return validation_path, spec.validation_tokens
@@ -104,7 +103,7 @@ def encode_activations(
     for start in range(0, len(residuals), batch_size):
         x = residuals[start : start + batch_size].float()
         x.mul_(activation_scale)
-        _reconstruction, batch_indices, batch_values = sae(x)
+        batch_indices, batch_values, _pre_activations = sae.encode(x)
         indices.append(batch_indices.cpu())
         values.append(batch_values.cpu())
     indices = torch.cat(indices)
@@ -179,7 +178,7 @@ def write_analysis(
                 shuffle=False,
                 seed=0,
             )
-            for input_ids, attention_mask, _context_ids in batches:
+            for input_ids, attention_mask in batches:
                 device_input_ids = input_ids.to(device, non_blocking=True)
                 device_attention_mask = attention_mask.to(device, non_blocking=True)
                 residuals = capture(
@@ -272,15 +271,12 @@ def main() -> None:
         raise FileExistsError(f"analysis output already exists: {output_path}")
 
     device = choose_device(args.device)
-    tokenizer = AutoTokenizer.from_pretrained(config["model_id"])
-    if tokenizer.pad_token_id is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLM.from_pretrained(
+    tokenizer = load_tokenizer(config["model_id"])
+    model = load_causal_lm(
         config["model_id"],
-        dtype=getattr(torch, config["model_dtype"]),
-        attn_implementation=ATTENTION_IMPLEMENTATION,
-    ).to(device)
-    model.eval().requires_grad_(False)
+        getattr(torch, config["model_dtype"]),
+        device,
+    )
     _layer_path, layers = find_transformer_layers(model)
     layer_index = int(config["layer_index"])
     if not 0 <= layer_index < len(layers):

@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 from dataclasses import asdict
 from functools import partial
 from pathlib import Path
 
 import numpy as np
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src.data import (
     RESIDUAL_CACHE_FORMATS,
@@ -27,14 +25,13 @@ from src.experiment import (
     capture_residual_cache,
     default_aux_k,
     estimate_activation_normalization,
-    evaluate_sae,
     find_transformer_layers,
     format_metrics_line,
     iter_captured_residual_batches,
     train_sae,
 )
 from src.misc import experiment_output_dir
-from src.runtime import ATTENTION_IMPLEMENTATION, choose_device
+from src.runtime import choose_device, load_causal_lm, load_tokenizer
 from src.sae import TopKSAE
 
 MODEL_ID = "google/gemma-3-270m"
@@ -78,20 +75,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def seed_everything(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-
-
 def load_capture_inputs(
     args: argparse.Namespace,
     device: torch.device,
     model_dtype: torch.dtype,
 ) -> tuple:
-    tokenizer = AutoTokenizer.from_pretrained(args.model_id)
-    if tokenizer.pad_token_id is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer = load_tokenizer(args.model_id)
     token_spec = TokenCacheSpec(
         cache_dir=args.cache_dir,
         model_id=args.model_id,
@@ -104,12 +93,11 @@ def load_capture_inputs(
     train_tokens = np.memmap(train_path, mode="r", dtype=np.uint32)
     validation_tokens = np.memmap(validation_path, mode="r", dtype=np.uint32)
 
-    model = AutoModelForCausalLM.from_pretrained(
+    model = load_causal_lm(
         args.model_id,
-        dtype=model_dtype,
-        attn_implementation=ATTENTION_IMPLEMENTATION,
-    ).to(device)
-    model.eval().requires_grad_(False)
+        model_dtype,
+        device,
+    )
     layer_path, layers = find_transformer_layers(model)
     layer_index = (
         len(layers) // 2 if args.activation_layer is None else args.activation_layer
@@ -150,7 +138,8 @@ def build_residual_cache(
             validation_tokens,
             tokenizer.pad_token_id,
             device,
-            args,
+            args.context_size,
+            args.model_batch_size,
             cache_paths,
             metadata,
         )
@@ -189,6 +178,7 @@ def run_training(
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     checkpoint_path = args.output_dir / "checkpoint.pt"
+    final_path = args.output_dir / "sae_final.pt"
     if args.resume:
         checkpoint = torch.load(
             checkpoint_path, map_location="cpu", weights_only=False
@@ -200,6 +190,10 @@ def run_training(
             f"from {checkpoint_path}"
         )
     else:
+        if final_path.exists():
+            raise FileExistsError(
+                f"{final_path} already exists; choose another --output-dir"
+            )
         if checkpoint_path.exists():
             raise FileExistsError(
                 f"{checkpoint_path} already exists; pass --resume or choose another "
@@ -210,7 +204,8 @@ def run_training(
             args.train_tokens,
             d_model,
             device,
-            args,
+            args.normalization_tokens,
+            args.subtract_pre_bias,
         )
     config = ExperimentConfig(
         model_id=args.model_id,
@@ -248,13 +243,16 @@ def run_training(
     if initial_pre_bias is not None:
         with torch.no_grad():
             sae.decoder_bias.copy_(initial_pre_bias)
-    _, evaluation = train_sae(
+    evaluation = train_sae(
         sae,
         train_batches,
         validation_batches,
         device,
-        args,
         config,
+        args.output_dir,
+        args.resume,
+        args.log_every,
+        args.checkpoint_every,
     )
     from src.plot import save_feature_density_plot, save_training_plot
 
@@ -267,22 +265,16 @@ def run_training(
         args.output_dir / "validation_feature_density.png",
     )
 
-    if evaluation is None:
-        evaluation = evaluate_sae(
-            sae,
-            validation_batches,
-            device,
-            config,
-        )
     (args.output_dir / "validation_metrics.json").write_text(
         json.dumps(evaluation, indent=2, sort_keys=True) + "\n"
     )
+    checkpoint_path.unlink(missing_ok=True)
     print(format_metrics_line(evaluation))
 
 
 def main() -> None:
     args = parse_args()
-    seed_everything(args.seed)
+    torch.manual_seed(args.seed)
     device = choose_device(args.device)
     model_dtype = getattr(torch, args.model_dtype)
 

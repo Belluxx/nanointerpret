@@ -44,15 +44,19 @@ class TopKSAE(nn.Module):
             reconstruction = reconstruction + self.decoder_bias
         return reconstruction
 
-    def forward_with_pre_activations(
-        self, x: Tensor
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    def encode(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         if self.subtract_pre_bias:
             x = x - self.decoder_bias
         pre_activations = x @ self.encoder_weight + self.encoder_bias
         values, indices = torch.topk(
             F.relu(pre_activations), self.k, dim=-1, sorted=False
         )
+        return indices, values, pre_activations
+
+    def forward_with_pre_activations(
+        self, x: Tensor
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        indices, values, pre_activations = self.encode(x)
         reconstruction = self.decode(indices, values)
         return reconstruction, indices, values, pre_activations
 
@@ -140,7 +144,7 @@ class RunningMetrics:
         indices: Tensor,
         values: Tensor,
         auxk_loss: Tensor | None = None,
-    ) -> Tensor:
+    ) -> None:
         error = x - reconstruction
         self.count += x.shape[0]
         firing = values > FIRING_THRESHOLD
@@ -148,15 +152,12 @@ class RunningMetrics:
         self.x_sq_sum += x.square().sum(dim=0)
         self.error_sq_sum += error.square().sum(dim=0)
         positive_indices = indices[firing]
-        batch_fire_counts = torch.zeros_like(self.feature_fire_counts)
-        batch_fire_counts.scatter_add_(
+        self.feature_fire_counts.scatter_add_(
             0, positive_indices, torch.ones_like(positive_indices, dtype=torch.float32)
         )
-        self.feature_fire_counts += batch_fire_counts
         if auxk_loss is not None:
             self.auxk_loss_sum += auxk_loss.detach() * x.shape[0]
             self.auxk_token_count += x.shape[0]
-        return batch_fire_counts
 
     @torch.no_grad()
     def compute(self) -> dict[str, float | None]:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import json
 import math
 import os
@@ -222,7 +221,7 @@ def iter_captured_residual_batches(
         seed=seed,
         skip_contexts=skip_batches * model_batch_size,
     )
-    for input_ids, attention_mask, _context_ids in batches:
+    for input_ids, attention_mask in batches:
         batch_tokens = int(attention_mask.sum())
         yield capture_residual_batch(
             model, capture, input_ids, attention_mask, batch_tokens, device
@@ -237,7 +236,8 @@ def capture_residual_cache(
     validation_tokens: np.memmap,
     pad_token_id: int,
     device: torch.device,
-    args: argparse.Namespace,
+    context_size: int,
+    model_batch_size: int,
     cache_paths: tuple[Path, Path, Path],
     metadata: dict,
 ) -> None:
@@ -262,13 +262,13 @@ def capture_residual_cache(
         written = 0
         batches = iter_context_batches(
             tokens,
-            args.context_size,
-            args.model_batch_size,
+            context_size,
+            model_batch_size,
             pad_token_id,
             shuffle=False,
             seed=0,
         )
-        for input_ids, attention_mask, _context_ids in batches:
+        for input_ids, attention_mask in batches:
             batch_tokens = int(attention_mask.sum())
             residual = capture_residual_batch(
                 model, capture, input_ids, attention_mask, batch_tokens, device
@@ -382,9 +382,10 @@ def estimate_activation_normalization(
     train_token_count: int,
     d_model: int,
     device: torch.device,
-    args: argparse.Namespace,
+    normalization_tokens: int,
+    subtract_pre_bias: bool,
 ) -> tuple[float, Tensor | None]:
-    target_tokens = min(args.normalization_tokens, train_token_count)
+    target_tokens = min(normalization_tokens, train_token_count)
     tokens_seen = 0
     squared_norm_sum = 0.0
     pre_bias = None
@@ -399,7 +400,7 @@ def estimate_activation_normalization(
         residual = residual.to(device=device, dtype=torch.float32)
         take = min(len(residual), target_tokens - tokens_seen)
         calibration_residual = residual[:take]
-        if args.subtract_pre_bias and pre_bias is None:
+        if subtract_pre_bias and pre_bias is None:
             pre_bias = geometric_median(calibration_residual)
         squared_norm_sum += calibration_residual.square().sum().item()
         tokens_seen += take
@@ -420,14 +421,17 @@ def train_sae(
     train_batches: ResidualBatchFactory,
     validation_batches: ResidualBatchFactory,
     device: torch.device,
-    args: argparse.Namespace,
     config: ExperimentConfig,
-) -> tuple[int, dict | None]:
+    output_dir: Path,
+    resume: bool,
+    log_every: int,
+    checkpoint_every: int,
+) -> dict:
     optimizer = torch.optim.Adam(sae.parameters(), lr=config.learning_rate)
-    checkpoint_path = args.output_dir / "checkpoint.pt"
-    metrics_path = args.output_dir / "train_metrics.jsonl"
-    checkpoint_metrics_path = args.output_dir / "checkpoint_metrics.jsonl"
-    if args.resume:
+    checkpoint_path = output_dir / "checkpoint.pt"
+    metrics_path = output_dir / "train_metrics.jsonl"
+    checkpoint_metrics_path = output_dir / "checkpoint_metrics.jsonl"
+    if resume:
         checkpoint = torch.load(
             checkpoint_path, map_location=device, weights_only=False
         )
@@ -451,7 +455,7 @@ def train_sae(
                 (sae.d_sae,), -1, dtype=torch.int64, device=device
             ),
         )
-    (args.output_dir / "config.json").write_text(
+    (output_dir / "config.json").write_text(
         json.dumps(asdict(config), indent=2) + "\n"
     )
     latest_evaluation = None
@@ -475,7 +479,7 @@ def train_sae(
         tqdm.write(format_metrics_line(checkpoint_record))
         return evaluation
 
-    if args.resume:
+    if resume:
         latest_evaluation = load_checkpoint_evaluation(
             checkpoint_metrics_path, state.processed_tokens
         )
@@ -483,10 +487,10 @@ def train_sae(
             latest_evaluation = evaluate_checkpoint()
 
     metrics = RunningMetrics(sae.d_model, sae.d_sae, device)
-    next_log = ((state.processed_tokens // args.log_every) + 1) * args.log_every
+    next_log = ((state.processed_tokens // log_every) + 1) * log_every
     next_checkpoint = (
-        (state.processed_tokens // args.checkpoint_every) + 1
-    ) * args.checkpoint_every
+        (state.processed_tokens // checkpoint_every) + 1
+    ) * checkpoint_every
     progress = tqdm(
         total=config.train_tokens,
         initial=state.processed_tokens,
@@ -504,6 +508,7 @@ def train_sae(
         residual = residual.to(device=device, dtype=torch.float32)
         residual.mul_(config.activation_scale)
         batch_tokens = len(residual)
+        torch.manual_seed(config.seed + state.processed_batches)
         permutation = torch.randperm(len(residual), device=residual.device)
         residual = residual[permutation]
 
@@ -552,7 +557,7 @@ def train_sae(
                 )
             metrics.reset()
             while next_log <= state.processed_tokens:
-                next_log += args.log_every
+                next_log += log_every
 
         if (
             state.processed_tokens >= next_checkpoint
@@ -561,15 +566,15 @@ def train_sae(
             save_checkpoint(checkpoint_path, sae, optimizer, state, config)
             latest_evaluation = evaluate_checkpoint()
             while next_checkpoint <= state.processed_tokens:
-                next_checkpoint += args.checkpoint_every
+                next_checkpoint += checkpoint_every
 
     metric_status.close()
     progress.close()
     torch.save(
         {"sae": sae.state_dict()},
-        args.output_dir / "sae_final.pt",
+        output_dir / "sae_final.pt",
     )
-    return state.processed_tokens, latest_evaluation
+    return latest_evaluation
 
 
 @torch.inference_mode()

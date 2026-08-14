@@ -6,12 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor, nn
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from .experiment import find_transformer_layers
-from .runtime import ATTENTION_IMPLEMENTATION
+from .runtime import load_causal_lm, load_tokenizer
 from .sae import TopKSAE, load_sae
 
 
@@ -33,10 +31,7 @@ def _feature_activation(
 ) -> Tensor:
     shape = normalized_residual.shape[:-1]
     x = normalized_residual.reshape(-1, sae.d_model)
-    if sae.subtract_pre_bias:
-        x = x - sae.decoder_bias
-    pre_activations = x @ sae.encoder_weight + sae.encoder_bias
-    values, indices = torch.topk(F.relu(pre_activations), sae.k, dim=-1, sorted=False)
+    indices, values, _pre_activations = sae.encode(x)
     activation = (values * (indices == feature_id)).sum(dim=-1)
     return activation.reshape(shape)
 
@@ -131,15 +126,12 @@ class InterventionGenerator:
             raise FileNotFoundError(f"SAE configuration not found: {config_path}")
         config = json.loads(config_path.read_text())
 
-        tokenizer = tokenizer or AutoTokenizer.from_pretrained(config["model_id"])
-        if tokenizer.pad_token_id is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        model = AutoModelForCausalLM.from_pretrained(
+        tokenizer = load_tokenizer(config["model_id"], tokenizer)
+        model = load_causal_lm(
             config["model_id"],
-            dtype=getattr(torch, config["model_dtype"]),
-            attn_implementation=ATTENTION_IMPLEMENTATION,
-        ).to(device)
-        model.eval().requires_grad_(False)
+            getattr(torch, config["model_dtype"]),
+            device,
+        )
 
         _layer_path, layers = find_transformer_layers(model)
         layer_index = int(config["layer_index"])

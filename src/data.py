@@ -176,8 +176,10 @@ def save_analysis(
 
 def token_cache_paths(spec: TokenCacheSpec) -> tuple[Path, Path, Path]:
     safe_model = spec.model_id.replace("/", "--")
+    safe_dataset = spec.dataset_id.replace("/", "--")
+    safe_config = spec.dataset_config.replace("/", "--")
     stem = (
-        f"{safe_model}_{spec.dataset_config}_{spec.train_tokens}_"
+        f"{safe_model}_{safe_dataset}_{safe_config}_{spec.train_tokens}_"
         f"{spec.validation_tokens}"
     )
     return (
@@ -269,12 +271,13 @@ def load_residual_cache_metadata(spec: ResidualCacheSpec) -> dict | None:
 
 
 def token_cache_is_valid(
-    train_path: Path,
-    validation_path: Path,
-    metadata_path: Path,
-    spec: TokenCacheSpec,
+    spec: TokenCacheSpec, *, validation_only: bool = False
 ) -> bool:
-    if not (train_path.exists() and validation_path.exists() and metadata_path.exists()):
+    train_path, validation_path, metadata_path = token_cache_paths(spec)
+    required_paths = (validation_path, metadata_path)
+    if not validation_only:
+        required_paths += (train_path,)
+    if not all(path.exists() for path in required_paths):
         return False
     metadata = json.loads(metadata_path.read_text())
 
@@ -283,15 +286,18 @@ def token_cache_is_valid(
     item_size = np.dtype(np.uint32).itemsize
     return (
         all(metadata.get(key) == value for key, value in expected.items())
-        and train_path.stat().st_size == spec.train_tokens * item_size
         and validation_path.stat().st_size == spec.validation_tokens * item_size
+        and (
+            validation_only
+            or train_path.stat().st_size == spec.train_tokens * item_size
+        )
     )
 
 
 def build_token_cache(tokenizer, spec: TokenCacheSpec) -> tuple[Path, Path]:
     train_path, validation_path, metadata_path = token_cache_paths(spec)
     spec.cache_dir.mkdir(parents=True, exist_ok=True)
-    if token_cache_is_valid(train_path, validation_path, metadata_path, spec):
+    if token_cache_is_valid(spec):
         print(f"using token cache at {spec.cache_dir}")
         return train_path, validation_path
 
@@ -371,7 +377,7 @@ def iter_context_batches(
     shuffle: bool,
     seed: int,
     skip_contexts: int = 0,
-) -> Iterator[tuple[Tensor, Tensor, np.ndarray]]:
+) -> Iterator[tuple[Tensor, Tensor]]:
     context_count = math.ceil(len(tokens) / context_size)
     order = np.arange(context_count)
     if shuffle:
@@ -388,7 +394,7 @@ def iter_context_batches(
             length = end - start
             input_ids[row, :length] = tokens[start:end]
             attention_mask[row, :length] = 1
-        yield torch.from_numpy(input_ids), torch.from_numpy(attention_mask), context_ids
+        yield torch.from_numpy(input_ids), torch.from_numpy(attention_mask)
 
 
 def iter_residual_batches(
