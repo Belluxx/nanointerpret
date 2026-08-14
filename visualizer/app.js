@@ -33,6 +33,7 @@ let features = [];
 let featuresById = new Map();
 let featureCount = 0;
 let amountIsCustom = false;
+let renderedBaselineKey = null;
 
 const DEFAULT_CONTEXT_RANGE_START = 0.7;
 const CONTEXT_LOAD_DELAY_MS = 120;
@@ -46,10 +47,19 @@ function element(tag, className, text) {
 }
 
 function renderGeneration(output, prompt, continuation) {
+  output.classList.remove("is-loading");
   output.replaceChildren(
     element("span", "generation-prompt", prompt),
     element("span", "generation-continuation", continuation || "(No visible text)"),
   );
+}
+
+function renderGenerationLoading(output) {
+  const spinner = element("span", "generation-spinner");
+  spinner.setAttribute("role", "status");
+  spinner.setAttribute("aria-label", "Generating");
+  output.classList.add("is-loading");
+  output.replaceChildren(spinner);
 }
 
 const compactNumber = new Intl.NumberFormat("en", {
@@ -251,10 +261,19 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
     request[input.name] = input.valueAsNumber;
   }
 
+  const baselineKey = JSON.stringify([
+    request.prompt,
+    ...ui.samplingInputs.map((input) => request[input.name]),
+  ]);
+  if (baselineKey !== renderedBaselineKey) {
+    renderGenerationLoading(ui.baselineOutput);
+  }
+  renderGenerationLoading(ui.intervenedOutput);
+  ui.generationResults.hidden = false;
+
   ui.generateButton.disabled = true;
   ui.generateButton.textContent = "Generating...";
   ui.sandboxForm.querySelector(".sandbox-error")?.remove();
-  ui.generationResults.hidden = true;
   try {
     const payload = await fetchJson("/api/interventions/generate", {
       method: "POST",
@@ -263,8 +282,10 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
     });
     renderGeneration(ui.baselineOutput, request.prompt, payload.baseline);
     renderGeneration(ui.intervenedOutput, request.prompt, payload.intervened);
-    ui.generationResults.hidden = false;
+    renderedBaselineKey = baselineKey;
   } catch (error) {
+    renderedBaselineKey = null;
+    ui.generationResults.hidden = true;
     const message = element("span", "sandbox-error", `Could not generate: ${error.message}`);
     message.setAttribute("role", "alert");
     ui.generateButton.after(message);
