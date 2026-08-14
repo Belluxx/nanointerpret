@@ -31,7 +31,7 @@ def _feature_activation(
 ) -> Tensor:
     shape = normalized_residual.shape[:-1]
     x = normalized_residual.reshape(-1, sae.d_model)
-    indices, values, _pre_activations = sae.encode(x)
+    indices, values = sae.encode(x)
     activation = (values * (indices == feature_id)).sum(dim=-1)
     return activation.reshape(shape)
 

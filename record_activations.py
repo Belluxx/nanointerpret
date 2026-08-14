@@ -103,7 +103,7 @@ def encode_activations(
     for start in range(0, len(residuals), batch_size):
         x = residuals[start : start + batch_size].float()
         x.mul_(activation_scale)
-        batch_indices, batch_values, _pre_activations = sae.encode(x)
+        batch_indices, batch_values = sae.encode(x)
         indices.append(batch_indices.cpu())
         values.append(batch_values.cpu())
     indices = torch.cat(indices)
