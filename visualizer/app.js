@@ -6,8 +6,6 @@ const ui = {
   list: document.querySelector("#feature-list"),
   count: document.querySelector("#result-count"),
   search: document.querySelector("#search-input"),
-  namedFilter: document.querySelector(".named-filter"),
-  namedOnly: document.querySelector("#named-only-input"),
   activationCountRange: document.querySelector("#activation-count-range"),
   minimumActivationCount: document.querySelector("#minimum-activation-count"),
   maximumActivationCount: document.querySelector("#maximum-activation-count"),
@@ -337,7 +335,6 @@ function visibleFeatures() {
     ui.maximumActivationCount.valueAsNumber,
   );
   const visible = features.filter((feature) => {
-    if (ui.namedOnly.checked && !feature.title) return false;
     if (
       feature.activation_count < selectedMinimumActivationCount
       || feature.activation_count > selectedMaximumActivationCount
@@ -642,7 +639,6 @@ ui.search.addEventListener("input", () => {
   cancelAnimationFrame(renderFrame);
   renderFrame = requestAnimationFrame(renderFeatureList);
 });
-ui.namedOnly.addEventListener("change", renderFeatureList);
 for (const input of [ui.minimumActivationCount, ui.maximumActivationCount]) {
   input.addEventListener("input", () => updateActivationCountRange(input));
   input.addEventListener("change", renderFeatureList);
@@ -664,7 +660,6 @@ async function initialize() {
   try {
     const payload = await fetchJson("/api/summary");
     features = payload.features;
-    const hasFeatureNames = features.some((feature) => feature.title);
     const activationCounts = features.map((feature) => feature.activation_count);
     minimumActivationCount = activationCounts.length
       ? Math.min(...activationCounts)
@@ -674,8 +669,6 @@ async function initialize() {
       : 0;
     ui.minimumActivationBound.textContent = minimumActivationCount.toLocaleString();
     ui.maximumActivationBound.textContent = maximumActivationCount.toLocaleString();
-    ui.namedFilter.hidden = !hasFeatureNames;
-    ui.namedOnly.checked = hasFeatureNames;
     renderMetadata(payload.metadata);
     initializeSandbox(payload.metadata);
     updateActivationCountRange();

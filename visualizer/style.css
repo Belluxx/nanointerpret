@@ -559,14 +559,6 @@ input.progress-range::-moz-range-thumb,
   min-width: 200px;
 }
 
-.toolbar input[type="checkbox"] {
-  width: 15px;
-  height: 15px;
-  margin: 0;
-  padding: 0;
-  accent-color: var(--accent);
-}
-
 .filter-button {
   display: grid;
   place-items: center;
@@ -578,7 +570,6 @@ input.progress-range::-moz-range-thumb,
   anchor-name: --filter-button;
 }
 
-.toolbar:has(#named-only-input:checked) .filter-button,
 .toolbar:has(.filter-popover:popover-open) .filter-button {
   border-color: var(--accent);
   color: var(--on-accent);
@@ -612,10 +603,6 @@ input.progress-range::-moz-range-thumb,
   padding: 14px;
 }
 
-.named-filter {
-  white-space: nowrap;
-}
-
 .sort-group {
   display: flex;
   align-items: center;
@@ -642,11 +629,6 @@ input.progress-range::-moz-range-thumb,
 .sort-direction-button:focus-visible {
   outline: 2px solid var(--text);
   outline-offset: -2px;
-}
-
-.named-filter:not([hidden]) + .activation-count-filter {
-  padding-top: 14px;
-  border-top: 1px solid var(--soft-line);
 }
 
 .activation-count-heading,
