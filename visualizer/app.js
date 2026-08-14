@@ -6,6 +6,7 @@ const ui = {
   list: document.querySelector("#feature-list"),
   count: document.querySelector("#result-count"),
   search: document.querySelector("#search-input"),
+  filterPopover: document.querySelector("#filter-popover"),
   clearFiltersButton: document.querySelector("#clear-filters-button"),
   activationCountRange: document.querySelector("#activation-count-range"),
   minimumActivationCount: document.querySelector("#minimum-activation-count"),
@@ -650,6 +651,7 @@ ui.clearFiltersButton.addEventListener("click", () => {
   ui.maximumActivationCount.value = ui.maximumActivationCount.max;
   updateActivationCountRange();
   renderFeatureList();
+  ui.filterPopover.hidePopover();
 });
 ui.sort.addEventListener("change", renderFeatureList);
 ui.sortDirection.addEventListener("click", () => {
