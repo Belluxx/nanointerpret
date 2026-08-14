@@ -405,7 +405,7 @@ function renderFeatureList() {
         "feature-stat",
         feature.activation_count.toLocaleString(),
       ),
-      element("span", "chevron", "›"),
+      element("span", "chevron"),
     );
     details.append(summary, element("div", "feature-body"));
     details.addEventListener("toggle", () => {
@@ -426,7 +426,7 @@ function renderContext(context, feature) {
     element(
       "span",
       "context-stats",
-      `Peak ${formatActivation(context.peak_activation)}, ${context.activation_count.toLocaleString()} active tokens`,
+      `Peak ${formatActivation(context.peak_activation)}`,
     ),
   );
 
@@ -527,7 +527,7 @@ function renderDistribution(feature, counts) {
   const orderLabel = element("span");
   const results = element("div", "contexts");
   panel.append(
-    element("h3", "range-heading", "Context peak distribution"),
+    element("h3", "range-heading", "Distribution of activation peaks"),
     plot,
     selector,
     resultCount,

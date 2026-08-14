@@ -307,6 +307,63 @@ input.progress-range::-moz-range-thumb,
   padding: 16px 18px 18px;
 }
 
+.intervention-info {
+  margin-bottom: 16px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+}
+
+.intervention-info > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 13px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  list-style: none;
+  text-transform: uppercase;
+}
+
+.intervention-info > summary::-webkit-details-marker {
+  display: none;
+}
+
+.intervention-info > summary:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
+}
+
+.intervention-info ol {
+  display: grid;
+  max-width: 80ch;
+  gap: 7px;
+  margin: 0;
+  padding: 0 13px 13px 38px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.intervention-info li::marker {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.intervention-info ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.intervention-info strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .intervention-form textarea,
 .intervention-form input:not([type="range"]),
 .intervention-form select,
@@ -799,16 +856,20 @@ input.progress-range::-moz-range-thumb,
 }
 
 .chevron {
-  display: grid;
-  align-self: stretch;
-  place-items: center;
+  width: 8px;
+  height: 8px;
+  align-self: center;
+  justify-self: center;
+  border-right: 2px solid;
+  border-bottom: 2px solid;
   color: var(--muted);
-  font-size: 22px;
+  transform: rotate(-45deg);
 }
 
-.feature[open] .chevron {
+.feature[open] .chevron,
+.intervention-info[open] .chevron {
   color: var(--accent);
-  transform: rotate(90deg);
+  transform: rotate(45deg);
 }
 
 .feature-body {
