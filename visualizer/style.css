@@ -570,6 +570,7 @@ input.progress-range::-moz-range-thumb,
   anchor-name: --filter-button;
 }
 
+.toolbar:has(#clear-filters-button:not(:disabled)) .filter-button,
 .toolbar:has(.filter-popover:popover-open) .filter-button {
   border-color: var(--accent);
   color: var(--on-accent);
@@ -601,6 +602,28 @@ input.progress-range::-moz-range-thumb,
   display: grid;
   gap: 14px;
   padding: 14px;
+}
+
+.clear-filters-button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  font-size: 9px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.clear-filters-button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.clear-filters-button:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
 }
 
 .sort-group {

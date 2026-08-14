@@ -6,6 +6,7 @@ const ui = {
   list: document.querySelector("#feature-list"),
   count: document.querySelector("#result-count"),
   search: document.querySelector("#search-input"),
+  clearFiltersButton: document.querySelector("#clear-filters-button"),
   activationCountRange: document.querySelector("#activation-count-range"),
   minimumActivationCount: document.querySelector("#minimum-activation-count"),
   maximumActivationCount: document.querySelector("#maximum-activation-count"),
@@ -378,6 +379,7 @@ function updateActivationCountRange(changedInput) {
   );
   ui.activationCountOutput.value =
     `${selectedMinimum.toLocaleString()}–${selectedMaximum.toLocaleString()}`;
+  ui.clearFiltersButton.disabled = minimumPosition === 0 && maximumPosition === 1;
 }
 
 function renderFeatureList() {
@@ -643,6 +645,12 @@ for (const input of [ui.minimumActivationCount, ui.maximumActivationCount]) {
   input.addEventListener("input", () => updateActivationCountRange(input));
   input.addEventListener("change", renderFeatureList);
 }
+ui.clearFiltersButton.addEventListener("click", () => {
+  ui.minimumActivationCount.value = ui.minimumActivationCount.min;
+  ui.maximumActivationCount.value = ui.maximumActivationCount.max;
+  updateActivationCountRange();
+  renderFeatureList();
+});
 ui.sort.addEventListener("change", renderFeatureList);
 ui.sortDirection.addEventListener("click", () => {
   reverseFeatureOrder = !reverseFeatureOrder;
