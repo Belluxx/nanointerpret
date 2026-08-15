@@ -12,6 +12,7 @@ Minimal training and feature interpretability analysis of LLMs with sparse autoe
 - `docs/overview.md`: brief notes on activation layer, width multiplier, and K.
 - `src/data.py`: token/residual-cache validation and batching.
 - `src/experiment.py`: residual-cache capture, normalization, training, evaluation, metrics, and checkpoints.
+- `src/interventions.py`: helper for additive steering and clamping used in visualizer interventions.
 - `src/misc.py`: generic helper functions/utils.
 - `src/plot.py`: training and feature-density plots.
 - `src/runtime.py`: PyTorch device selection.
