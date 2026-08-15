@@ -1,13 +1,10 @@
 # Gemma 3 270M
 
-> [!WARNING]
-> Gemma 3 models are gated on Hugging Face. Before running the commands below you need to accept Google's usage license on the [model page](https://huggingface.co/google/gemma-3-270m). Then run `hf auth login` to login.
-
 1. Train the SAE:
 
 ```sh
 python3 train.py \
-  --model-id google/gemma-3-270m \
+  --model-id unsloth/gemma-3-270m \
   --activation-layer 9 \
   --width-multiplier 16 \
   --k 16 \
