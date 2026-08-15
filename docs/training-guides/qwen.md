@@ -26,7 +26,7 @@ python3 record_activations.py --sae-dir artifacts/qwen3_1.7b_l14_w16_k16_500m
 # Around $6-$16 in API cost for 32K features
 
 python3 interpret_features.py \
-  --analysis artifacts/qwen3_1.7b_l14_w16_k16_500m/analysis \
+  --activations artifacts/qwen3_1.7b_l14_w16_k16_500m/activations \
   --base-url https://openrouter.ai/api/v1 \
   --api-key "[API_KEY]" \
   --model openai/gpt-5.6-luna \
@@ -40,7 +40,7 @@ python3 interpret_features.py \
 4. Browse the features and their activation contexts:
 
 ```sh
-python3 visualize.py --analysis artifacts/qwen3_1.7b_l14_w16_k16_500m/analysis
+python3 visualize.py --activations artifacts/qwen3_1.7b_l14_w16_k16_500m/activations
 ```
 
 Then open [http://127.0.0.1:8000](http://127.0.0.1:8000).

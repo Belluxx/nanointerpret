@@ -15,7 +15,7 @@ from openai import APIConnectionError, APIStatusError, OpenAI
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
 
-from src.data import load_analysis
+from src.data import load_activations
 
 
 MAX_RETRIES = 3
@@ -58,8 +58,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--api-key", help="API key. Default: OPENAI_API_KEY, or 'not-needed' if unset.")
-    parser.add_argument("--analysis", type=Path, required=True)
-    parser.add_argument("--output", type=Path, help="Output JSONL path. Default: next to the analysis artifact.")
+    parser.add_argument("--activations", type=Path, required=True)
+    parser.add_argument("--output", type=Path, help="Output JSONL path. Default: next to the activation data.")
     parser.add_argument("--feature-ids", type=nonnegative_int, nargs="+", help="Interpret only these features. Default: every SAE feature.")
     parser.add_argument("--no-reasoning", action="store_true", help="Disable model reasoning. Reasoning is enabled by default.")
     parser.add_argument("--max-tokens", type=positive_int, help="Completion-token budget. Default: 32768, or 64 with --no-reasoning.")
@@ -335,7 +335,7 @@ def resume_progress(temporary: Path, requested: list[int]) -> tuple[int, int]:
 
 def main() -> None:
     args = parse_args()
-    output_path = args.output or args.analysis.with_name("feature_names.jsonl")
+    output_path = args.output or args.activations.with_name("feature_names.jsonl")
     client = OpenAI(
         base_url=args.base_url,
         api_key=args.api_key or os.environ.get("OPENAI_API_KEY") or "not-needed",
@@ -343,9 +343,9 @@ def main() -> None:
         max_retries=0,
     )
 
-    analysis = load_analysis(args.analysis)
-    d_sae = len(analysis.feature_ptr) - 1
-    context_size = int(analysis.metadata["context_size"])
+    activations = load_activations(args.activations)
+    d_sae = len(activations.feature_ptr) - 1
+    context_size = int(activations.metadata["context_size"])
     requested = list(args.feature_ids or range(d_sae))
     invalid = next(
         (feature_id for feature_id in requested if feature_id >= d_sae), None
@@ -353,19 +353,21 @@ def main() -> None:
     if invalid is not None:
         raise ValueError(f"feature IDs must be below {d_sae}; got {invalid}")
 
-    tokenizer = AutoTokenizer.from_pretrained(analysis.metadata["model_id"])
+    tokenizer = AutoTokenizer.from_pretrained(activations.metadata["model_id"])
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = output_path.with_suffix(output_path.suffix + ".tmp")
 
     completed, insufficient = resume_progress(temporary, requested)
 
     def interpret_feature(feature_id: int) -> tuple[int, str]:
-        start, stop = map(int, analysis.feature_ptr[feature_id : feature_id + 2])
+        start, stop = map(
+            int, activations.feature_ptr[feature_id : feature_id + 2]
+        )
         examples = choose_examples(
             feature_id,
-            analysis.token_positions[start:stop],
-            analysis.values[start:stop],
-            analysis.token_ids,
+            activations.token_positions[start:stop],
+            activations.values[start:stop],
+            activations.token_ids,
             context_size,
             tokenizer,
             args.seed,

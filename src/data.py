@@ -16,7 +16,7 @@ from tqdm.auto import tqdm
 RESIDUAL_CACHE_FORMATS = ("fp16", "int8")
 RESIDUAL_FP16_SCALE = 1 / 256
 RESIDUAL_INT8_GROUP_SIZE = 128
-ANALYSIS_VALUE_DTYPE = np.float16
+ACTIVATION_VALUE_DTYPE = np.float16
 TRANSPOSE_TOKENS = 1_000_000
 
 
@@ -45,7 +45,7 @@ class ResidualCacheSpec:
 
 
 @dataclass(frozen=True)
-class FeatureAnalysis:
+class FeatureActivations:
     metadata: dict
     token_ids: np.ndarray
     feature_ptr: np.ndarray
@@ -54,13 +54,13 @@ class FeatureAnalysis:
     feature_max: np.ndarray
 
 
-def load_analysis(path: Path) -> FeatureAnalysis:
+def load_activations(path: Path) -> FeatureActivations:
     metadata = json.loads((path / "metadata.json").read_text())
 
     def load(name: str) -> np.ndarray:
         return np.load(path / f"{name}.npy", mmap_mode="r")
 
-    return FeatureAnalysis(
+    return FeatureActivations(
         metadata=metadata,
         token_ids=load("token_ids"),
         feature_ptr=load("feature_ptr"),
@@ -70,7 +70,7 @@ def load_analysis(path: Path) -> FeatureAnalysis:
     )
 
 
-def save_analysis(
+def save_activations(
     output_path: Path,
     metadata: dict,
     token_ids: np.ndarray,
@@ -81,7 +81,7 @@ def save_analysis(
     feature_max: np.ndarray,
 ) -> None:
     if output_path.exists():
-        raise FileExistsError(f"analysis output already exists: {output_path}")
+        raise FileExistsError(f"activation output already exists: {output_path}")
 
     token_count = len(token_ids)
     activation_count = len(feature_ids)
@@ -112,7 +112,7 @@ def save_analysis(
         value_output = np.lib.format.open_memmap(
             temporary / "values.npy",
             mode="w+",
-            dtype=ANALYSIS_VALUE_DTYPE,
+            dtype=ACTIVATION_VALUE_DTYPE,
             shape=(activation_count,),
         )
         cursors = feature_ptr[:-1].copy()

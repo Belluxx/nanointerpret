@@ -669,7 +669,7 @@ async function initialize() {
     updateActivationCountRange();
     renderFeatureList();
   } catch (error) {
-    ui.count.textContent = "Could not load analysis";
+    ui.count.textContent = "Could not load activations";
     ui.error.textContent = error.message;
     ui.error.hidden = false;
   }

@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlsplit
 import numpy as np
 from transformers import AutoTokenizer
 
-from src.data import load_analysis
+from src.data import load_activations
 from src.interventions import InterventionGenerator, InterventionRequest
 from src.runtime import choose_device
 
@@ -38,13 +38,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Browse SAE feature activations in a local web UI."
     )
-    parser.add_argument("--analysis", type=Path, required=True)
+    parser.add_argument("--activations", type=Path, required=True)
     parser.add_argument(
         "--names",
         type=Path,
         help=(
             "Feature-title JSONL produced by interpret_features.py. "
-            "Default: feature_names.jsonl next to the analysis directory, when present."
+            "Default: feature_names.jsonl next to the activations directory, when present."
         ),
     )
     parser.add_argument(
@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help=(
             "Training output containing config.json and sae_final.pt. "
-            "Default: the analysis directory's parent."
+            "Default: the activations directory's parent."
         ),
     )
     parser.add_argument(
@@ -93,14 +93,14 @@ class FeatureContexts(NamedTuple):
     peak_order: np.ndarray
 
 
-class AnalysisData:
-    def __init__(self, analysis_path: Path, names_path: Path | None, tokenizer=None):
-        analysis = load_analysis(analysis_path)
-        self.metadata = analysis.metadata
-        self.token_ids = analysis.token_ids
-        self.feature_ptr = analysis.feature_ptr
-        self.token_positions = analysis.token_positions
-        self.values = analysis.values
+class ActivationData:
+    def __init__(self, activations_path: Path, names_path: Path | None, tokenizer=None):
+        activations = load_activations(activations_path)
+        self.metadata = activations.metadata
+        self.token_ids = activations.token_ids
+        self.feature_ptr = activations.feature_ptr
+        self.token_positions = activations.token_positions
+        self.values = activations.values
 
         self.d_sae = len(self.feature_ptr) - 1
         self.context_size = int(self.metadata["context_size"])
@@ -115,7 +115,7 @@ class AnalysisData:
                 "id": int(feature_id),
                 "title": titles.get(int(feature_id)),
                 "activation_count": int(counts[feature_id]),
-                "max_activation": float(analysis.feature_max[feature_id]),
+                "max_activation": float(activations.feature_max[feature_id]),
             }
             for feature_id in np.flatnonzero(counts)
         ]
@@ -262,7 +262,7 @@ class InterventionSandbox:
     def __init__(
         self,
         sae_dir: Path,
-        data: AnalysisData,
+        data: ActivationData,
         device_name: str,
     ):
         self.sae_dir = sae_dir
@@ -286,7 +286,7 @@ class VisualizerHandler(SimpleHTTPRequestHandler):
     def __init__(
         self,
         *args,
-        data: AnalysisData,
+        data: ActivationData,
         sandbox: InterventionSandbox,
         **kwargs,
     ):
@@ -359,12 +359,12 @@ def main() -> None:
     args = parse_args()
     names_path = args.names
     if names_path is None:
-        default_names = args.analysis.with_name("feature_names.jsonl")
+        default_names = args.activations.with_name("feature_names.jsonl")
         names_path = default_names if default_names.exists() else None
 
-    print(f"Loading {args.analysis} ...")
-    data = AnalysisData(args.analysis, names_path)
-    sae_dir = args.sae_dir or args.analysis.parent
+    print(f"Loading {args.activations} ...")
+    data = ActivationData(args.activations, names_path)
+    sae_dir = args.sae_dir or args.activations.parent
     sandbox = InterventionSandbox(sae_dir, data, args.device)
     handler = partial(VisualizerHandler, data=data, sandbox=sandbox)
     with ThreadingHTTPServer((args.host, args.port), handler) as server:

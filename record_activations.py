@@ -10,10 +10,10 @@ from torch import Tensor
 from tqdm.auto import tqdm
 
 from src.data import (
-    ANALYSIS_VALUE_DTYPE,
+    ACTIVATION_VALUE_DTYPE,
     TokenCacheSpec,
     iter_context_batches,
-    save_analysis,
+    save_activations,
     token_cache_is_valid,
     token_cache_paths,
 )
@@ -47,7 +47,7 @@ def parse_args() -> argparse.Namespace:
         "--output",
         type=Path,
         default=None,
-        help="Output directory. Default: <sae-dir>/analysis.",
+        help="Output directory. Default: <sae-dir>/activations.",
     )
     parser.add_argument(
         "--max-tokens",
@@ -112,13 +112,13 @@ def encode_activations(
     counts = firing.sum(dim=1).numpy().astype(np.uint32, copy=False)
     feature_ids = indices[firing].numpy().astype(feature_dtype, copy=False)
     active_values = values[firing].numpy().astype(
-        ANALYSIS_VALUE_DTYPE, copy=False
+        ACTIVATION_VALUE_DTYPE, copy=False
     )
     return counts, feature_ids, active_values
 
 
 @torch.inference_mode()
-def write_analysis(
+def write_activations(
     output_path: Path,
     pad_token_id: int,
     model,
@@ -167,7 +167,7 @@ def write_analysis(
         ) as values_output, tqdm(
             total=token_count,
             unit="tok",
-            desc="Analyze",
+            desc="Record",
             dynamic_ncols=True,
         ) as progress:
             batches = iter_context_batches(
@@ -225,13 +225,13 @@ def write_analysis(
             np.memmap(
                 values_temporary,
                 mode="r",
-                dtype=ANALYSIS_VALUE_DTYPE,
+                dtype=ACTIVATION_VALUE_DTYPE,
                 shape=(active_count,),
             )
             if active_count
-            else np.empty(0, dtype=ANALYSIS_VALUE_DTYPE)
+            else np.empty(0, dtype=ACTIVATION_VALUE_DTYPE)
         )
-        save_analysis(
+        save_activations(
             output_path,
             metadata,
             evaluation_tokens,
@@ -266,9 +266,9 @@ def main() -> None:
     evaluation_tokens = np.memmap(
         evaluation_path, mode="r", dtype=np.uint32, shape=(available_tokens,)
     )[:token_count]
-    output_path = args.output or args.sae_dir / "analysis"
+    output_path = args.output or args.sae_dir / "activations"
     if output_path.exists():
-        raise FileExistsError(f"analysis output already exists: {output_path}")
+        raise FileExistsError(f"activation output already exists: {output_path}")
 
     device = choose_device(args.device)
     tokenizer = load_tokenizer(config["model_id"])
@@ -291,7 +291,7 @@ def main() -> None:
         f"Layer: {layer_index} | Output: {output_path}"
     )
     with ResidualStreamCapture(layers[layer_index]) as capture:
-        write_analysis(
+        write_activations(
             output_path,
             tokenizer.pad_token_id,
             model,
