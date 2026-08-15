@@ -13,7 +13,7 @@ python3 train.py \
   --validation-tokens 10000000
 ```
 
-2. Extract feature activation stats:
+2. Record feature activations:
 
 ```sh
 python3 record_activations.py --sae-dir artifacts/gemma_3_270m_l9_w16_k16_500m
@@ -24,7 +24,13 @@ python3 record_activations.py --sae-dir artifacts/gemma_3_270m_l9_w16_k16_500m
 ```sh
 # Around $2-$5 in API cost for 10K features
 
-python3 interpret_features.py --analysis artifacts/gemma_3_270m_l9_w16_k16_500m/analysis --base-url https://openrouter.ai/api/v1 --api-key [API_KEY] --model openai/gpt-5.6-luna --no-reasoning --concurrent 8
+python3 interpret_features.py \
+  --analysis artifacts/gemma_3_270m_l9_w16_k16_500m/analysis \
+  --base-url https://openrouter.ai/api/v1 \
+  --api-key "[API_KEY]" \
+  --model openai/gpt-5.6-luna \
+  --no-reasoning \
+  --concurrent 8
 ```
 
 > [!TIP]

@@ -14,7 +14,7 @@ python3 train.py \
   --model-dtype bfloat16
 ```
 
-2. Extract feature activation stats:
+2. Record feature activations:
 
 ```sh
 python3 record_activations.py --sae-dir artifacts/qwen3_1.7b_l14_w16_k16_500m
@@ -25,7 +25,13 @@ python3 record_activations.py --sae-dir artifacts/qwen3_1.7b_l14_w16_k16_500m
 ```sh
 # Around $6-$16 in API cost for 32K features
 
-python3 interpret_features.py --analysis artifacts/qwen3_1.7b_l14_w16_k16_500m/analysis --base-url https://openrouter.ai/api/v1 --api-key [API_KEY] --model openai/gpt-5.6-luna --no-reasoning --concurrent 8
+python3 interpret_features.py \
+  --analysis artifacts/qwen3_1.7b_l14_w16_k16_500m/analysis \
+  --base-url https://openrouter.ai/api/v1 \
+  --api-key "[API_KEY]" \
+  --model openai/gpt-5.6-luna \
+  --no-reasoning \
+  --concurrent 8
 ```
 
 > [!TIP]
