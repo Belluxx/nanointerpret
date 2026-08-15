@@ -18,7 +18,7 @@ Secondary objectives:
 
 ## Main experiment reproduction
 
-0. Prepare the environment:
+Prepare the environment:
 
 ```sh
 python3 -m venv .venv
@@ -26,43 +26,10 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-1. Train the SAE:
+Then proceed to a guide:
 
-```sh
-python3 train.py \
-  --model-id google/gemma-3-270m \
-  --activation-layer 9 \
-  --width-multiplier 16 \
-  --k 16 \
-  --train-tokens 500000000 \
-  --checkpoint-every 250000000 \
-  --validation-tokens 10000000
-```
-
-2. Extract feature activation stats:
-
-```sh
-python3 record_activations.py --sae-dir artifacts/gemma_3_270m_l9_w16_k16_500m
-```
-
-3. Name the features with an LLM:
-
-```sh
-# Around $2-$5 in API cost for 10K features
-
-python3 interpret_features.py --analysis artifacts/gemma_3_270m_l9_w16_k16_500m/analysis --base-url https://openrouter.ai/api/v1 --api-key [API_KEY] --model openai/gpt-5.6-luna --no-reasoning --concurrent 8
-```
-
-> [!TIP]
-> If you want you can run it without `--no-reasoning` and it will produce higher quality feature titles but at a **MUCH** higher API cost (up to $200 depending on how long the model thinks)
-
-4. Browse the features and their activation contexts:
-
-```sh
-python3 visualize.py --analysis artifacts/gemma_3_270m_l9_w16_k16_500m/analysis
-```
-
-Then open [http://127.0.0.1:8000](http://127.0.0.1:8000).
+- [Gemma 3 270M](docs/training-guides/gemma.md) (~5GB free RAM required)
+- [Qwen3 1.7B Base](docs/training-guides/qwen.md) (~12GB free RAM required)
 
 ## Disclaimer
 
