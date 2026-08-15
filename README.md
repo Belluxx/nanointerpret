@@ -16,7 +16,7 @@ Secondary objectives:
 - [ ] Test on 3B-7B models
 - [ ] Test on interactive chat tuned models (the repo uses pretrained base Gemma/Qwen)
 
-## Main experiment reproduction
+## How to run
 
 Prepare the environment:
 
@@ -28,7 +28,7 @@ pip install -r requirements.txt
 
 Then proceed to a guide:
 
-- [Gemma 3 270M](docs/training-guides/gemma.md) (~5GB free RAM required)
+- [Gemma3 270M Base](docs/training-guides/gemma.md) (~5GB free RAM required)
 - [Qwen3 1.7B Base](docs/training-guides/qwen.md) (~12GB free RAM required)
 
 ## Disclaimer
