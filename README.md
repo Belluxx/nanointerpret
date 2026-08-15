@@ -13,11 +13,18 @@ The main objectives are:
 
 Secondary objectives:
 - [ ] Use GGUF / llama.cpp to run LLM and capture acivations
-- [ ] Instead of the current `1e-3`, use a learned-threshold (like JumpReLU SAE from [GemmaScope](https://arxiv.org/abs/2408.05147))
-- [ ] Test on bigger models (Gemma3-270M is VERY small)
-- [ ] Test on interactive chat tuned models (the repo uses pretrained base Gemma)
+- [ ] Test on 3B-7B models
+- [ ] Test on interactive chat tuned models (the repo uses pretrained base Gemma/Qwen)
 
 ## Main experiment reproduction
+
+0. Prepare the environment:
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
 1. Train the SAE:
 
