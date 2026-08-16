@@ -180,33 +180,45 @@
           </label>
 
           <div class="intervention-controls">
-            <label class="feature-field">
-              <span>Feature</span>
+            <div class="form-field feature-field">
+              <label id="feature-label" for="feature-input">Feature</label>
               <div class="feature-control">
-                <input
-                  name="feature_id"
-                  type="text"
-                  list="feature-options"
-                  placeholder="ID or title"
-                  autocomplete="off"
-                  required
-                />
+                <div class="feature-autocomplete">
+                  <input
+                    id="feature-input"
+                    name="feature_id"
+                    type="text"
+                    placeholder="ID or title"
+                    autocomplete="off"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded="false"
+                    aria-controls="feature-options"
+                    required
+                  />
+                  <div
+                    id="feature-options"
+                    class="dropdown-menu autocomplete-menu"
+                    role="listbox"
+                    aria-labelledby="feature-label"
+                    hidden
+                  ></div>
+                </div>
                 <a
                   class="selected-feature-title"
                   aria-live="polite"
                   hidden
                 ></a>
               </div>
-              <datalist id="feature-options"></datalist>
-            </label>
+            </div>
 
-            <label>
-              <span>Intervention</span>
-              <select name="mode">
+            <div class="form-field">
+              <span id="intervention-label">Intervention</span>
+              <select name="mode" aria-labelledby="intervention-label" hidden>
                 <option value="clamp">Feature clamping</option>
                 <option value="additive">Additive steering</option>
               </select>
-            </label>
+            </div>
 
             <div class="amount-field">
               <span class="amount-label">Target activation</span>
@@ -338,14 +350,14 @@
           </div>
 
           <div class="sort-group">
-            <label class="sort-control">
-              <span>Sort</span>
-              <select id="sort-select">
+            <div class="sort-control">
+              <span id="sort-label">Sort</span>
+              <select id="sort-select" aria-labelledby="sort-label" hidden>
                 <option value="id">Feature ID</option>
                 <option value="count" selected>Activation count</option>
                 <option value="title">Title</option>
               </select>
-            </label>
+            </div>
             <button
               id="sort-direction-button"
               class="icon-button sort-direction-button"
@@ -371,11 +383,11 @@
             type="button"
             aria-label="Previous page"
           ></button>
-          <label>
-            <span>Page</span>
-            <select id="page-select" aria-label="Feature page"></select>
+          <div class="pagination-label">
+            <span id="page-label">Page</span>
+            <select id="page-select" aria-label="Feature page" hidden></select>
             <span id="page-count"></span>
-          </label>
+          </div>
           <button
             id="next-page-button"
             class="icon-button page-button next-page-button"

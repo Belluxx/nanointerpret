@@ -39,21 +39,7 @@ body {
 }
 button,
 input,
-select,
 textarea { font: inherit; }
-select {
-  appearance: none;
-  -webkit-appearance: none;
-  border-radius: 0;
-  background-image:
-    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
-    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
-  background-position:
-    calc(100% - 13px) calc(50% + 1px),
-    calc(100% - 9px) calc(50% + 1px);
-  background-repeat: no-repeat;
-  background-size: 4px 4px;
-}
 main {
   width: min(1080px, calc(100% - 40px));
   margin: 0 auto;
@@ -152,6 +138,7 @@ main {
   }
 }
 .intervention-form label,
+.form-field,
 .amount-field,
 .sampling-setting > label {
   display: grid;
@@ -163,7 +150,6 @@ main {
 }
 .intervention-form textarea,
 .intervention-form input:not([type="range"]),
-.intervention-form select,
 .sampling-setting-control input[type="number"] {
   width: 100%;
   border: 1px solid var(--line);
@@ -177,9 +163,101 @@ main {
   height: var(--control-height);
   padding: 0 10px;
 }
-.intervention-form select {
+.intervention-form .custom-select-trigger {
   height: var(--control-height);
   padding: 0 30px 0 10px;
+  font-size: 12px;
+}
+
+/* Custom dropdowns */
+.custom-select,
+.feature-autocomplete {
+  position: relative;
+  min-width: 0;
+}
+.custom-select.is-open,
+.feature-autocomplete.is-open { z-index: 40; }
+.custom-select-trigger {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 8px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  color: var(--text);
+  background: var(--subtle);
+  cursor: pointer;
+  text-align: left;
+  &:hover,
+  &[aria-expanded="true"] { border-color: var(--text); }
+}
+.custom-select-value {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dropdown-chevron {
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-right: 1px solid currentcolor;
+  border-bottom: 1px solid currentcolor;
+  color: var(--muted);
+  transform: rotate(45deg);
+  transition: transform 120ms ease, margin 120ms ease;
+}
+.custom-select.is-open .dropdown-chevron {
+  margin-top: 3px;
+  transform: rotate(225deg);
+}
+.dropdown-menu {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 5px);
+  left: 0;
+  overflow-y: auto;
+  max-height: min(260px, 50vh);
+  padding: 4px 0;
+  border: 1px solid var(--text);
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 14px 36px rgb(0 0 0 / 18%);
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+  scrollbar-color: var(--line) transparent;
+  scrollbar-width: thin;
+}
+.select-menu {
+  width: max-content;
+  min-width: 100%;
+  max-width: min(360px, calc(100vw - 32px));
+}
+.custom-select-option,
+.autocomplete-option {
+  cursor: pointer;
+  user-select: none;
+  &.is-active { background: var(--accent-soft); }
+}
+.custom-select-option {
+  position: relative;
+  min-height: 32px;
+  padding: 8px 30px 8px 10px;
+  white-space: nowrap;
+  &[aria-selected="true"] {
+    color: var(--accent);
+    &::after {
+      position: absolute;
+      top: 50%;
+      right: 10px;
+      content: "✓";
+      font-size: 10px;
+      transform: translateY(-50%);
+    }
+  }
 }
 
 /* Range controls */
@@ -390,10 +468,32 @@ input.progress-range::-moz-range-thumb,
   align-items: center;
   min-width: 0;
   gap: 10px;
-  > input {
-    width: 120px;
-    flex: 0 0 120px;
-  }
+}
+.feature-autocomplete {
+  width: 120px;
+  flex: 0 0 120px;
+  > input { width: 100%; }
+}
+.autocomplete-menu {
+  width: min(360px, calc(100vw - 40px));
+}
+.autocomplete-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 18px;
+  min-height: 38px;
+  padding: 8px 10px;
+}
+.autocomplete-option-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.autocomplete-option-id {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
 }
 .selected-feature-title {
   display: -webkit-box;
@@ -538,8 +638,7 @@ input.progress-range::-moz-range-thumb,
   gap: 16px;
   padding: 12px;
   border-bottom: 1px solid var(--line);
-  input[type="search"],
-  select {
+  input[type="search"] {
     height: var(--control-height);
     border: 1px solid var(--line);
     color: var(--text);
@@ -552,16 +651,17 @@ input.progress-range::-moz-range-thumb,
     width: auto;
     min-width: 200px;
   }
-  label {
+  .sort-control {
     display: flex;
     align-items: center;
     gap: 9px;
     color: var(--muted);
     font-size: 11px;
   }
-  select {
+  .custom-select-trigger {
     height: 40px;
-    padding: 0 30px 0 10px;
+    padding: 0 10px;
+    font-size: 13px;
   }
 }
 .filter-button {
@@ -610,6 +710,7 @@ input.progress-range::-moz-range-thumb,
   align-items: center;
   gap: 8px;
 }
+.sort-control .custom-select { width: 154px; }
 .icon-button {
   display: grid;
   place-items: center;
@@ -707,7 +808,7 @@ input.progress-range::-moz-range-thumb,
   border-top: 1px solid var(--line);
   background: var(--subtle);
   &[hidden] { display: none; }
-  label {
+  .pagination-label {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -716,14 +817,22 @@ input.progress-range::-moz-range-thumb,
     font-size: 10px;
     font-variant-numeric: tabular-nums;
   }
-  select {
+  .custom-select {
+    width: 68px;
+    font-family: var(--mono);
+  }
+  .custom-select-trigger {
     height: 34px;
-    min-width: 68px;
-    padding: 0 28px 0 10px;
-    border: 1px solid var(--line);
-    color: var(--text);
-    background-color: var(--surface);
+    padding: 0 10px;
+    background: var(--surface);
     font-size: 11px;
+  }
+  .select-menu {
+    top: auto;
+    bottom: calc(100% + 5px);
+    width: 100%;
+    min-width: 68px;
+    font-size: 10px;
   }
 }
 .previous-page-button::after { --icon: url("icons/arrow_left.svg"); }
@@ -956,7 +1065,7 @@ input.progress-range::-moz-range-thumb,
 }
 
 /* Interaction and responsive layout */
-:where(button, input, select, textarea, summary, a):focus-visible {
+:where(button, input, textarea, summary, a):focus-visible {
   outline: 2px solid var(--text);
   outline-offset: -2px;
 }
