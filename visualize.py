@@ -35,29 +35,11 @@ def positive_int(value: str) -> int:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Browse SAE feature activations in a local web UI."
-    )
+    parser = argparse.ArgumentParser(description="Browse SAE feature activations in a local web UI.")
     parser.add_argument("--activations", type=Path, required=True)
-    parser.add_argument(
-        "--names",
-        type=Path,
-        help=(
-            "Feature-title JSONL produced by interpret_features.py. "
-            "Default: feature_names.jsonl next to the activations directory, when present."
-        ),
-    )
-    parser.add_argument(
-        "--sae-dir",
-        type=Path,
-        help=(
-            "Training output containing config.json and sae_final.pt. "
-            "Default: the activations directory's parent."
-        ),
-    )
-    parser.add_argument(
-        "--device", choices=("auto", "mps", "cuda", "cpu"), default="auto"
-    )
+    parser.add_argument("--names", type=Path, help="Feature-title JSONL produced by interpret_features.py. Default: feature_names.jsonl next to the activations directory, when present.")
+    parser.add_argument("--sae-dir", type=Path, help="Training output containing config.json and sae_final.pt. Default: the activations directory's parent.")
+    parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=positive_int, default=8000)
     return parser.parse_args()

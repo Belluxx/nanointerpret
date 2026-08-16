@@ -33,37 +33,13 @@ def positive_int(value: str) -> int:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Record SAE feature activations on the local evaluation set."
-    )
-    parser.add_argument(
-        "--sae-dir",
-        type=Path,
-        required=True,
-        help="Training output directory containing config.json and sae_final.pt.",
-    )
+    parser = argparse.ArgumentParser(description="Record SAE feature activations on the local evaluation set.")
+    parser.add_argument("--sae-dir", type=Path, required=True, help="Training output directory containing config.json and sae_final.pt.")
     parser.add_argument("--cache-dir", type=Path, default=CACHE_DIR)
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=None,
-        help="Output directory. Default: <sae-dir>/activations.",
-    )
-    parser.add_argument(
-        "--max-tokens",
-        type=positive_int,
-        default=None,
-        help="Process at most this many evaluation tokens.",
-    )
-    parser.add_argument(
-        "--model-batch-size",
-        type=positive_int,
-        default=None,
-        help="Contexts processed together. Default: the training configuration.",
-    )
-    parser.add_argument(
-        "--device", choices=("auto", "mps", "cuda", "cpu"), default="auto"
-    )
+    parser.add_argument("--output", type=Path, default=None, help="Output directory. Default: <sae-dir>/activations.")
+    parser.add_argument("--max-tokens", type=positive_int, default=None, help="Process at most this many evaluation tokens.")
+    parser.add_argument("--model-batch-size", type=positive_int, default=None, help="Contexts processed together. Default: the training configuration.")
+    parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
     return parser.parse_args()
 
 
