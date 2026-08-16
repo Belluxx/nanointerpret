@@ -285,7 +285,7 @@ input.progress-range::-moz-range-thumb,
   background: var(--accent);
 }
 .settings-icon {
-  --icon: url("/icons/settings.svg");
+  --icon: url("icons/settings.svg");
   display: block;
   width: 14px;
   height: 14px;
@@ -559,7 +559,7 @@ input.progress-range::-moz-range-thumb,
   anchor-name: --filter-button;
 }
 .filter-icon {
-  --icon: url("/icons/filter.svg");
+  --icon: url("icons/filter.svg");
   width: 16px;
   height: 16px;
 }
@@ -609,7 +609,7 @@ input.progress-range::-moz-range-thumb,
 .sort-direction-button::after,
 .range-result-count::after {
   content: "";
-  --icon: url("/icons/switch.svg");
+  --icon: url("icons/switch.svg");
 }
 .sort-direction-button::after {
   width: 16px;

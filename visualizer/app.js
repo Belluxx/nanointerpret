@@ -1,6 +1,8 @@
 const sandboxForm = document.querySelector(".intervention-form");
 const formFields = sandboxForm.elements;
 const samplingSettings = document.querySelector("#sampling-settings-dialog");
+const config = window.NANOINTERPRET_CONFIG;
+const staticData = Boolean(config.dataDirectory);
 
 const ui = {
   list: document.querySelector("#feature-list"),
@@ -47,6 +49,12 @@ let reverseFeatureOrder = false;
 const DEFAULT_CONTEXT_RANGE_START = 0.7;
 const CONTEXT_LOAD_DELAY_MS = 120;
 const generateButtonLabel = ui.generateButton.textContent.trim();
+
+function featureUrl(featureId) {
+  if (!staticData) return `/api/features/${featureId}`;
+  const shard = String(Math.floor(featureId / 1000)).padStart(3, "0");
+  return `${config.dataDirectory}/features/${shard}/${featureId}.json`;
+}
 
 function element(tag, className, text) {
   const result = document.createElement(tag);
@@ -272,7 +280,7 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
   ui.generateButton.textContent = "Generating...";
   ui.sandboxForm.querySelector(".sandbox-error")?.remove();
   try {
-    const payload = await fetchJson("/api/interventions/generate", {
+    const payload = await fetchJson(config.interventionUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
@@ -422,9 +430,17 @@ function renderContext(context, feature) {
   );
 
   const tokens = element("pre", "tokens");
+  const sparseActivations = context.activation_positions
+    ? new Map(context.activation_positions.map((position, index) => [
+      position,
+      context.activation_values[index],
+    ]))
+    : null;
   context.tokens.forEach((text, index) => {
     const token = element("span", "token", text);
-    const activation = context.activations[index];
+    const activation = sparseActivations
+      ? sparseActivations.get(index) || 0
+      : context.activations[index];
     if (activation > 0) {
       const strength = Math.sqrt(Math.min(1, activation / feature.max_activation));
       token.classList.add("active");
@@ -473,7 +489,9 @@ function renderOverview(feature, payload) {
   return overview;
 }
 
-function renderDistribution(feature, counts) {
+function renderDistribution(feature, payload) {
+  const counts = payload.activation_histogram;
+  const exportedContexts = payload.contexts || [];
   const panel = element("section");
   const plot = element("div", "distribution-plot");
   plot.setAttribute("aria-hidden", "true");
@@ -567,13 +585,23 @@ function renderDistribution(feature, counts) {
     if (!results.childElementCount) {
       results.append(element("p", "loading", "Loading contexts..."));
     }
-    const query = new URLSearchParams({ min: minimum, max: maximum });
     try {
-      const payload = await fetchJson(`/api/features/${feature.id}?${query}`);
+      let payload;
+      if (staticData) {
+        const contexts = exportedContexts.filter((context) => (
+          context.peak_activation >= minimum && context.peak_activation <= maximum
+        ));
+        payload = { contexts };
+      } else {
+        const query = new URLSearchParams({ min: minimum, max: maximum });
+        payload = await fetchJson(`${featureUrl(feature.id)}?${query}`);
+      }
       if (currentRequest !== requestId) return;
       const contexts = descending ? payload.contexts : [...payload.contexts].reverse();
       const shown = contexts.length;
-      const label = shown === payload.matching_context_count
+      const label = staticData
+        ? `${shown.toLocaleString()} representative contexts`
+        : shown === payload.matching_context_count
         ? `${shown.toLocaleString()} contexts`
         : `Sampled ${shown.toLocaleString()} of ${payload.matching_context_count.toLocaleString()}`;
       orderLabel.textContent = descending ? "(high to low)" : "(low to high)";
@@ -612,10 +640,10 @@ async function loadFeature(details, feature) {
   details.dataset.loaded = "loading";
   body.replaceChildren(element("p", "loading", "Loading feature..."));
   try {
-    const payload = await fetchJson(`/api/features/${feature.id}`);
+    const payload = await fetchJson(featureUrl(feature.id));
     body.replaceChildren(
       renderOverview(feature, payload),
-      renderDistribution(feature, payload.activation_histogram),
+      renderDistribution(feature, payload),
     );
     details.dataset.loaded = "true";
   } catch (error) {
@@ -653,7 +681,11 @@ document.addEventListener("keydown", (event) => {
 
 async function initialize() {
   try {
-    const payload = await fetchJson("/api/summary");
+    if (!config.interventionUrl) ui.sandboxForm.closest(".sandbox").hidden = true;
+    const summaryUrl = staticData
+      ? `${config.dataDirectory}/summary.json`
+      : "/api/summary";
+    const payload = await fetchJson(summaryUrl);
     features = payload.features;
     const activationCounts = features.map((feature) => feature.activation_count);
     minimumActivationCount = activationCounts.length
