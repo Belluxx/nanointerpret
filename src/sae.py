@@ -103,20 +103,35 @@ def normalized_auxk_loss(
     sae: TopKSAE,
     pre_activations: Tensor,
     residual_error: Tensor,
-    dead_mask: Tensor,
+    dead_indices: Tensor,
     aux_k: int,
 ) -> Tensor:
-    dead_count = int(dead_mask.sum().item())
+    dead_count = len(dead_indices)
     if dead_count == 0:
         return pre_activations.sum() * 0.0
 
-    masked = pre_activations.masked_fill(~dead_mask.unsqueeze(0), float("-inf"))
+    dead_pre_activations = pre_activations.index_select(1, dead_indices)
     values, indices = torch.topk(
-        masked, min(aux_k, dead_count), dim=-1, sorted=False
+        dead_pre_activations, min(aux_k, dead_count), dim=-1, sorted=False
     )
-    auxiliary_reconstruction = sae.decode(
-        indices, F.relu(values), include_bias=sae.subtract_pre_bias
-    )
+    values = F.relu(values)
+    # MPS dense matmul is much faster than embedding_bag at AuxK's large k.
+    if pre_activations.device.type == "mps":
+        auxiliary_activations = torch.zeros_like(dead_pre_activations).scatter_(
+            1, indices, values
+        )
+        auxiliary_reconstruction = (
+            auxiliary_activations
+            @ sae.decoder_weight.index_select(0, dead_indices)
+        )
+        if sae.subtract_pre_bias:
+            auxiliary_reconstruction = auxiliary_reconstruction + sae.decoder_bias
+    else:
+        auxiliary_reconstruction = sae.decode(
+            dead_indices[indices],
+            values,
+            include_bias=sae.subtract_pre_bias,
+        )
     target = residual_error.detach()
     if sae.subtract_pre_bias:
         target = target + sae.decoder_bias.detach()

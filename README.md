@@ -27,8 +27,10 @@ pip install -r requirements.txt
 
 Then proceed to a guide:
 
-- [Gemma3 270M Base](docs/training-guides/gemma.md) (~5GB free RAM required)
-- [Qwen3 1.7B Base](docs/training-guides/qwen.md) (~12GB free RAM required)
+- [Gemma3 270M Base](docs/training-guides/gemma.md) (~6GB free RAM required)
+- [Qwen3 1.7B Base](docs/training-guides/qwen.md) (~13GB free RAM required)
+
+For low RAM devices: try to lower `--model-batch-size` or `--sae-batch-size`.
 
 ## Disclaimer
 

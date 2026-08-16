@@ -348,14 +348,17 @@ def optimize_residual_batch(
         mse_loss = F.mse_loss(reconstruction, x)
         auxk_loss = None
         loss = mse_loss
-        if aux_k_coef > 0:
-            dead_mask = last_fired < token_position - dead_window
-            if dead_mask.any():
+        if aux_k_coef > 0 and token_position >= dead_window:
+            dead_indices = torch.nonzero(
+                last_fired < token_position - dead_window,
+                as_tuple=True,
+            )[0]
+            if len(dead_indices) > 0:
                 auxk_loss = normalized_auxk_loss(
                     sae,
                     pre_activations,
                     x - reconstruction,
-                    dead_mask,
+                    dead_indices,
                     aux_k,
                 )
                 loss = loss + aux_k_coef * auxk_loss
