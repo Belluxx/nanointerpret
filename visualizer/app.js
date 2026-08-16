@@ -9,6 +9,7 @@ const ui = {
   list: document.querySelector("#feature-list"),
   count: document.querySelector("#result-count"),
   search: document.querySelector("#search-input"),
+  filterButton: document.querySelector("#filter-button"),
   filterPopover: document.querySelector("#filter-popover"),
   clearFiltersButton: document.querySelector("#clear-filters-button"),
   activationCountRange: document.querySelector("#activation-count-range"),
@@ -50,6 +51,21 @@ let reverseFeatureOrder = false;
 const DEFAULT_CONTEXT_RANGE_START = 0.7;
 const CONTEXT_LOAD_DELAY_MS = 120;
 const generateButtonLabel = ui.generateButton.textContent.trim();
+
+function positionFilterPopover() {
+  const buttonRect = ui.filterButton.getBoundingClientRect();
+  const preferredLeft = innerWidth <= 720
+    ? buttonRect.left
+    : buttonRect.right - 260;
+  const left = Math.max(8, Math.min(preferredLeft, innerWidth - 268));
+
+  ui.filterPopover.style.top = `${buttonRect.bottom + 8}px`;
+  ui.filterPopover.style.left = `${left}px`;
+}
+
+ui.filterPopover.addEventListener("beforetoggle", (event) => {
+  if (event.newState === "open") positionFilterPopover();
+});
 
 function featureUrl(featureId) {
   if (!staticData) return `/api/features/${featureId}`;
