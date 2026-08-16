@@ -22,6 +22,11 @@ const ui = {
   sortDirection: document.querySelector("#sort-direction-button"),
   metadata: document.querySelector("#dataset-meta"),
   error: document.querySelector("#error-message"),
+  pagination: document.querySelector("#feature-pagination"),
+  previousPage: document.querySelector("#previous-page-button"),
+  pageSelect: document.querySelector("#page-select"),
+  pageCount: document.querySelector("#page-count"),
+  nextPage: document.querySelector("#next-page-button"),
   sandboxForm,
   prompt: formFields.prompt,
   featureInput: formFields.feature_id,
@@ -47,9 +52,11 @@ let renderedBaselineKey = null;
 let minimumActivationCount = 0;
 let maximumActivationCount = 0;
 let reverseFeatureOrder = false;
+let currentFeaturePage = 1;
 
 const DEFAULT_CONTEXT_RANGE_START = 0.7;
 const CONTEXT_LOAD_DELAY_MS = 120;
+const FEATURES_PER_PAGE = 50;
 const generateButtonLabel = ui.generateButton.textContent.trim();
 
 function positionFilterPopover() {
@@ -167,6 +174,8 @@ function openFeature(featureId) {
   if (!details) {
     ui.search.value = "";
     resetActivationCountRange();
+    const index = visibleFeatures().findIndex((feature) => feature.id === featureId);
+    currentFeaturePage = Math.floor(Math.max(0, index) / FEATURES_PER_PAGE) + 1;
     renderFeatureList();
     details = document.getElementById(`feature-${featureId}`);
   }
@@ -408,12 +417,16 @@ function resetActivationCountRange() {
 
 function renderFeatureList() {
   const visible = visibleFeatures();
+  const pageCount = Math.max(1, Math.ceil(visible.length / FEATURES_PER_PAGE));
+  currentFeaturePage = Math.min(currentFeaturePage, pageCount);
+  const pageStart = (currentFeaturePage - 1) * FEATURES_PER_PAGE;
+  const pageFeatures = visible.slice(pageStart, pageStart + FEATURES_PER_PAGE);
   ui.count.textContent = visible.length === features.length
     ? `${visible.length.toLocaleString()} active features`
     : `${visible.length.toLocaleString()} of ${features.length.toLocaleString()} features`;
 
   const fragment = document.createDocumentFragment();
-  for (const feature of visible) {
+  for (const feature of pageFeatures) {
     const details = element("details", "feature");
     details.id = `feature-${feature.id}`;
     const summary = element("summary");
@@ -439,6 +452,32 @@ function renderFeatureList() {
     fragment.append(details);
   }
   ui.list.replaceChildren(fragment);
+  ui.pagination.hidden = pageCount === 1;
+  if (pageCount === 1) return;
+
+  if (ui.pageSelect.options.length !== pageCount) {
+    ui.pageSelect.replaceChildren(...Array.from({ length: pageCount }, (_, index) => {
+      const option = document.createElement("option");
+      option.value = String(index + 1);
+      option.textContent = (index + 1).toLocaleString();
+      return option;
+    }));
+  }
+  ui.pageSelect.value = String(currentFeaturePage);
+  ui.pageCount.textContent = `of ${pageCount.toLocaleString()}`;
+  ui.previousPage.disabled = currentFeaturePage === 1;
+  ui.nextPage.disabled = currentFeaturePage === pageCount;
+}
+
+function resetFeaturePage() {
+  currentFeaturePage = 1;
+  renderFeatureList();
+}
+
+function showFeaturePage(page) {
+  currentFeaturePage = page;
+  renderFeatureList();
+  ui.list.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderContext(context, feature) {
@@ -679,26 +718,31 @@ async function loadFeature(details, feature) {
 let renderFrame;
 ui.search.addEventListener("input", () => {
   cancelAnimationFrame(renderFrame);
-  renderFrame = requestAnimationFrame(renderFeatureList);
+  renderFrame = requestAnimationFrame(resetFeaturePage);
 });
 for (const input of [ui.minimumActivationCount, ui.maximumActivationCount]) {
   input.addEventListener("input", () => updateActivationCountRange(input));
-  input.addEventListener("change", renderFeatureList);
+  input.addEventListener("change", resetFeaturePage);
 }
 ui.clearFiltersButton.addEventListener("click", () => {
   resetActivationCountRange();
-  renderFeatureList();
+  resetFeaturePage();
   ui.filterPopover.hidePopover();
 });
-ui.sort.addEventListener("change", renderFeatureList);
+ui.sort.addEventListener("change", resetFeaturePage);
 ui.sortDirection.addEventListener("click", () => {
   reverseFeatureOrder = !reverseFeatureOrder;
-  renderFeatureList();
+  resetFeaturePage();
 });
+ui.pageSelect.addEventListener("change", () => {
+  showFeaturePage(Number(ui.pageSelect.value));
+});
+ui.previousPage.addEventListener("click", () => showFeaturePage(currentFeaturePage - 1));
+ui.nextPage.addEventListener("click", () => showFeaturePage(currentFeaturePage + 1));
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && ui.search.value) {
     ui.search.value = "";
-    renderFeatureList();
+    resetFeaturePage();
     ui.search.focus();
   }
 });

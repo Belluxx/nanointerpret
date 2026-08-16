@@ -348,7 +348,7 @@
             </label>
             <button
               id="sort-direction-button"
-              class="sort-direction-button"
+              class="icon-button sort-direction-button"
               type="button"
               aria-label="Reverse feature order"
             ></button>
@@ -364,6 +364,25 @@
 
         <div id="error-message" class="error-message" hidden></div>
         <div id="feature-list" aria-live="polite"></div>
+        <nav id="feature-pagination" class="pagination" aria-label="Feature pages" hidden>
+          <button
+            id="previous-page-button"
+            class="icon-button page-button previous-page-button"
+            type="button"
+            aria-label="Previous page"
+          ></button>
+          <label>
+            <span>Page</span>
+            <select id="page-select" aria-label="Feature page"></select>
+            <span id="page-count"></span>
+          </label>
+          <button
+            id="next-page-button"
+            class="icon-button page-button next-page-button"
+            type="button"
+            aria-label="Next page"
+          ></button>
+        </nav>
       </section>
     </main>
 
