@@ -4,6 +4,9 @@ import argparse
 import json
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
+from itertools import groupby
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +18,14 @@ from visualize import ActivationData, STATIC_DIR
 CONTEXTS_PER_FEATURE = 20
 CONTEXT_TOKENS = 64
 FEATURES_PER_FILE = 32
+DEFAULT_WORKERS = min(8, os.cpu_count() or 1)
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return parsed
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,6 +45,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--intervention-url",
         help="Public intervention endpoint. The sandbox is hidden when omitted.",
+    )
+    parser.add_argument(
+        "--workers",
+        type=positive_int,
+        default=DEFAULT_WORKERS,
+        help=f"Concurrent export workers. Default: {DEFAULT_WORKERS}.",
     )
     return parser.parse_args()
 
@@ -85,22 +102,28 @@ def render_context(
 def representative_contexts(data: ActivationData, feature_id: int) -> list[dict]:
     contexts = data._feature_contexts(feature_id)
     ordered_peaks = contexts.peaks[contexts.peak_order]
-    targets = np.linspace(
-        0.0,
-        float(ordered_peaks[-1]),
-        CONTEXTS_PER_FEATURE,
-    )
+    targets = np.linspace(0.0, float(ordered_peaks[-1]), CONTEXTS_PER_FEATURE)
     ranks = np.minimum(
-        np.searchsorted(ordered_peaks, targets),
-        len(ordered_peaks) - 1,
+        np.searchsorted(ordered_peaks, targets), len(ordered_peaks) - 1
     )
-    group_indices = set(map(int, contexts.peak_order[ranks]))
-    ordered = sorted(
-        group_indices,
-        key=lambda group_index: contexts.peaks[group_index],
-        reverse=True,
-    )
-    return [render_context(data, contexts, group_index) for group_index in ordered]
+    group_indices = np.unique(contexts.peak_order[ranks])
+    group_indices = group_indices[np.argsort(contexts.peaks[group_indices])[::-1]]
+    return [render_context(data, contexts, int(index)) for index in group_indices]
+
+
+def export_feature_file(
+    data: ActivationData,
+    output_directory: Path,
+    shard: tuple[int, list[dict]],
+) -> None:
+    shard_id, features = shard
+    payload = {}
+    for feature in features:
+        feature_id = feature["id"]
+        feature_payload = data.feature(feature_id)
+        feature_payload["contexts"] = representative_contexts(data, feature_id)
+        payload[feature_id] = feature_payload
+    write_json(output_directory / f"{shard_id}.json", payload)
 
 
 def main() -> None:
@@ -136,26 +159,24 @@ def main() -> None:
         )
         write_json(temporary / "data" / "summary.json", data.summary())
 
-        shard_id = None
-        shard_payload = {}
-        for feature in tqdm(
-            data.features,
-            unit="feature",
-            desc="Export",
-            dynamic_ncols=True,
-        ):
-            feature_id = feature["id"]
-            next_shard_id = feature_id // FEATURES_PER_FILE
-            if shard_id is not None and next_shard_id != shard_id:
-                write_json(feature_directory / f"{shard_id}.json", shard_payload)
-                shard_payload = {}
-            shard_id = next_shard_id
-            payload = data.feature(feature_id)
-            payload["contexts"] = representative_contexts(data, feature_id)
-            shard_payload[feature_id] = payload
-
-        if shard_id is not None:
-            write_json(feature_directory / f"{shard_id}.json", shard_payload)
+        shards = [
+            (shard_id, list(features))
+            for shard_id, features in groupby(
+                data.features,
+                key=lambda feature: feature["id"] // FEATURES_PER_FILE,
+            )
+        ]
+        export = partial(export_feature_file, data, feature_directory)
+        with ThreadPoolExecutor(max_workers=args.workers) as executor:
+            results = executor.map(export, shards)
+            for _ in tqdm(
+                results,
+                total=len(shards),
+                unit="file",
+                desc="Export",
+                dynamic_ncols=True,
+            ):
+                pass
 
         os.replace(temporary, args.output)
     except BaseException:
