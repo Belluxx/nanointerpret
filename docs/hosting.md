@@ -10,9 +10,9 @@ python3 export_visualizer.py \
   --intervention-url https://YOUR-WORKSPACE--YOUR-ENDPOINT.modal.run
 ```
 
-The output directory contains the webpage, a feature summary, and sharded
-per-feature JSON files. It can be uploaded directly to any static host. Preview
-it locally with:
+The output directory contains the webpage, a feature summary, and JSON files
+containing 32 features each. It can be uploaded directly to any static host.
+Preview it locally with:
 
 ```sh
 python3 -m http.server 8080 --directory dist/qwen3-1.7b

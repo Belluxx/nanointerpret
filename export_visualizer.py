@@ -14,6 +14,7 @@ from visualize import ActivationData, STATIC_DIR
 
 CONTEXTS_PER_FEATURE = 20
 CONTEXT_TOKENS = 64
+FEATURES_PER_FILE = 32
 
 
 def parse_args() -> argparse.Namespace:
@@ -124,6 +125,7 @@ def main() -> None:
         feature_directory.mkdir(parents=True)
         config = {
             "dataDirectory": "data",
+            "featuresPerFile": FEATURES_PER_FILE,
             "interventionUrl": args.intervention_url,
         }
         (temporary / "config.js").write_text(
@@ -134,6 +136,8 @@ def main() -> None:
         )
         write_json(temporary / "data" / "summary.json", data.summary())
 
+        shard_id = None
+        shard_payload = {}
         for feature in tqdm(
             data.features,
             unit="feature",
@@ -141,11 +145,17 @@ def main() -> None:
             dynamic_ncols=True,
         ):
             feature_id = feature["id"]
-            shard = feature_directory / f"{feature_id // 1000:03d}"
-            shard.mkdir(exist_ok=True)
+            next_shard_id = feature_id // FEATURES_PER_FILE
+            if shard_id is not None and next_shard_id != shard_id:
+                write_json(feature_directory / f"{shard_id}.json", shard_payload)
+                shard_payload = {}
+            shard_id = next_shard_id
             payload = data.feature(feature_id)
             payload["contexts"] = representative_contexts(data, feature_id)
-            write_json(shard / f"{feature_id}.json", payload)
+            shard_payload[feature_id] = payload
+
+        if shard_id is not None:
+            write_json(feature_directory / f"{shard_id}.json", shard_payload)
 
         os.replace(temporary, args.output)
     except BaseException:

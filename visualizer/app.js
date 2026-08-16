@@ -3,6 +3,7 @@ const formFields = sandboxForm.elements;
 const samplingSettings = document.querySelector("#sampling-settings-dialog");
 const config = window.NANOINTERPRET_CONFIG;
 const staticData = Boolean(config.dataDirectory);
+const featureFiles = new Map();
 
 const ui = {
   list: document.querySelector("#feature-list"),
@@ -52,8 +53,15 @@ const generateButtonLabel = ui.generateButton.textContent.trim();
 
 function featureUrl(featureId) {
   if (!staticData) return `/api/features/${featureId}`;
-  const shard = String(Math.floor(featureId / 1000)).padStart(3, "0");
-  return `${config.dataDirectory}/features/${shard}/${featureId}.json`;
+  const fileId = Math.floor(featureId / config.featuresPerFile);
+  return `${config.dataDirectory}/features/${fileId}.json`;
+}
+
+async function fetchFeature(featureId) {
+  const url = featureUrl(featureId);
+  if (!staticData) return fetchJson(url);
+  if (!featureFiles.has(url)) featureFiles.set(url, fetchJson(url));
+  return (await featureFiles.get(url))[featureId];
 }
 
 function element(tag, className, text) {
@@ -640,7 +648,7 @@ async function loadFeature(details, feature) {
   details.dataset.loaded = "loading";
   body.replaceChildren(element("p", "loading", "Loading feature..."));
   try {
-    const payload = await fetchJson(featureUrl(feature.id));
+    const payload = await fetchFeature(feature.id);
     body.replaceChildren(
       renderOverview(feature, payload),
       renderDistribution(feature, payload),
