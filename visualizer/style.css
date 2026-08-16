@@ -12,8 +12,8 @@
   --activation-highlight: #c44f1b;
   --on-accent: #fff;
   --control-height: 38px;
-  --range-thumb-width: 12px;
-  --range-thumb-height: 14px;
+  --range-thumb-width: 16px;
+  --range-thumb-height: 16px;
   --mono: "SFMono-Regular", Consolas, monospace;
   color: var(--text);
   background: var(--background);
@@ -254,7 +254,7 @@ main {
 /* Range controls */
 input.progress-range {
   min-width: 0;
-  height: 16px;
+  height: 28px;
   appearance: none;
   background: transparent;
   cursor: pointer;
@@ -280,7 +280,7 @@ input.progress-range::-webkit-slider-thumb,
   box-sizing: border-box;
   width: var(--range-thumb-width);
   height: var(--range-thumb-height);
-  margin-top: -5px;
+  margin-top: calc((3px - var(--range-thumb-height)) / 2);
   border: 2px solid var(--accent);
   border-radius: 1px;
   appearance: none;
