@@ -411,11 +411,20 @@ async function fetchJson(url, options) {
 
 function initializeSandbox(metadata) {
   featuresById = new Map(features.map((feature) => [feature.id, feature]));
+  const featureChoices = Array.from({ length: metadata.d_sae }, (_, id) => {
+    const feature = featuresById.get(id);
+    return {
+      id,
+      activationCount: feature?.activation_count ?? 0,
+      title: feature?.title,
+    };
+  });
+  featureChoices.sort((a, b) => b.activationCount - a.activationCount || a.id - b.id);
+
   const options = document.createDocumentFragment();
-  for (let featureId = 0; featureId < metadata.d_sae; featureId += 1) {
-    const title = featuresById.get(featureId)?.title;
-    const label = title ? `${featureId}: ${title}` : `Feature ${featureId}`;
-    options.append(new Option(label, String(featureId)));
+  for (const feature of featureChoices) {
+    const label = feature.title ? `${feature.id}: ${feature.title}` : `Feature ${feature.id}`;
+    options.append(new Option(label, String(feature.id)));
   }
   ui.featureInput.append(options);
   featureSelectControl.updateOptions();
