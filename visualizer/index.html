@@ -152,9 +152,6 @@
                 feature dropdown and scroll or search by ID or title.
               </li>
               <li>
-                Choose an intervention (leave <strong>Feature clamping</strong> if unsure).
-              </li>
-              <li>
                 Choose how strongly to activate the feature:
                 <ul>
                   <li><strong>50%</strong> mildly activated.</li>
@@ -165,6 +162,8 @@
               <li>Press <strong>Generate comparison</strong>.</li>
             </ol>
           </details>
+
+          <input type="hidden" name="mode" value="clamp" />
 
           <label>
             <span>Prompt</span>
@@ -177,7 +176,7 @@
           </label>
 
           <div class="intervention-controls">
-            <div class="form-field feature-field">
+            <div class="form-field">
               <span id="feature-label">Feature</span>
               <select
                 id="feature-input"
@@ -190,16 +189,8 @@
               </select>
             </div>
 
-            <div class="form-field">
-              <span id="intervention-label">Intervention</span>
-              <select name="mode" aria-labelledby="intervention-label" hidden>
-                <option value="clamp">Feature clamping</option>
-                <option value="additive">Additive steering</option>
-              </select>
-            </div>
-
             <div class="amount-field">
-              <span class="amount-label">Target activation</span>
+              <span>Target activation</span>
               <div class="amount-control">
                 <div class="amount-preset-control">
                   <input

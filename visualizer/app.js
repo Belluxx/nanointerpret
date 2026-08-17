@@ -30,8 +30,6 @@ const ui = {
   sandboxForm,
   prompt: formFields.prompt,
   featureInput: formFields.feature_id,
-  interventionMode: formFields.mode,
-  amountLabel: sandboxForm.querySelector(".amount-label"),
   amountMultiplier: sandboxForm.querySelector(".amount-preset-control input"),
   amountInput: formFields.amount,
   samplingSettings,
@@ -416,7 +414,7 @@ function initializeSandbox(metadata) {
   const options = document.createDocumentFragment();
   for (let featureId = 0; featureId < metadata.d_sae; featureId += 1) {
     const title = featuresById.get(featureId)?.title;
-    const label = title ? `Feature ${featureId} — ${title}` : `Feature ${featureId}`;
+    const label = title ? `${featureId}: ${title}` : `Feature ${featureId}`;
     options.append(new Option(label, String(featureId)));
   }
   ui.featureInput.append(options);
@@ -436,13 +434,7 @@ function selectedFeatureMaximum() {
 }
 
 function updateAmountControl() {
-  const clamping = ui.interventionMode.value === "clamp";
   const multiplier = ui.amountMultiplier.valueAsNumber;
-  ui.amountLabel.textContent = clamping ? "Target activation" : "Steering strength";
-  ui.amountInput.setAttribute(
-    "aria-label",
-    clamping ? "Target feature activation" : "Additive steering strength",
-  );
   ui.amountMultiplier.setAttribute(
     "aria-valuetext",
     `${formatPercentage(multiplier)} of maximum activation`,
@@ -494,7 +486,6 @@ function updateRangeProgress(range) {
   range.style.setProperty("--range-progress", `${progress}%`);
 }
 
-ui.interventionMode.addEventListener("change", updateAmountControl);
 ui.amountMultiplier.addEventListener("input", () => {
   amountIsCustom = false;
   updateAmountControl();

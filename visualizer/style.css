@@ -446,7 +446,7 @@ input.progress-range::-moz-range-thumb,
 }
 .intervention-controls {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 180px max-content;
+  grid-template-columns: minmax(220px, 1fr) max-content;
   align-items: start;
   gap: 12px;
   margin-top: 12px;
@@ -1050,12 +1050,6 @@ input.progress-range::-moz-range-thumb,
 :where(.progress-range, .dual-range input):focus-visible {
   outline-offset: 2px;
 }
-@media (max-width: 820px) {
-  .intervention-controls {
-    grid-template-columns: 180px minmax(0, 1fr);
-  }
-  .feature-field { grid-column: 1 / -1; }
-}
 @media (max-width: 720px) {
   main {
     width: calc(100% - 20px);
@@ -1114,7 +1108,7 @@ input.progress-range::-moz-range-thumb,
   }
   .context-header { align-items: flex-start; }
 }
-@media (max-width: 480px) {
+@media (max-width: 560px) {
   .intervention-controls { grid-template-columns: 1fr; }
 }
 @media (max-width: 380px) {
