@@ -146,7 +146,7 @@
               <span class="chevron" aria-hidden="true"></span>
             </summary>
             <ol>
-              <li>Enter a prompt like <q>Today I think that I will</q>.</li>
+              <li>Enter a prompt like <q>I was driving when</q></li>
               <li>
                 Choose the feature that you want to forcefully activate. Open the
                 feature dropdown and scroll or search by ID or title.
@@ -154,12 +154,12 @@
               <li>
                 Choose how strongly to activate the feature:
                 <ul>
-                  <li><strong>50%</strong> mildly activated.</li>
-                  <li><strong>100%</strong> maximum observed activation.</li>
-                  <li><strong>150%</strong> one and a half times the maximum.</li>
+                  <li><strong>50%</strong> mildly activated</li>
+                  <li><strong>100%</strong> maximum observed activation</li>
+                  <li><strong>200%</strong> twice the maximum (may break the model)</li>
                 </ul>
               </li>
-              <li>Press <strong>Generate comparison</strong>.</li>
+              <li>Press <strong>Generate comparison</strong></li>
             </ol>
           </details>
 
@@ -197,17 +197,16 @@
                     class="progress-range"
                     type="range"
                     min="0.5"
-                    max="1.5"
-                    step="0.25"
+                    max="2"
+                    step="0.5"
                     value="1.0"
                     aria-label="Percentage of maximum activation"
                   />
                   <div class="amount-step-labels" aria-hidden="true">
                     <span>50%</span>
-                    <span>75%</span>
                     <span>100%</span>
-                    <span>125%</span>
                     <span>150%</span>
+                    <span>200%</span>
                   </div>
                   <div class="amount-scale-caption">of feature max</div>
                 </div>
