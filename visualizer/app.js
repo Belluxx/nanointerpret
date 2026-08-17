@@ -30,8 +30,6 @@ const ui = {
   sandboxForm,
   prompt: formFields.prompt,
   featureInput: formFields.feature_id,
-  featureOptions: document.querySelector("#feature-options"),
-  selectedFeatureTitle: sandboxForm.querySelector(".selected-feature-title"),
   interventionMode: formFields.mode,
   amountLabel: sandboxForm.querySelector(".amount-label"),
   amountMultiplier: sandboxForm.querySelector(".amount-preset-control input"),
@@ -46,7 +44,6 @@ const ui = {
 
 let features = [];
 let featuresById = new Map();
-let featureCount = 0;
 let amountIsCustom = false;
 let renderedBaselineKey = null;
 let minimumActivationCount = 0;
@@ -57,7 +54,7 @@ let currentFeaturePage = 1;
 const DEFAULT_CONTEXT_RANGE_START = 0.7;
 const CONTEXT_LOAD_DELAY_MS = 120;
 const FEATURES_PER_PAGE = 50;
-const MAX_FEATURE_SUGGESTIONS = 8;
+const SEARCH_RESULT_BATCH_SIZE = 100;
 const generateButtonLabel = ui.generateButton.textContent.trim();
 
 document.addEventListener("pointermove", (event) => {
@@ -105,7 +102,7 @@ function element(tag, className, text) {
 
 const dropdowns = [];
 
-function createDropdown(trigger, menu, onChoose, beforeOpen) {
+function createDropdown(trigger, menu, onChoose) {
   let activeIndex = 0;
   const root = menu.parentElement;
   const options = () => [...menu.querySelectorAll('[role="option"]')];
@@ -119,7 +116,11 @@ function createDropdown(trigger, menu, onChoose, beforeOpen) {
 
   function activate(index, scroll = true) {
     const items = options();
-    if (!items.length) return;
+    if (!items.length) {
+      activeIndex = 0;
+      trigger.removeAttribute("aria-activedescendant");
+      return;
+    }
     activeIndex = Math.max(0, Math.min(index, items.length - 1));
     items.forEach((item, itemIndex) => {
       item.classList.toggle("is-active", itemIndex === activeIndex);
@@ -140,9 +141,10 @@ function createDropdown(trigger, menu, onChoose, beforeOpen) {
 
   function choose(index) {
     const item = options()[index];
-    if (!item) return;
+    if (!item) return false;
     onChoose(item);
     close();
+    return true;
   }
 
   trigger.addEventListener("keydown", (event) => {
@@ -151,9 +153,7 @@ function createDropdown(trigger, menu, onChoose, beforeOpen) {
       close();
     } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      if (menu.hidden) {
-        if (!beforeOpen || beforeOpen()) open();
-      }
+      if (menu.hidden) open();
       else activate(activeIndex + (event.key === "ArrowDown" ? 1 : -1));
     } else if (!menu.hidden && (event.key === "Home" || event.key === "End")) {
       event.preventDefault();
@@ -179,7 +179,13 @@ function createDropdown(trigger, menu, onChoose, beforeOpen) {
     if (item) activate(options().indexOf(item), false);
   });
 
-  const controller = { root, open, close };
+  const controller = {
+    root,
+    open,
+    close,
+    move: (offset) => activate(activeIndex + offset),
+    chooseActive: () => choose(activeIndex),
+  };
   dropdowns.push(controller);
   return controller;
 }
@@ -189,37 +195,104 @@ function createSelectControl(select, index) {
   const trigger = element("button", "custom-select-trigger");
   const value = element("span", "custom-select-value");
   const menu = element("div", "dropdown-menu select-menu");
+  const searchable = select.hasAttribute("data-searchable");
+  const optionsRoot = searchable ? element("div", "searchable-select-options") : menu;
+  const search = searchable ? element("input", "select-search") : null;
+  const empty = searchable ? element("p", "select-empty", "No features found") : null;
   const menuId = `select-menu-${index}`;
+  const optionsId = searchable ? `${menuId}-options` : menuId;
   const valueId = `select-value-${index}`;
   const labelledBy = select.getAttribute("aria-labelledby");
   const ariaLabel = select.getAttribute("aria-label");
+  const optionItems = () => [...optionsRoot.querySelectorAll('[role="option"]')];
+  let choices = [];
+  let matchingChoices = [];
+  let renderedChoiceCount = 0;
 
   trigger.type = "button";
   trigger.setAttribute("role", "combobox");
   trigger.setAttribute("aria-expanded", "false");
-  trigger.setAttribute("aria-controls", menuId);
+  trigger.setAttribute("aria-controls", optionsId);
   value.id = valueId;
   menu.id = menuId;
-  menu.setAttribute("role", "listbox");
   menu.hidden = true;
+  optionsRoot.id = optionsId;
+  optionsRoot.setAttribute("role", "listbox");
+
+  if (search) {
+    menu.classList.add("searchable-select-menu");
+    search.type = "search";
+    search.placeholder = "Search by ID or title";
+    search.autocomplete = "off";
+    search.setAttribute("aria-label", "Search features");
+    search.setAttribute("aria-controls", optionsId);
+    empty.hidden = true;
+    const searchWrap = element("div", "select-search-wrap");
+    searchWrap.append(search);
+    menu.append(searchWrap, optionsRoot, empty);
+  }
 
   select.before(control);
   control.append(select, trigger, menu);
   trigger.append(value, element("span", "dropdown-chevron"));
 
-  function render() {
+  function appendChoices() {
+    const end = Math.min(
+      renderedChoiceCount + (search ? SEARCH_RESULT_BATCH_SIZE : matchingChoices.length),
+      matchingChoices.length,
+    );
+    const fragment = document.createDocumentFragment();
+    for (let index = renderedChoiceCount; index < end; index += 1) {
+      const choice = matchingChoices[index];
+      const item = element("div", "custom-select-option", choice.text);
+      item.id = `${menuId}-option-${choice.index}`;
+      item.dataset.value = choice.value;
+      item.setAttribute("role", "option");
+      item.setAttribute("aria-selected", String(choice.value === select.value));
+      fragment.append(item);
+    }
+    optionsRoot.append(fragment);
+    renderedChoiceCount = end;
+  }
+
+  function renderChoices(nextChoices) {
+    matchingChoices = nextChoices;
+    renderedChoiceCount = 0;
+    optionsRoot.replaceChildren();
+    appendChoices();
+  }
+
+  function renderSearchResults() {
+    const query = search.value.trim().toLocaleLowerCase();
+    renderChoices(query
+      ? choices.filter((choice) => choice.searchText.includes(query))
+      : choices);
+    optionsRoot.scrollTop = 0;
+    empty.hidden = matchingChoices.length > 0;
+  }
+
+  function renderValue() {
     const selected = select.selectedOptions[0];
     value.textContent = selected?.textContent || "";
     if (labelledBy) trigger.setAttribute("aria-labelledby", `${labelledBy} ${valueId}`);
     else if (ariaLabel) trigger.setAttribute("aria-label", `${ariaLabel}: ${value.textContent}`);
-    menu.replaceChildren(...[...select.options].map((option, optionIndex) => {
-      const item = element("div", "custom-select-option", option.textContent);
-      item.id = `${menuId}-option-${optionIndex}`;
-      item.dataset.value = option.value;
-      item.setAttribute("role", "option");
-      item.setAttribute("aria-selected", String(option.selected));
-      return item;
-    }));
+    for (const item of optionItems()) {
+      item.setAttribute("aria-selected", String(item.dataset.value === select.value));
+    }
+  }
+
+  function updateOptions() {
+    choices = [...select.options]
+      .filter((option) => !option.hidden)
+      .map((option, optionIndex) => ({
+        index: optionIndex,
+        value: option.value,
+        text: option.textContent,
+        searchText: option.textContent.toLocaleLowerCase(),
+      }));
+    if (search) renderSearchResults();
+    else renderChoices(choices);
+    renderValue();
   }
 
   const dropdown = createDropdown(trigger, menu, (item) => {
@@ -229,14 +302,54 @@ function createSelectControl(select, index) {
   });
   trigger.addEventListener("click", () => {
     if (menu.hidden) {
-      dropdown.open(Math.max(0, select.selectedIndex));
+      const selectedIndex = optionItems()
+        .findIndex((item) => item.dataset.value === select.value);
+      dropdown.open(Math.max(0, selectedIndex));
+      search?.focus();
     } else {
       dropdown.close();
     }
   });
-  select.addEventListener("change", render);
-  render();
-  return { render };
+  if (search) {
+    let searchFrame;
+    trigger.addEventListener("keydown", (event) => {
+      if (!menu.hidden && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+        search.focus();
+      }
+    });
+    search.addEventListener("input", () => {
+      cancelAnimationFrame(searchFrame);
+      searchFrame = requestAnimationFrame(() => {
+        if (menu.hidden) return;
+        renderSearchResults();
+        dropdown.open();
+      });
+    });
+    optionsRoot.addEventListener("scroll", () => {
+      if (
+        renderedChoiceCount < matchingChoices.length
+        && optionsRoot.scrollTop + optionsRoot.clientHeight >= optionsRoot.scrollHeight - 40
+      ) appendChoices();
+    });
+    search.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        dropdown.close();
+        trigger.focus();
+      } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        dropdown.move(event.key === "ArrowDown" ? 1 : -1);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        if (dropdown.chooseActive()) trigger.focus();
+      } else if (event.key === "Tab") {
+        dropdown.close();
+      }
+    });
+  }
+  select.addEventListener("change", renderValue);
+  updateOptions();
+  return { trigger, updateOptions };
 }
 
 const selectControls = new Map(
@@ -245,67 +358,8 @@ const selectControls = new Map(
     createSelectControl(select, index),
   ]),
 );
+const featureSelectControl = selectControls.get(ui.featureInput);
 
-function matchingFeatures(query) {
-  const normalizedQuery = query.trim().toLocaleLowerCase();
-  const matches = [];
-  for (const feature of features) {
-    const title = feature.title || "";
-    if (normalizedQuery) {
-      if (
-        !String(feature.id).includes(normalizedQuery)
-        && !title.toLocaleLowerCase().includes(normalizedQuery)
-      ) continue;
-    } else if (!title) {
-      continue;
-    }
-    matches.push(feature);
-    if (matches.length === MAX_FEATURE_SUGGESTIONS) break;
-  }
-  return matches;
-}
-
-function prepareFeatureSuggestions() {
-  if (document.activeElement !== ui.featureInput || !features.length) {
-    return false;
-  }
-  const matches = matchingFeatures(ui.featureInput.value);
-  if (!matches.length) {
-    ui.featureOptions.replaceChildren();
-    return false;
-  }
-
-  ui.featureOptions.replaceChildren(...matches.map((feature) => {
-    const option = element("div", "autocomplete-option");
-    option.id = `feature-option-${feature.id}`;
-    option.dataset.featureId = String(feature.id);
-    option.setAttribute("role", "option");
-    option.append(
-      element("span", "autocomplete-option-title", feature.title || `Feature ${feature.id}`),
-      element("span", "autocomplete-option-id", `#${feature.id}`),
-    );
-    return option;
-  }));
-  return true;
-}
-
-const featureDropdown = createDropdown(
-  ui.featureInput,
-  ui.featureOptions,
-  (option) => {
-    ui.featureInput.value = option.dataset.featureId;
-    ui.featureInput.dispatchEvent(new Event("input", { bubbles: true }));
-    ui.featureInput.focus();
-  },
-  prepareFeatureSuggestions,
-);
-
-function renderFeatureSuggestions() {
-  if (prepareFeatureSuggestions()) featureDropdown.open();
-  else featureDropdown.close();
-}
-
-ui.featureInput.addEventListener("focus", renderFeatureSuggestions);
 document.addEventListener("pointerdown", (event) => {
   for (const dropdown of dropdowns) {
     if (!dropdown.root.contains(event.target)) dropdown.close();
@@ -358,45 +412,20 @@ async function fetchJson(url, options) {
 }
 
 function initializeSandbox(metadata) {
-  featureCount = metadata.d_sae;
   featuresById = new Map(features.map((feature) => [feature.id, feature]));
+  const options = document.createDocumentFragment();
+  for (let featureId = 0; featureId < metadata.d_sae; featureId += 1) {
+    const title = featuresById.get(featureId)?.title;
+    const label = title ? `Feature ${featureId} — ${title}` : `Feature ${featureId}`;
+    options.append(new Option(label, String(featureId)));
+  }
+  ui.featureInput.append(options);
+  featureSelectControl.updateOptions();
 }
 
 function selectedFeatureId() {
-  const value = ui.featureInput.value.trim();
-  const featureId = Number(value);
-  return value
-    && Number.isInteger(featureId)
-    && featureId >= 0
-    && featureId < featureCount
-    ? featureId
-    : null;
-}
-
-function updateSelectedFeatureTitle() {
-  const featureId = selectedFeatureId();
-  const title = featuresById.get(featureId)?.title || "";
-  ui.selectedFeatureTitle.textContent = title;
-  ui.selectedFeatureTitle.title = title;
-  ui.selectedFeatureTitle.hidden = !title;
-  if (title) ui.selectedFeatureTitle.href = `#feature-${featureId}`;
-  else ui.selectedFeatureTitle.removeAttribute("href");
-}
-
-function openFeature(featureId) {
-  let details = document.getElementById(`feature-${featureId}`);
-  if (!details) {
-    ui.search.value = "";
-    resetActivationCountRange();
-    const index = visibleFeatures().findIndex((feature) => feature.id === featureId);
-    currentFeaturePage = Math.floor(Math.max(0, index) / FEATURES_PER_PAGE) + 1;
-    renderFeatureList();
-    details = document.getElementById(`feature-${featureId}`);
-  }
-  if (!details) return;
-
-  details.open = true;
-  details.scrollIntoView({ behavior: "smooth", block: "start" });
+  const value = ui.featureInput.value;
+  return value === "" ? null : Number(value);
 }
 
 function selectedFeatureMaximum() {
@@ -475,17 +504,10 @@ ui.amountInput.addEventListener("input", () => {
   updateAmountMultiplierFromCustomValue();
 });
 ui.prompt.addEventListener("input", () => ui.prompt.setCustomValidity(""));
-ui.featureInput.addEventListener("input", () => {
-  ui.featureInput.setCustomValidity("");
-  updateSelectedFeatureTitle();
+ui.featureInput.addEventListener("change", () => {
+  featureSelectControl.trigger.removeAttribute("aria-invalid");
   if (amountIsCustom) updateAmountMultiplierFromCustomValue();
   else updateAmountControl();
-  renderFeatureSuggestions();
-});
-ui.selectedFeatureTitle.addEventListener("click", (event) => {
-  event.preventDefault();
-  const featureId = selectedFeatureId();
-  if (featureId !== null) openFeature(featureId);
 });
 ui.samplingInputs.forEach(addSynchronizedRange);
 ui.samplingSettings.addEventListener("invalid", () => {
@@ -503,8 +525,8 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
 
   const featureId = selectedFeatureId();
   if (featureId === null) {
-    ui.featureInput.setCustomValidity("Choose a feature from the suggestions or enter its numeric ID.");
-    ui.featureInput.reportValidity();
+    featureSelectControl.trigger.setAttribute("aria-invalid", "true");
+    featureSelectControl.trigger.focus();
     return;
   }
 
@@ -679,7 +701,7 @@ function renderFeatureList() {
     }));
   }
   ui.pageSelect.value = String(currentFeaturePage);
-  selectControls.get(ui.pageSelect).render();
+  selectControls.get(ui.pageSelect).updateOptions();
   ui.pageCount.textContent = `of ${pageCount.toLocaleString()}`;
   ui.previousPage.disabled = currentFeaturePage === 1;
   ui.nextPage.disabled = currentFeaturePage === pageCount;
@@ -956,7 +978,7 @@ ui.pageSelect.addEventListener("change", () => {
 ui.previousPage.addEventListener("click", () => showFeaturePage(currentFeaturePage - 1));
 ui.nextPage.addEventListener("click", () => showFeaturePage(currentFeaturePage + 1));
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && ui.search.value) {
+  if (!event.defaultPrevented && event.key === "Escape" && ui.search.value) {
     ui.search.value = "";
     resetFeaturePage();
     ui.search.focus();

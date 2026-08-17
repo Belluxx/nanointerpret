@@ -148,11 +148,8 @@
             <ol>
               <li>Enter a prompt like <q>Today I think that I will</q>.</li>
               <li>
-                Choose the feature that you want to forcefully activate. You can:
-                <ul>
-                  <li>Input a feature ID.</li>
-                  <li>Type something and choose from the options that appear.</li>
-                </ul>
+                Choose the feature that you want to forcefully activate. Open the
+                feature dropdown and scroll or search by ID or title.
               </li>
               <li>
                 Choose an intervention (leave <strong>Feature clamping</strong> if unsure).
@@ -181,35 +178,16 @@
 
           <div class="intervention-controls">
             <div class="form-field feature-field">
-              <label id="feature-label" for="feature-input">Feature</label>
-              <div class="feature-control">
-                <div class="feature-autocomplete">
-                  <input
-                    id="feature-input"
-                    name="feature_id"
-                    type="text"
-                    placeholder="ID or title"
-                    autocomplete="off"
-                    role="combobox"
-                    aria-autocomplete="list"
-                    aria-expanded="false"
-                    aria-controls="feature-options"
-                    required
-                  />
-                  <div
-                    id="feature-options"
-                    class="dropdown-menu autocomplete-menu"
-                    role="listbox"
-                    aria-labelledby="feature-label"
-                    hidden
-                  ></div>
-                </div>
-                <a
-                  class="selected-feature-title"
-                  aria-live="polite"
-                  hidden
-                ></a>
-              </div>
+              <span id="feature-label">Feature</span>
+              <select
+                id="feature-input"
+                name="feature_id"
+                aria-labelledby="feature-label"
+                data-searchable
+                hidden
+              >
+                <option value="" selected hidden>Select a feature</option>
+              </select>
             </div>
 
             <div class="form-field">
