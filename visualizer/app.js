@@ -3,6 +3,9 @@ const formFields = sandboxForm.elements;
 const samplingSettings = document.querySelector("#sampling-settings-dialog");
 const config = window.NANOINTERPRET_CONFIG;
 const staticData = Boolean(config.dataDirectory);
+const coldStartNote = staticData
+  ? "The GPU may be cold, please wait a minute the first time"
+  : null;
 const featureFiles = new Map();
 
 const ui = {
@@ -386,12 +389,15 @@ function renderGeneration(output, prompt, continuation) {
   );
 }
 
-function renderLoading(output, label) {
+function renderLoading(output, label, noteText) {
   const spinner = element("span", "generation-spinner");
   spinner.setAttribute("role", "status");
   spinner.setAttribute("aria-label", label);
   output.classList.add("is-loading");
   output.replaceChildren(spinner);
+  if (noteText) {
+    output.append(element("span", "generation-wait-note", noteText));
+  }
 }
 
 const compactNumber = new Intl.NumberFormat("en", {
@@ -555,9 +561,9 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
     ...ui.samplingInputs.map((input) => request[input.name]),
   ]);
   if (baselineKey !== renderedBaselineKey) {
-    renderLoading(ui.baselineOutput, "Generating");
+    renderLoading(ui.baselineOutput, "Generating", coldStartNote);
   }
-  renderLoading(ui.intervenedOutput, "Generating");
+  renderLoading(ui.intervenedOutput, "Generating", coldStartNote);
   ui.generationResults.hidden = false;
 
   ui.generateButton.disabled = true;

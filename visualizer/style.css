@@ -565,9 +565,17 @@ input.progress-range::-moz-range-thumb,
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   &.is-loading {
-    display: grid;
-    place-items: center;
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+    justify-content: center;
+    gap: 10px;
   }
+}
+.generation-wait-note {
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
 }
 .generation-spinner {
   width: 18px;
