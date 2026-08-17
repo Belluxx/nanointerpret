@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import shutil
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from itertools import groupby
@@ -11,6 +12,8 @@ from pathlib import Path
 
 import numpy as np
 from tqdm.auto import tqdm
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from visualize import ActivationData, STATIC_DIR
 
