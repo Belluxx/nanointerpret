@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg"
      width="1400"
-     height="420"
-     viewBox="0 0 1400 420"
+     height="300"
+     viewBox="0 60 1400 300"
      role="img"
      aria-labelledby="title description">
   <title id="title">nanointerpret</title>
@@ -103,25 +103,25 @@
        class="connections"
        transform="translate(885.59 291.64) rotate(-90) scale(0.50247 1)"
        stroke-width="1.1">
-      <path d="M 20 59 C 102 59, 166 15, 248 15" />
-      <path d="M 20 115 C 112 115, 166 15, 248 15" />
+      <path d="M 20 58 C 102 58, 166 15, 248 15" />
+      <path d="M 20 112 C 112 112, 166 15, 248 15" />
       <path d="M 20 76 C 108 76, 170 99, 248 99" />
       <path d="M 20 76 C 110 76, 174 155, 248 155" />
-      <path d="M 20 115 C 100 115, 166 155, 248 155" />
-      <path d="M 20 150 C 108 150, 174 155, 248 155" />
+      <path d="M 20 112 C 100 112, 166 155, 248 155" />
+      <path d="M 20 148 C 108 148, 174 155, 248 155" />
       <path d="M 20 166 C 106 166, 174 155, 248 155" />
-      <path d="M 20 131 C 110 131, 176 211, 248 211" />
+      <path d="M 20 130 C 110 130, 176 211, 248 211" />
       <path d="M 20 184 C 108 184, 174 211, 248 211" />
       <path d="M 20 166 C 106 166, 174 225.664, 248 225.664" />
     </g>
 
     <g id="input-nodes" class="muted" transform="rotate(-90 594.74 -290.85)">
-      <circle cx="12" cy="59" r="3.5" />
+      <circle cx="12" cy="58" r="3.5" />
       <circle cx="12" cy="76" r="3.5" />
       <circle cx="12" cy="94" r="3.5" />
-      <circle cx="12" cy="115" r="3.5" />
-      <circle cx="12" cy="131" r="3.5" />
-      <circle cx="12" cy="150" r="3.5" />
+      <circle cx="12" cy="112" r="3.5" />
+      <circle cx="12" cy="130" r="3.5" />
+      <circle cx="12" cy="148" r="3.5" />
       <circle cx="12" cy="166" r="3.5" />
       <circle cx="12" cy="184" r="3.5" />
     </g>
