@@ -60,6 +60,14 @@ const FEATURES_PER_PAGE = 50;
 const MAX_FEATURE_SUGGESTIONS = 8;
 const generateButtonLabel = ui.generateButton.textContent.trim();
 
+document.addEventListener("pointermove", (event) => {
+  if (!event.buttons) return;
+  const pointerTarget = document.elementFromPoint(event.clientX, event.clientY);
+  for (const popover of document.querySelectorAll(".popover-dialog:popover-open")) {
+    if (!popover.contains(pointerTarget)) popover.hidePopover();
+  }
+});
+
 function positionFilterPopover() {
   const buttonRect = ui.filterButton.getBoundingClientRect();
   const preferredLeft = innerWidth <= 720
