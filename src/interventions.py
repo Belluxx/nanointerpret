@@ -27,37 +27,42 @@ class InterventionRequest:
 
 
 def _feature_activation(
-    sae: TopKSAE, normalized_residual: Tensor, feature_id: int
+    sae: TopKSAE, normalized_residual: Tensor, feature_id: int | Tensor
 ) -> Tensor:
     shape = normalized_residual.shape[:-1]
     x = normalized_residual.reshape(-1, sae.d_model)
     indices, values = sae.encode(x)
-    activation = (values * (indices == feature_id)).sum(dim=-1)
+    target = feature_id.unsqueeze(1) if isinstance(feature_id, Tensor) else feature_id
+    activation = (values * (indices == target)).sum(dim=-1)
     return activation.reshape(shape)
 
 
 def apply_feature_intervention(
     residual: Tensor,
     sae: TopKSAE,
-    feature_id: int,
+    feature_id: int | Tensor,
     mode: str,
-    amount: float,
+    amount: float | Tensor,
     *,
     activation_scale: float = 1.0,
 ) -> Tensor:
-    """Return a residual stream with one SAE decoder-direction edit.
+    """Return a residual stream with SAE decoder-direction edits.
 
     The SAE operates on ``activation_scale * residual``. The edit is therefore
     calculated in the SAE's normalized coordinates and divided by that scale
     before it is added to the model's residual stream.
     """
+    batched = isinstance(feature_id, Tensor)
     direction = sae.decoder_weight[feature_id]
+    if batched:
+        direction = direction.unsqueeze(1)
+        amount = amount.unsqueeze(1)
     if mode == "clamp":
         normalized = residual.to(sae.decoder_weight.dtype) * activation_scale
         current = _feature_activation(sae, normalized, feature_id)
         delta = (amount - current).unsqueeze(-1) * direction
     elif mode == "additive":
-        delta = amount * direction
+        delta = amount.unsqueeze(-1) * direction if batched else amount * direction
     else:
         raise AssertionError(f"unexpected intervention mode: {mode}")
     return residual + (delta / activation_scale).to(residual.dtype)
@@ -67,9 +72,9 @@ def apply_feature_intervention(
 def feature_intervention_hook(
     layer: nn.Module,
     sae: TopKSAE,
-    feature_id: int,
+    feature_id: int | Tensor,
     mode: str,
-    amount: float,
+    amount: float | Tensor,
     activation_scale: float,
 ):
     def intervene(_module, args, kwargs):
@@ -151,22 +156,9 @@ class InterventionGenerator:
 
     @torch.inference_mode()
     def generate_pair(self, request: InterventionRequest) -> dict:
-        inputs = self.tokenizer(request.prompt, return_tensors="pt")
-        inputs = {name: value.to(self.device) for name, value in inputs.items()}
-        prompt_tokens = inputs["input_ids"].shape[1]
-        generation_args = {
-            **inputs,
-            "do_sample": request.temperature > 0,
-            "max_new_tokens": request.max_new_tokens,
-            "pad_token_id": self.tokenizer.pad_token_id,
-            "repetition_penalty": request.repetition_penalty,
-        }
-        if request.temperature > 0:
-            generation_args.update(
-                temperature=request.temperature,
-                top_p=request.top_p,
-                top_k=request.top_k,
-            )
+        generation_args, prompt_tokens = self._prepare_generation(
+            request.prompt, request
+        )
 
         baseline_key = (
             request.prompt,
@@ -200,6 +192,66 @@ class InterventionGenerator:
             "baseline": baseline,
             "intervened": self._decode_generation(intervened_ids[0], prompt_tokens),
         }
+
+    @torch.inference_mode()
+    def generate_intervened(
+        self, requests: list[InterventionRequest]
+    ) -> list[str]:
+        first = requests[0]
+        generation_args, prompt_tokens = self._prepare_generation(
+            [request.prompt for request in requests],
+            first,
+        )
+
+        feature_ids = torch.tensor(
+            [request.feature_id for request in requests],
+            device=self.device,
+        )
+        amounts = torch.tensor(
+            [request.amount for request in requests],
+            device=self.device,
+            dtype=self.sae.decoder_weight.dtype,
+        )
+        with feature_intervention_hook(
+            self.layer,
+            self.sae,
+            feature_ids,
+            first.mode,
+            amounts,
+            self.activation_scale,
+        ):
+            intervened_ids = self.model.generate(**generation_args)
+
+        return [
+            self._decode_generation(token_ids, prompt_tokens)
+            for token_ids in intervened_ids
+        ]
+
+    def _prepare_generation(
+        self,
+        prompts: str | list[str],
+        request: InterventionRequest,
+    ) -> tuple[dict, int]:
+        inputs = self.tokenizer(
+            prompts,
+            return_tensors="pt",
+            padding=isinstance(prompts, list),
+        )
+        inputs = {name: value.to(self.device) for name, value in inputs.items()}
+        generation_args = {
+            **inputs,
+            "do_sample": request.temperature > 0,
+            "max_new_tokens": request.max_new_tokens,
+            "pad_token_id": self.tokenizer.pad_token_id,
+            "repetition_penalty": request.repetition_penalty,
+        }
+        if request.temperature > 0:
+            generation_args.update(
+                temperature=request.temperature,
+                top_p=request.top_p,
+                top_k=request.top_k,
+            )
+        return generation_args, inputs["input_ids"].shape[1]
 
     def _decode_generation(self, token_ids: Tensor, prompt_tokens: int) -> str:
         return self.tokenizer.decode(
