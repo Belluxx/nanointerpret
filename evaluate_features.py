@@ -20,6 +20,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sae-dir", type=Path, required=True)
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--output", type=Path, required=True, help="Output JSONL path.")
+    parser.add_argument("--base-url", required=True, help="OpenAI-compatible judge URL. Default: http://127.0.0.1:9000/v1.")
+    parser.add_argument("--model", required=True, help="Judge model name. Default: model_default.")
+    parser.add_argument("--api-key", required=True, help="Judge API key")
     feature_selection = parser.add_mutually_exclusive_group(required=True)
     feature_selection.add_argument("--feature-id-range", type=int, nargs=2, metavar=("START", "STOP"), help="Half-open feature range: START is included and STOP is excluded.")
     feature_selection.add_argument("--feature-activation-range", type=int, nargs=2, metavar=("MIN", "MAX"), help="Select features with an activation count between MIN and MAX, inclusive.")
@@ -32,9 +35,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-k", type=int, default=64)
     parser.add_argument("--repetition-penalty", type=float, default=1.1)
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
-    parser.add_argument("--base-url", default="http://127.0.0.1:9000/v1", help="OpenAI-compatible judge URL. Default: http://127.0.0.1:9000/v1.")
-    parser.add_argument("--model", default="model_default", help="Judge model name. Default: model_default.")
-    parser.add_argument("--api-key", help="Judge API key. Default: OPENAI_API_KEY, or 'not-needed' if unset.")
     parser.add_argument("--generation-concurrent", type=int, default=1, help="Generation batch size. Default: 1.")
     parser.add_argument("--judge-concurrent", type=int, default=1, help="Concurrent judge requests. Default: 1.")
     return parser.parse_args()
@@ -179,7 +179,7 @@ def main() -> None:
 
     client = OpenAI(
         base_url=args.base_url,
-        api_key=args.api_key or os.environ.get("OPENAI_API_KEY") or "not-needed",
+        api_key=args.api_key,
         timeout=300,
     )
 
