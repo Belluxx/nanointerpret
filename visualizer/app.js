@@ -386,10 +386,10 @@ function renderGeneration(output, prompt, continuation) {
   );
 }
 
-function renderGenerationLoading(output) {
+function renderLoading(output, label) {
   const spinner = element("span", "generation-spinner");
   spinner.setAttribute("role", "status");
-  spinner.setAttribute("aria-label", "Generating");
+  spinner.setAttribute("aria-label", label);
   output.classList.add("is-loading");
   output.replaceChildren(spinner);
 }
@@ -555,9 +555,9 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
     ...ui.samplingInputs.map((input) => request[input.name]),
   ]);
   if (baselineKey !== renderedBaselineKey) {
-    renderGenerationLoading(ui.baselineOutput);
+    renderLoading(ui.baselineOutput, "Generating");
   }
-  renderGenerationLoading(ui.intervenedOutput);
+  renderLoading(ui.intervenedOutput, "Generating");
   ui.generationResults.hidden = false;
 
   ui.generateButton.disabled = true;
@@ -951,9 +951,10 @@ function renderDistribution(feature, payload) {
 async function loadFeature(details, feature) {
   const body = details.querySelector(".feature-body");
   details.dataset.loaded = "loading";
-  body.replaceChildren(element("p", "loading", "Loading feature..."));
+  renderLoading(body, "Loading feature");
   try {
     const payload = await fetchFeature(feature.id);
+    body.classList.remove("is-loading");
     body.replaceChildren(
       renderOverview(feature, payload),
       renderDistribution(feature, payload),
@@ -961,6 +962,7 @@ async function loadFeature(details, feature) {
     details.dataset.loaded = "true";
   } catch (error) {
     delete details.dataset.loaded;
+    body.classList.remove("is-loading");
     body.replaceChildren(element("p", "empty-state", `Could not load feature: ${error.message}`));
   }
 }

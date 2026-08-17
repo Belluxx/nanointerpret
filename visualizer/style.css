@@ -858,6 +858,10 @@ input.progress-range::-moz-range-thumb,
   padding: 22px 24px 26px calc(16px + var(--feature-id-column));
   border-top: 1px solid var(--line);
   background: var(--subtle);
+  &.is-loading {
+    display: grid;
+    place-items: center;
+  }
 }
 .feature-overview {
   display: grid;
@@ -1095,7 +1099,6 @@ input.progress-range::-moz-range-thumb,
   }
   .feature-body {
     padding: 18px 12px 22px;
-    > .loading { text-align: center; }
   }
   .feature-overview {
     grid-template-columns: 1fr;
