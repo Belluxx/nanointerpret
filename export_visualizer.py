@@ -15,8 +15,8 @@ from tqdm.auto import tqdm
 from visualize import ActivationData, STATIC_DIR
 
 
-CONTEXTS_PER_FEATURE = 20
-CONTEXT_TOKENS = 64
+CONTEXTS_PER_FEATURE = 40
+CONTEXT_TOKENS = 128
 FEATURES_PER_FILE = 32
 DEFAULT_WORKERS = min(8, os.cpu_count() or 1)
 
