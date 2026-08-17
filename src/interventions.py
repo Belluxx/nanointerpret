@@ -242,6 +242,7 @@ class InterventionGenerator:
             **inputs,
             "do_sample": request.temperature > 0,
             "max_new_tokens": request.max_new_tokens,
+            "max_length": None,
             "pad_token_id": self.tokenizer.pad_token_id,
             "repetition_penalty": request.repetition_penalty,
         }
