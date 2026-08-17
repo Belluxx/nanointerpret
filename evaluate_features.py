@@ -35,7 +35,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:9000/v1", help="OpenAI-compatible judge URL. Default: http://127.0.0.1:9000/v1.")
     parser.add_argument("--model", default="model_default", help="Judge model name. Default: model_default.")
     parser.add_argument("--api-key", help="Judge API key. Default: OPENAI_API_KEY, or 'not-needed' if unset.")
-    parser.add_argument("--concurrent", type=int, default=1, help="Generation batch size and concurrent judge requests. Default: 1.")
+    parser.add_argument("--generation-concurrent", type=int, default=1, help="Generation batch size. Default: 1.")
+    parser.add_argument("--judge-concurrent", type=int, default=1, help="Concurrent judge requests. Default: 1.")
     return parser.parse_args()
 
 
@@ -96,9 +97,7 @@ def coherence_score(
             if answer_label(token.token) is not None
         )
     except (AttributeError, IndexError, StopIteration, TypeError) as error:
-        raise ValueError(
-            f"the judge did not return Yes or No: {choice.message.content!r}"
-        ) from error
+        raise ValueError("the judge did not return Yes or No") from error
 
     answer_probabilities = {"yes": 0.0, "no": 0.0}
     for candidate in decision.top_logprobs or []:
@@ -157,8 +156,8 @@ def main() -> None:
     }
     results = []
     with tqdm(total=len(feature_ids), unit="feature", desc="Generate") as progress:
-        for start in range(0, len(feature_ids), args.concurrent):
-            batch_ids = feature_ids[start : start + args.concurrent]
+        for start in range(0, len(feature_ids), args.generation_concurrent):
+            batch_ids = feature_ids[start : start + args.generation_concurrent]
             requests = [
                 InterventionRequest(
                     feature_id=feature_id,
@@ -193,7 +192,7 @@ def main() -> None:
         )
         return {**result, "score": score}
 
-    with ThreadPoolExecutor(max_workers=args.concurrent) as executor:
+    with ThreadPoolExecutor(max_workers=args.judge_concurrent) as executor:
         results = list(
             tqdm(
                 executor.map(judge, results),
