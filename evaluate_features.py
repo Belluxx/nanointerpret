@@ -90,23 +90,30 @@ def coherence_score(
     )
     try:
         choice = response.choices[0]
-        decision = next(token for token in reversed(choice.logprobs.content) if token.token.strip())
-        if answer_label(decision.token) is None:
-            raise ValueError
-    except (AttributeError, IndexError, StopIteration, TypeError, ValueError) as error:
-        raise ValueError("the judge did not return only Yes or No") from error
+        decision = next(
+            token
+            for token in choice.logprobs.content
+            if answer_label(token.token) is not None
+        )
+    except (AttributeError, IndexError, StopIteration, TypeError) as error:
+        raise ValueError(
+            f"the judge did not return Yes or No: {choice.message.content!r}"
+        ) from error
 
     answer_probabilities = {"yes": 0.0, "no": 0.0}
     for candidate in decision.top_logprobs or []:
         label = answer_label(candidate.token)
         if label is not None:
             answer_probabilities[label] += math.exp(float(candidate.logprob))
+
     if not all(answer_probabilities.values()):
         raise ValueError(
             "the judge did not include both Yes and No in its top logprobs"
         )
+
     yes = answer_probabilities["yes"]
-    return yes / sum(answer_probabilities.values())
+    no = answer_probabilities["no"]
+    return yes / (yes + no)
 
 
 def main() -> None:
@@ -176,6 +183,7 @@ def main() -> None:
         api_key=args.api_key or os.environ.get("OPENAI_API_KEY") or "not-needed",
         timeout=300,
     )
+
     def judge(result: dict) -> dict:
         score = coherence_score(
             client,
