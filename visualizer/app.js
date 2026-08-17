@@ -98,6 +98,16 @@ function element(tag, className, text) {
   return result;
 }
 
+function normalizeFeatureQuery(value) {
+  return value.trim().toLocaleLowerCase();
+}
+
+function matchesFeatureQuery(id, title, query) {
+  return !query
+    || String(id).includes(query)
+    || (title || "").toLocaleLowerCase().includes(query);
+}
+
 const dropdowns = [];
 
 function createDropdown(trigger, menu, onChoose) {
@@ -193,12 +203,13 @@ function createSelectControl(select, index) {
   const trigger = element("button", "custom-select-trigger");
   const value = element("span", "custom-select-value");
   const menu = element("div", "dropdown-menu select-menu");
-  const searchable = select.hasAttribute("data-searchable");
-  const optionsRoot = searchable ? element("div", "searchable-select-options") : menu;
-  const search = searchable ? element("input", "select-search") : null;
-  const empty = searchable ? element("p", "select-empty", "No features found") : null;
+  const search = select.hasAttribute("data-feature-search")
+    ? element("input", "select-search")
+    : null;
+  const optionsRoot = search ? element("div", "searchable-select-options") : menu;
+  const empty = search ? element("p", "select-empty", "No features found") : null;
   const menuId = `select-menu-${index}`;
-  const optionsId = searchable ? `${menuId}-options` : menuId;
+  const optionsId = search ? `${menuId}-options` : menuId;
   const valueId = `select-value-${index}`;
   const labelledBy = select.getAttribute("aria-labelledby");
   const ariaLabel = select.getAttribute("aria-label");
@@ -261,10 +272,14 @@ function createSelectControl(select, index) {
   }
 
   function renderSearchResults() {
-    const query = search.value.trim().toLocaleLowerCase();
-    renderChoices(query
-      ? choices.filter((choice) => choice.searchText.includes(query))
-      : choices);
+    const query = normalizeFeatureQuery(search.value);
+    renderChoices(choices.filter((choice) => (
+      matchesFeatureQuery(
+        choice.value,
+        featuresById.get(Number(choice.value))?.title,
+        query,
+      )
+    )));
     optionsRoot.scrollTop = 0;
     empty.hidden = matchingChoices.length > 0;
   }
@@ -286,7 +301,6 @@ function createSelectControl(select, index) {
         index: optionIndex,
         value: option.value,
         text: option.textContent,
-        searchText: option.textContent.toLocaleLowerCase(),
       }));
     if (search) renderSearchResults();
     else renderChoices(choices);
@@ -594,7 +608,7 @@ const sorters = {
 };
 
 function visibleFeatures() {
-  const query = ui.search.value.trim().toLocaleLowerCase();
+  const query = normalizeFeatureQuery(ui.search.value);
   const selectedMinimumActivationCount = activationCountAt(
     ui.minimumActivationCount.valueAsNumber,
   );
@@ -606,9 +620,7 @@ function visibleFeatures() {
       feature.activation_count < selectedMinimumActivationCount
       || feature.activation_count > selectedMaximumActivationCount
     ) return false;
-    return !query
-      || String(feature.id).includes(query)
-      || (feature.title || "").toLocaleLowerCase().includes(query);
+    return matchesFeatureQuery(feature.id, feature.title, query);
   });
   visible.sort(sorters[ui.sort.value]);
   return reverseFeatureOrder ? visible.reverse() : visible;
