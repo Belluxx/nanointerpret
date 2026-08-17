@@ -325,6 +325,10 @@ const compactNumber = new Intl.NumberFormat("en", {
   maximumFractionDigits: 1,
 });
 
+function compactCount(count) {
+  return `~${compactNumber.format(count)}`;
+}
+
 function formatActivation(value) {
   if (value >= 100) return value.toFixed(0);
   if (value >= 10) return value.toFixed(1);
@@ -740,8 +744,8 @@ function renderOverview(feature, payload) {
 
   const facts = element("dl", "feature-facts");
   for (const [label, value] of [
-    ["Activating tokens", payload.activation_count.toLocaleString()],
-    ["Contexts", payload.context_count.toLocaleString()],
+    ["Activating tokens", compactCount(payload.activation_count)],
+    ["Contexts", compactCount(payload.context_count)],
     ["Peak activation", formatActivation(feature.max_activation)],
   ]) {
     const fact = element("div", "feature-fact");
