@@ -19,7 +19,7 @@ python3 train.py \
 python3 record_activations.py --sae-dir artifacts/gemma_3_270m_l9_w16_k16_500m
 ```
 
-3. Name the features with an LLM:
+3. Name the features with an LLM (if you want to run this locally too, check [here](interpret-locally.md)):
 
 ```sh
 # Around $2-$5 in API cost for 10K features
