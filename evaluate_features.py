@@ -184,13 +184,20 @@ def main() -> None:
     )
 
     def judge(result: dict) -> dict:
-        score = coherence_score(
-            client,
-            args.model,
-            result["completion"],
-            result["title"],
-        )
-        return {**result, "score": score}
+        try:
+            score = coherence_score(
+                client,
+                args.model,
+                result["completion"],
+                result["title"],
+            )
+            return {**result, "score": score}
+        except Exception as error:
+            return {
+                **result,
+                "score": None,
+                "judge_error": f"{type(error).__name__}: {error}",
+            }
 
     with ThreadPoolExecutor(max_workers=args.judge_concurrent) as executor:
         results = list(
@@ -202,7 +209,10 @@ def main() -> None:
             )
         )
 
-    results.sort(key=lambda result: result["score"], reverse=True)
+    results.sort(
+        key=lambda result: result["score"] if result["score"] is not None else -1.0,
+        reverse=True,
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8") as output:
         for result in results:
@@ -210,11 +220,15 @@ def main() -> None:
 
     print("\nRanked features:\n")
     for rank, result in enumerate(results, start=1):
+        score = result["score"]
+        score_text = f"{score:.6g}" if score is not None else "ERROR"
         print(
             f"{rank}. Feature {result['feature_id']} | "
-            f"score {result['score']:.6g} | {result['title']}"
+            f"score {score_text} | {result['title']}"
         )
         print(result["completion"].strip() or "[empty completion]")
+        if "judge_error" in result:
+            print(f"Judge error: {result['judge_error']}")
         print()
     print(f"Saved {len(results):,} ranked results to {args.output}")
 
