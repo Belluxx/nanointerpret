@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +19,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate with a range of activated SAE features and rank how well the completions match their feature titles.")
     parser.add_argument("--sae-dir", type=Path, required=True)
     parser.add_argument("--prompt", required=True)
+    parser.add_argument("--output", type=Path, required=True, help="Output JSONL path.")
     feature_selection = parser.add_mutually_exclusive_group(required=True)
     feature_selection.add_argument("--feature-id-range", type=int, nargs=2, metavar=("START", "STOP"), help="Half-open feature range: START is included and STOP is excluded.")
     feature_selection.add_argument("--feature-activation-range", type=int, nargs=2, metavar=("MIN", "MAX"), help="Select features with an activation count between MIN and MAX, inclusive.")
@@ -33,6 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:9000/v1", help="OpenAI-compatible judge URL. Default: http://127.0.0.1:9000/v1.")
     parser.add_argument("--model", default="model_default", help="Judge model name. Default: model_default.")
     parser.add_argument("--api-key", help="Judge API key. Default: OPENAI_API_KEY, or 'not-needed' if unset.")
+    parser.add_argument("--concurrent", type=int, default=1, help="Number of concurrent judge requests. Default: 1.")
     return parser.parse_args()
 
 
@@ -167,15 +170,31 @@ def main() -> None:
         api_key=args.api_key or os.environ.get("OPENAI_API_KEY") or "not-needed",
         timeout=300,
     )
-    for result in tqdm(results, unit="feature", desc="Judge"):
-        result["score"] = coherence_score(
+    def judge(result: dict) -> dict:
+        score = coherence_score(
             client,
             args.model,
             result["completion"],
             result["title"],
         )
+        return {**result, "score": score}
+
+    with ThreadPoolExecutor(max_workers=args.concurrent) as executor:
+        results = list(
+            tqdm(
+                executor.map(judge, results),
+                total=len(results),
+                unit="feature",
+                desc="Judge",
+            )
+        )
 
     results.sort(key=lambda result: result["score"], reverse=True)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    with args.output.open("w", encoding="utf-8") as output:
+        for result in results:
+            output.write(json.dumps(result, ensure_ascii=False) + "\n")
+
     print("\nRanked features:\n")
     for rank, result in enumerate(results, start=1):
         print(
@@ -184,6 +203,7 @@ def main() -> None:
         )
         print(result["completion"].strip() or "[empty completion]")
         print()
+    print(f"Saved {len(results):,} ranked results to {args.output}")
 
 
 if __name__ == "__main__":
