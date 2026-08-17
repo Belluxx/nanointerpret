@@ -68,7 +68,7 @@ def prepare(sae_repo_id: str) -> None:
     gpu=GPU,
     volumes={HF_CACHE_DIR: cache_volume},
     max_containers=1,
-    scaledown_window=5 * 60,
+    scaledown_window=60,
     startup_timeout=15 * 60,
 )
 class Interventions:
