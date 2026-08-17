@@ -33,7 +33,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:9000/v1", help="OpenAI-compatible judge URL. Default: http://127.0.0.1:9000/v1.")
     parser.add_argument("--model", default="model_default", help="Judge model name. Default: model_default.")
     parser.add_argument("--api-key", help="Judge API key. Default: OPENAI_API_KEY, or 'not-needed' if unset.")
-    parser.add_argument("--judge-max-tokens", type=int, default=512, help="Judge completion-token budget, including reasoning. Default: 512.")
     return parser.parse_args()
 
 
@@ -61,7 +60,8 @@ def judge_prompt(completion: str, title: str) -> str:
     return (
         f"Feature: {title}\n"
         f"Completion: {completion}\n"
-        "Is the completion coherent with the feature? Answer only Yes or No."
+        "Is the completion coherent with the feature? Respond with only Yes or No. "
+        "Do not reason or explain."
     )
 
 
@@ -75,32 +75,23 @@ def coherence_score(
     model: str,
     completion: str,
     title: str,
-    max_tokens: int,
 ) -> float:
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": judge_prompt(completion, title)}],
         temperature=0,
-        max_tokens=max_tokens,
+        max_tokens=3,
+        reasoning_effort="none",
         logprobs=True,
         top_logprobs=20,
     )
     try:
         choice = response.choices[0]
-        final_label = answer_label(choice.message.content or "")
-        if final_label is None:
+        decision = next(token for token in reversed(choice.logprobs.content) if token.token.strip())
+        if answer_label(decision.token) is None:
             raise ValueError
-        token_logprobs = choice.logprobs.content
-        decision = next(
-            token
-            for token in reversed(token_logprobs)
-            if answer_label(token.token) == final_label
-        )
     except (AttributeError, IndexError, StopIteration, TypeError, ValueError) as error:
-        raise ValueError(
-            "the judge did not return a final Yes/No token with logprobs; "
-            "increase --judge-max-tokens"
-        ) from error
+        raise ValueError("the judge did not return only Yes or No") from error
 
     answer_probabilities = {"yes": 0.0, "no": 0.0}
     for candidate in decision.top_logprobs or []:
@@ -182,7 +173,6 @@ def main() -> None:
             args.model,
             result["completion"],
             result["title"],
-            args.judge_max_tokens,
         )
 
     results.sort(key=lambda result: result["score"], reverse=True)
