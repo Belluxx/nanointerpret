@@ -421,7 +421,6 @@ input.progress-range::-moz-range-thumb,
   }
   ol {
     display: grid;
-    max-width: 80ch;
     gap: 7px;
     margin: 0;
     padding: 0 13px 13px 38px;
@@ -446,7 +445,7 @@ input.progress-range::-moz-range-thumb,
 }
 .intervention-controls {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) max-content;
+  grid-template-columns: minmax(220px, 420px) max-content;
   align-items: start;
   gap: 12px;
   margin-top: 12px;
@@ -493,7 +492,7 @@ input.progress-range::-moz-range-thumb,
 .amount-control {
   display: grid;
   grid-template-columns: minmax(0, 160px) 82px;
-  align-items: center;
+  align-items: start;
   gap: 12px;
 }
 .amount-preset-control {
@@ -517,7 +516,7 @@ input.progress-range::-moz-range-thumb,
   display: flex;
   justify-content: space-between;
   height: 8px;
-  margin: 4px 6px 0;
+  margin: 0 6px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   span {
@@ -1110,6 +1109,7 @@ input.progress-range::-moz-range-thumb,
 }
 @media (max-width: 560px) {
   .intervention-controls { grid-template-columns: 1fr; }
+  .amount-control { grid-template-columns: minmax(0, 1fr) 82px; }
 }
 @media (max-width: 380px) {
   .sandbox-actions {
