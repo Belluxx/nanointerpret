@@ -5,8 +5,7 @@ If you dont't want to use remote LLMs to interpret the SAE features, do the foll
 llama-server -m gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf \
   -ngl 999 -fa on -c 6000 --port 9000 \
   --temp 0.85 --top-k 20 --top-p 0.87 --min-p 0 \
-  --repeat-penalty 1 --presence-penalty 0 \
-  -spec-type draft-mtp   --spec-draft-n-max 2
+  --repeat-penalty 1 --presence-penalty 0
 ```
 
 2. Run the interpret script pointing at the local llamacpp server.
