@@ -160,7 +160,7 @@ function createDropdown(trigger, menu, onChoose, beforeOpen) {
       close();
     }
   });
-  menu.addEventListener("pointerdown", (event) => {
+  menu.addEventListener("click", (event) => {
     const item = event.target.closest('[role="option"]');
     if (!item) return;
     event.preventDefault();
