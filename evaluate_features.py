@@ -35,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:9000/v1", help="OpenAI-compatible judge URL. Default: http://127.0.0.1:9000/v1.")
     parser.add_argument("--model", default="model_default", help="Judge model name. Default: model_default.")
     parser.add_argument("--api-key", help="Judge API key. Default: OPENAI_API_KEY, or 'not-needed' if unset.")
-    parser.add_argument("--concurrent", type=int, default=1, help="Number of concurrent judge requests. Default: 1.")
+    parser.add_argument("--concurrent", type=int, default=1, help="Generation batch size and concurrent judge requests. Default: 1.")
     return parser.parse_args()
 
 
@@ -149,21 +149,27 @@ def main() -> None:
         "repetition_penalty": args.repetition_penalty,
     }
     results = []
-    for feature_id in tqdm(feature_ids, unit="feature", desc="Generate"):
-        amount = float(feature_max[feature_id]) * args.strength
-        request = InterventionRequest(
-            feature_id=feature_id,
-            amount=amount,
-            **request_args,
-        )
-        completion = generator.generate_pair(request)["intervened"]
-        results.append(
-            {
-                "feature_id": feature_id,
-                "title": titles[feature_id],
-                "completion": completion,
-            }
-        )
+    with tqdm(total=len(feature_ids), unit="feature", desc="Generate") as progress:
+        for start in range(0, len(feature_ids), args.concurrent):
+            batch_ids = feature_ids[start : start + args.concurrent]
+            requests = [
+                InterventionRequest(
+                    feature_id=feature_id,
+                    amount=float(feature_max[feature_id]) * args.strength,
+                    **request_args,
+                )
+                for feature_id in batch_ids
+            ]
+            completions = generator.generate_intervened(requests)
+            results.extend(
+                {
+                    "feature_id": feature_id,
+                    "title": titles[feature_id],
+                    "completion": completion,
+                }
+                for feature_id, completion in zip(batch_ids, completions)
+            )
+            progress.update(len(batch_ids))
 
     client = OpenAI(
         base_url=args.base_url,
