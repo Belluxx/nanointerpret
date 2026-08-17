@@ -32,29 +32,12 @@ def positive_int(value: str) -> int:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Export a compact, static SAE feature visualizer."
-    )
+    parser = argparse.ArgumentParser(description="Export a compact, static SAE feature visualizer.")
     parser.add_argument("--activations", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument(
-        "--names",
-        type=Path,
-        help=(
-            "Feature-title JSONL. Default: feature_names.jsonl next to the "
-            "activation directory, when present."
-        ),
-    )
-    parser.add_argument(
-        "--intervention-url",
-        help="Public intervention endpoint. The sandbox is hidden when omitted.",
-    )
-    parser.add_argument(
-        "--workers",
-        type=positive_int,
-        default=DEFAULT_WORKERS,
-        help=f"Concurrent export workers. Default: {DEFAULT_WORKERS}.",
-    )
+    parser.add_argument("--names", type=Path, help="Feature-title JSONL. Default: feature_names.jsonl next to the activation directory, when present.")
+    parser.add_argument("--intervention-url", help="Public intervention endpoint. The playground is hidden when omitted.")
+    parser.add_argument("--workers", type=positive_int, default=DEFAULT_WORKERS, help=f"Concurrent export workers. Default: {DEFAULT_WORKERS}.")
     return parser.parse_args()
 
 

@@ -240,7 +240,7 @@ class ActivationData:
         }
 
 
-class InterventionSandbox:
+class InterventionPlayground:
     def __init__(
         self,
         sae_dir: Path,
@@ -269,11 +269,11 @@ class VisualizerHandler(SimpleHTTPRequestHandler):
         self,
         *args,
         data: ActivationData,
-        sandbox: InterventionSandbox,
+        playground: InterventionPlayground,
         **kwargs,
     ):
         self.data = data
-        self.sandbox = sandbox
+        self.playground = playground
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
 
     def do_GET(self) -> None:
@@ -316,7 +316,7 @@ class VisualizerHandler(SimpleHTTPRequestHandler):
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(content_length))
-            result = self.sandbox.generate(payload)
+            result = self.playground.generate(payload)
         except (json.JSONDecodeError, UnicodeDecodeError):
             self.send_json({"error": "request body must be valid JSON"}, status=400)
         except Exception as error:
@@ -347,8 +347,8 @@ def main() -> None:
     print(f"Loading {args.activations} ...")
     data = ActivationData(args.activations, names_path)
     sae_dir = args.sae_dir or args.activations.parent
-    sandbox = InterventionSandbox(sae_dir, data, args.device)
-    handler = partial(VisualizerHandler, data=data, sandbox=sandbox)
+    playground = InterventionPlayground(sae_dir, data, args.device)
+    handler = partial(VisualizerHandler, data=data, playground=playground)
     with ThreadingHTTPServer((args.host, args.port), handler) as server:
         url = f"http://{args.host}:{server.server_address[1]}"
         print(f"Open {url}")

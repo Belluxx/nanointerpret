@@ -1,5 +1,5 @@
-const sandboxForm = document.querySelector(".intervention-form");
-const formFields = sandboxForm.elements;
+const playgroundForm = document.querySelector(".intervention-form");
+const formFields = playgroundForm.elements;
 const samplingSettings = document.querySelector("#sampling-settings-dialog");
 const config = window.NANOINTERPRET_CONFIG;
 const staticData = Boolean(config.dataDirectory);
@@ -30,14 +30,14 @@ const ui = {
   pageSelect: document.querySelector("#page-select"),
   pageCount: document.querySelector("#page-count"),
   nextPage: document.querySelector("#next-page-button"),
-  sandboxForm,
+  playgroundForm,
   prompt: formFields.prompt,
   featureInput: formFields.feature_id,
-  amountMultiplier: sandboxForm.querySelector(".amount-preset-control input"),
+  amountMultiplier: playgroundForm.querySelector(".amount-preset-control input"),
   amountInput: formFields.amount,
   samplingSettings,
   samplingInputs: [...samplingSettings.querySelectorAll("input[type='number']")],
-  generateButton: sandboxForm.querySelector("[type='submit']"),
+  generateButton: playgroundForm.querySelector("[type='submit']"),
   generationResults: document.querySelector("#generation-results"),
   baselineOutput: document.querySelector("#baseline-output"),
   intervenedOutput: document.querySelector("#intervened-output"),
@@ -429,7 +429,7 @@ async function fetchJson(url, options) {
   return payload;
 }
 
-function initializeSandbox(metadata) {
+function initializePlayground(metadata) {
   featuresById = new Map(features.map((feature) => [feature.id, feature]));
   const featureChoices = Array.from({ length: metadata.d_sae }, (_, id) => {
     const feature = featuresById.get(id);
@@ -535,7 +535,7 @@ ui.samplingSettings.addEventListener("invalid", () => {
     ui.samplingSettings.showPopover();
   }
 }, true);
-ui.sandboxForm.addEventListener("submit", async (event) => {
+ui.playgroundForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!ui.prompt.value.trim()) {
     ui.prompt.setCustomValidity("Enter a prompt to continue.");
@@ -550,9 +550,9 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  const request = Object.fromEntries(new FormData(ui.sandboxForm));
+  const request = Object.fromEntries(new FormData(ui.playgroundForm));
   request.feature_id = featureId;
-  for (const input of ui.sandboxForm.elements) {
+  for (const input of ui.playgroundForm.elements) {
     if (input.type === "number") request[input.name] = input.valueAsNumber;
   }
 
@@ -568,7 +568,7 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
 
   ui.generateButton.disabled = true;
   ui.generateButton.textContent = "Generating...";
-  ui.sandboxForm.querySelector(".sandbox-error")?.remove();
+  ui.playgroundForm.querySelector(".playground-error")?.remove();
   try {
     const payload = await fetchJson(config.interventionUrl, {
       method: "POST",
@@ -581,7 +581,7 @@ ui.sandboxForm.addEventListener("submit", async (event) => {
   } catch (error) {
     renderedBaselineKey = null;
     ui.generationResults.hidden = true;
-    const message = element("span", "sandbox-error", `Could not generate: ${error.message}`);
+    const message = element("span", "playground-error", `Could not generate: ${error.message}`);
     message.setAttribute("role", "alert");
     ui.generateButton.after(message);
   } finally {
@@ -1007,7 +1007,7 @@ document.addEventListener("keydown", (event) => {
 
 async function initialize() {
   try {
-    if (!config.interventionUrl) ui.sandboxForm.closest(".sandbox").hidden = true;
+    if (!config.interventionUrl) ui.playgroundForm.closest(".playground").hidden = true;
     const summaryUrl = staticData
       ? `${config.dataDirectory}/summary.json`
       : "/api/summary";
@@ -1023,7 +1023,7 @@ async function initialize() {
     ui.minimumActivationBound.textContent = minimumActivationCount.toLocaleString();
     ui.maximumActivationBound.textContent = maximumActivationCount.toLocaleString();
     renderMetadata(payload.metadata);
-    initializeSandbox(payload.metadata);
+    initializePlayground(payload.metadata);
     updateActivationCountRange();
     renderFeatureList();
   } catch (error) {

@@ -1,6 +1,6 @@
 ![nanointerpret](assets/banner.svg)
 
-Nanointerpret objective is being the most minimal but full-fledged interpretability sandbox where you can:
+Nanointerpret objective is being the most minimal but full-fledged interpretability playground where you can:
 - Train your own SAE on your own LLM
 - Automatically interpret SAE features with a local or remote LLM
 - Explore the features via a web GUI

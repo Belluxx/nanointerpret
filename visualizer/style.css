@@ -81,12 +81,12 @@ main {
 }
 
 /* Shared panels and controls */
-.sandbox,
+.playground,
 .browser {
   border: 1px solid var(--line);
   background: var(--surface);
 }
-.sandbox-header h2,
+.playground-header h2,
 .popover-dialog h3,
 .generation-results h3 {
   margin: 0;
@@ -327,9 +327,9 @@ input.progress-range::-moz-range-thumb,
   }
 }
 
-/* Intervention sandbox */
-.sandbox { margin-bottom: 24px; }
-.sandbox-header {
+/* Intervention playground */
+.playground { margin-bottom: 24px; }
+.playground-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -353,7 +353,7 @@ input.progress-range::-moz-range-thumb,
   text-transform: uppercase;
   anchor-name: --sampling-settings-button;
 }
-.sandbox:has(.sampling-settings-dialog:popover-open) .settings-button,
+.playground:has(.sampling-settings-dialog:popover-open) .settings-button,
 .toolbar:has(#clear-filters-button:not(:disabled)) .filter-button,
 .toolbar:has(.filter-popover:popover-open) .filter-button {
   border-color: var(--accent);
@@ -520,7 +520,7 @@ input.progress-range::-moz-range-thumb,
     white-space: nowrap;
   }
 }
-.sandbox-actions {
+.playground-actions {
   display: flex;
   align-items: center;
   gap: 16px;
@@ -540,7 +540,7 @@ input.progress-range::-moz-range-thumb,
     opacity: 0.55;
   }
 }
-.sandbox-error {
+.playground-error {
   color: var(--accent);
   font-size: 10px;
 }
@@ -1110,7 +1110,7 @@ input.progress-range::-moz-range-thumb,
   .amount-control { grid-template-columns: minmax(0, 1fr) 82px; }
 }
 @media (max-width: 380px) {
-  .sandbox-actions {
+  .playground-actions {
     align-items: flex-start;
     flex-direction: column;
   }
