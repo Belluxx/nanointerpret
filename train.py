@@ -57,7 +57,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--normalization-tokens", type=int, default=1_000_000, help="Training-token sample used to estimate one global activation scale.")
     parser.add_argument("--max-activation-l2", type=float, default=None, metavar="NORM", help="Exclude residual activations whose raw pre-normalization L2 norm exceeds NORM.")
     parser.add_argument("--log-every", type=int, default=100_000)
-    parser.add_argument("--checkpoint-every", type=int, default=50_000_000, help="Save and evaluate a checkpoint after this many training tokens.")
+    parser.add_argument("--checkpoint-every", type=int, default=50_000_000, help="Save a checkpoint after this many training tokens.")
+    parser.add_argument("--validate-every", type=int, default=50_000_000, help="Validate after this many training tokens.")
     parser.add_argument("--dead-window", type=int, default=10_000_000)
     parser.add_argument("--gradient-clip", type=float, default=None, metavar="MAX_NORM", help="Enable gradient clipping with the specified positive maximum norm.")
     parser.add_argument("--seed", type=int, default=42)
@@ -178,7 +179,7 @@ def run_training(
         raise ValueError("--normalization-tokens must be positive")
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    checkpoint_path = args.output_dir / "checkpoint.pt"
+    checkpoint_path = args.output_dir / "checkpoint_latest.pt"
     final_path = args.output_dir / "sae_final.pt"
     if args.resume:
         checkpoint = torch.load(
@@ -256,6 +257,7 @@ def run_training(
         args.resume,
         args.log_every,
         args.checkpoint_every,
+        args.validate_every,
     )
     from src.plot import save_feature_density_plot, save_training_plot
 
@@ -271,7 +273,6 @@ def run_training(
     (args.output_dir / "validation_metrics.json").write_text(
         json.dumps(evaluation, indent=2, sort_keys=True) + "\n"
     )
-    checkpoint_path.unlink(missing_ok=True)
     print(format_metrics_line(evaluation))
 
 

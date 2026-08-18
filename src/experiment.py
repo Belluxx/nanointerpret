@@ -452,9 +452,10 @@ def train_sae(
     resume: bool,
     log_every: int,
     checkpoint_every: int,
+    validate_every: int,
 ) -> dict:
     optimizer = torch.optim.Adam(sae.parameters(), lr=config.learning_rate)
-    checkpoint_path = output_dir / "checkpoint.pt"
+    checkpoint_path = output_dir / "checkpoint_latest.pt"
     metrics_path = output_dir / "train_metrics.jsonl"
     checkpoint_metrics_path = output_dir / "checkpoint_metrics.jsonl"
     if resume:
@@ -509,14 +510,15 @@ def train_sae(
         latest_evaluation = load_checkpoint_evaluation(
             checkpoint_metrics_path, state.processed_tokens
         )
-        if latest_evaluation is None:
-            latest_evaluation = evaluate_checkpoint()
 
     metrics = RunningMetrics(sae.d_model, sae.d_sae, device)
     next_log = ((state.processed_tokens // log_every) + 1) * log_every
     next_checkpoint = (
         (state.processed_tokens // checkpoint_every) + 1
     ) * checkpoint_every
+    next_validation = (
+        (state.processed_tokens // validate_every) + 1
+    ) * validate_every
     progress = tqdm(
         total=config.train_tokens,
         initial=state.processed_tokens,
@@ -592,18 +594,21 @@ def train_sae(
             while next_log <= state.processed_tokens:
                 next_log += log_every
 
-        if (
-            state.processed_tokens >= next_checkpoint
-            or state.processed_tokens == config.train_tokens
-        ):
+        if state.processed_tokens >= next_checkpoint:
             save_checkpoint(checkpoint_path, sae, optimizer, state, config)
-            latest_evaluation = evaluate_checkpoint()
-            last_evaluated_training_tokens = state.processed_tokens
             while next_checkpoint <= state.processed_tokens:
                 next_checkpoint += checkpoint_every
 
+        if state.processed_tokens >= next_validation:
+            latest_evaluation = evaluate_checkpoint()
+            last_evaluated_training_tokens = state.processed_tokens
+            while next_validation <= state.processed_tokens:
+                next_validation += validate_every
+
     metric_status.close()
     progress.close()
+    save_checkpoint(checkpoint_path, sae, optimizer, state, config)
+    save_checkpoint(output_dir / "checkpoint_final.pt", sae, optimizer, state, config)
     if last_evaluated_training_tokens != state.processed_tokens:
         latest_evaluation = evaluate_checkpoint()
     torch.save(
