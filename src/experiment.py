@@ -29,6 +29,8 @@ from .sae import (
 
 ResidualBatchFactory = Callable[..., Iterator[Tensor]]
 
+DOWNSTREAM_KL_TOKENS = 4096
+
 
 def default_aux_k(d_model: int) -> int:
     return 1 << round(math.log2(d_model / 2))
@@ -104,36 +106,31 @@ class _ActivationCaptured(Exception):
 
 class ResidualStreamCapture:
     def __init__(self, layer: nn.Module):
-        self.activation: Tensor | None = None
-
-        def capture(_module, args, kwargs):
-            hidden = args[0] if args else kwargs["hidden_states"]
-            self.activation = hidden.detach()
-            raise _ActivationCaptured
-
-        self.handle = layer.register_forward_pre_hook(capture, with_kwargs=True)
+        self.layer = layer
 
     @torch.no_grad()
     def __call__(
         self, model: nn.Module, input_ids: Tensor, attention_mask: Tensor | None
     ) -> Tensor:
-        self.activation = None
+        activation = None
+
+        def capture(_module, args, kwargs):
+            nonlocal activation
+            hidden = args[0] if args else kwargs["hidden_states"]
+            activation = hidden.detach()
+            raise _ActivationCaptured
+
+        handle = self.layer.register_forward_pre_hook(capture, with_kwargs=True)
         try:
-            model(input_ids=input_ids, attention_mask=attention_mask, use_cache=False)
-        except _ActivationCaptured:
-            pass
-        if self.activation is None:
+            try:
+                model(input_ids=input_ids, attention_mask=attention_mask, use_cache=False)
+            except _ActivationCaptured:
+                pass
+        finally:
+            handle.remove()
+        if activation is None:
             raise RuntimeError("the residual-stream hook did not run")
-        return self.activation
-
-    def close(self) -> None:
-        self.handle.remove()
-
-    def __enter__(self) -> ResidualStreamCapture:
-        return self
-
-    def __exit__(self, *_args: object) -> None:
-        self.close()
+        return activation
 
 
 def save_checkpoint(
@@ -169,10 +166,15 @@ def format_metrics(record: dict) -> str:
         if record["dead_feature_pct"] is None
         else f"{record['dead_feature_pct']:.2f}%"
     )
-    parts = [
-        f"EV {record['explained_variance']:.2%}",
-        f"MSE {record['mse']:,.4f}",
-    ]
+    parts = []
+    if record.get("downstream_kl") is not None:
+        parts.append(f"downstream KL {record['downstream_kl']:.6g}")
+    parts.extend(
+        [
+            f"EV {record['explained_variance']:.2%}",
+            f"MSE {record['mse']:,.4f}",
+        ]
+    )
     if record.get("auxk_loss") is not None:
         parts.append(f"AuxK NMSE {record['auxk_loss']:,.4f}")
     parts.append(f"dead {dead}")
@@ -442,6 +444,81 @@ def estimate_activation_normalization(
     return scale, pre_bias
 
 
+@torch.inference_mode()
+def evaluate_downstream_kl(
+    sae: TopKSAE,
+    model: nn.Module,
+    layer: nn.Module,
+    validation_tokens: np.memmap,
+    pad_token_id: int,
+    device: torch.device,
+    context_size: int,
+    activation_scale: float,
+) -> float:
+    validation_subset = validation_tokens[:DOWNSTREAM_KL_TOKENS]
+    kl_sum = 0.0
+    prediction_count = 0
+    progress = tqdm(
+        total=len(validation_subset),
+        unit="tok",
+        desc="Downstream KL",
+        leave=False,
+        disable=None,
+    )
+
+    def reconstruct_layer_input(_module, args, kwargs):
+        hidden = args[0] if args else kwargs["hidden_states"]
+        shape = hidden.shape
+        x = hidden.reshape(-1, shape[-1]).float() * activation_scale
+        reconstruction = sae(x)[0].reshape(shape)
+        reconstruction = (reconstruction / activation_scale).to(hidden.dtype)
+        if args:
+            return (reconstruction, *args[1:]), kwargs
+        kwargs["hidden_states"] = reconstruction
+        return args, kwargs
+
+    for input_ids, attention_mask in iter_context_batches(
+        validation_subset,
+        context_size,
+        1,  # Keep full-vocabulary logits memory-bounded.
+        pad_token_id,
+        shuffle=False,
+        seed=0,
+    ):
+        input_ids = input_ids.to(device, non_blocking=True)
+        attention_mask = attention_mask.to(device, non_blocking=True)
+        model_kwargs = {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "use_cache": False,
+        }
+        base_logits = model(**model_kwargs).logits[:, :-1].float()
+        base_log_z = torch.logsumexp(base_logits, dim=-1)
+
+        handle = layer.register_forward_pre_hook(
+            reconstruct_layer_input, with_kwargs=True
+        )
+        try:
+            sae_logits = model(**model_kwargs).logits[:, :-1].float()
+        finally:
+            handle.remove()
+        sae_log_z = torch.logsumexp(sae_logits, dim=-1)
+
+        # KL(base || sae), reusing the logit tensors to avoid another vocab-sized buffer.
+        sae_logits.neg_().add_(base_logits)
+        base_logits.sub_(base_log_z.unsqueeze(-1)).exp_()
+        token_kl = sae_logits.mul_(base_logits).sum(dim=-1)
+        token_kl.add_(sae_log_z).sub_(base_log_z)
+
+        valid = attention_mask[:, 1:].bool()
+        kl_sum += token_kl[valid].sum().item()
+        prediction_count += int(valid.sum().item())
+        progress.update(int(attention_mask.sum().item()))
+
+    progress.close()
+    return kl_sum / prediction_count
+
+
 def train_sae(
     sae: TopKSAE,
     train_batches: ResidualBatchFactory,
@@ -453,6 +530,7 @@ def train_sae(
     log_every: int,
     checkpoint_every: int,
     validate_every: int,
+    downstream_kl_evaluator: Callable[[TopKSAE, float], float],
 ) -> dict:
     optimizer = torch.optim.Adam(sae.parameters(), lr=config.learning_rate)
     checkpoint_path = output_dir / "checkpoint_latest.pt"
@@ -487,9 +565,16 @@ def train_sae(
     )
     latest_evaluation = None
     evaluation_seconds = 0.0
+    best_downstream_kl = math.inf
+    if resume:
+        for line in checkpoint_metrics_path.read_text().splitlines():
+            if line.strip():
+                best_downstream_kl = min(
+                    best_downstream_kl, float(json.loads(line)["downstream_kl"])
+                )
 
     def evaluate_checkpoint() -> dict:
-        nonlocal evaluation_seconds
+        nonlocal evaluation_seconds, best_downstream_kl
         evaluation_start = time.monotonic()
         evaluation = evaluate_sae(
             sae,
@@ -497,6 +582,18 @@ def train_sae(
             device,
             config,
         )
+        evaluation["downstream_kl"] = downstream_kl_evaluator(
+            sae, config.activation_scale
+        )
+        if evaluation["downstream_kl"] < best_downstream_kl:
+            best_downstream_kl = float(evaluation["downstream_kl"])
+            save_checkpoint(
+                output_dir / "checkpoint_best_kl.pt",
+                sae,
+                optimizer,
+                state,
+                config,
+            )
         evaluation_seconds += time.monotonic() - evaluation_start
         checkpoint_record = {
             **evaluation,

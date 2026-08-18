@@ -284,18 +284,18 @@ def main() -> None:
         f"Device: {device} | Evaluation: {token_count:,} tokens | "
         f"Layer: {layer_index} | Output: {output_path}"
     )
-    with ResidualStreamCapture(layers[layer_index]) as capture:
-        write_activations(
-            output_path,
-            tokenizer.pad_token_id,
-            model,
-            capture,
-            sae,
-            evaluation_tokens,
-            config,
-            device,
-            model_batch_size,
-        )
+    capture = ResidualStreamCapture(layers[layer_index])
+    write_activations(
+        output_path,
+        tokenizer.pad_token_id,
+        model,
+        capture,
+        sae,
+        evaluation_tokens,
+        config,
+        device,
+        model_batch_size,
+    )
 
 
 if __name__ == "__main__":

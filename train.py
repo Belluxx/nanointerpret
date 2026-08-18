@@ -25,6 +25,7 @@ from src.experiment import (
     capture_residual_cache,
     default_aux_k,
     estimate_activation_normalization,
+    evaluate_downstream_kl,
     find_transformer_layers,
     format_metrics_line,
     iter_captured_residual_batches,
@@ -132,19 +133,19 @@ def build_residual_cache(
     metadata.pop("cache_dir")
     metadata.update(layer_metadata)
 
-    with ResidualStreamCapture(layer) as capture:
-        capture_residual_cache(
-            model,
-            capture,
-            train_tokens,
-            validation_tokens,
-            tokenizer.pad_token_id,
-            device,
-            args.context_size,
-            args.model_batch_size,
-            cache_paths,
-            metadata,
-        )
+    capture = ResidualStreamCapture(layer)
+    capture_residual_cache(
+        model,
+        capture,
+        train_tokens,
+        validation_tokens,
+        tokenizer.pad_token_id,
+        device,
+        args.context_size,
+        args.model_batch_size,
+        cache_paths,
+        metadata,
+    )
 
 
 def run_training(
@@ -153,6 +154,7 @@ def run_training(
     metadata: dict,
     train_batches: ResidualBatchFactory,
     validation_batches: ResidualBatchFactory,
+    downstream_kl_evaluator,
 ) -> None:
     d_model = int(metadata["d_model"])
     d_sae = args.width_multiplier * d_model
@@ -258,6 +260,7 @@ def run_training(
         args.log_every,
         args.checkpoint_every,
         args.validate_every,
+        downstream_kl_evaluator,
     )
     from src.plot import save_feature_density_plot, save_training_plot
 
@@ -286,24 +289,38 @@ def main() -> None:
         tokenizer, model, layer, train_data, validation_data, metadata = (
             load_capture_inputs(args, device, model_dtype)
         )
-        with ResidualStreamCapture(layer) as capture:
-            batch_function = partial(
-                iter_captured_residual_batches,
+        capture = ResidualStreamCapture(layer)
+        batch_function = partial(
+            iter_captured_residual_batches,
+            model,
+            capture,
+            pad_token_id=tokenizer.pad_token_id,
+            device=device,
+            context_size=args.context_size,
+            model_batch_size=args.model_batch_size,
+            seed=args.seed,
+        )
+
+        def downstream_kl_evaluator(sae: TopKSAE, activation_scale: float) -> float:
+            return evaluate_downstream_kl(
+                sae,
                 model,
-                capture,
-                pad_token_id=tokenizer.pad_token_id,
-                device=device,
-                context_size=args.context_size,
-                model_batch_size=args.model_batch_size,
-                seed=args.seed,
-            )
-            run_training(
-                args,
+                layer,
+                validation_data,
+                tokenizer.pad_token_id,
                 device,
-                metadata,
-                partial(batch_function, train_data, shuffle=True),
-                partial(batch_function, validation_data, shuffle=False),
+                args.context_size,
+                activation_scale,
             )
+
+        run_training(
+            args,
+            device,
+            metadata,
+            partial(batch_function, train_data, shuffle=True),
+            partial(batch_function, validation_data, shuffle=False),
+            downstream_kl_evaluator,
+        )
         return
 
     spec = ResidualCacheSpec(
@@ -334,6 +351,41 @@ def main() -> None:
         print(f"Residual cache ({args.residual_cache_format}): {args.residual_cache_dir}")
         return
 
+    kl_tokenizer = load_tokenizer(args.model_id)
+    kl_token_spec = TokenCacheSpec(
+        cache_dir=args.cache_dir,
+        model_id=args.model_id,
+        dataset_id=args.dataset_id,
+        dataset_config=args.dataset_config,
+        train_tokens=args.train_tokens,
+        validation_tokens=args.validation_tokens,
+    )
+    _kl_train_path, kl_validation_path = build_token_cache(kl_tokenizer, kl_token_spec)
+    kl_validation_tokens = np.memmap(
+        kl_validation_path, mode="r", dtype=np.uint32
+    )
+
+    def downstream_kl_evaluator(sae: TopKSAE, activation_scale: float) -> float:
+        model = load_causal_lm(args.model_id, model_dtype, device)
+        try:
+            _, layers = find_transformer_layers(model)
+            return evaluate_downstream_kl(
+                sae,
+                model,
+                layers[int(metadata["layer_index"])],
+                kl_validation_tokens,
+                kl_tokenizer.pad_token_id,
+                device,
+                args.context_size,
+                activation_scale,
+            )
+        finally:
+            del model
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+            elif device.type == "mps":
+                torch.mps.empty_cache()
+
     train_data = np.load(train_path, mmap_mode="r")
     validation_data = np.load(validation_path, mmap_mode="r")
     batch_function = partial(
@@ -347,6 +399,7 @@ def main() -> None:
         metadata,
         partial(batch_function, train_data, shuffle=True),
         partial(batch_function, validation_data, shuffle=False),
+        downstream_kl_evaluator,
     )
 
 
