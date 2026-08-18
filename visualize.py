@@ -34,11 +34,20 @@ def positive_int(value: str) -> int:
     return parsed
 
 
+def unit_float(value: str) -> float:
+    parsed = float(value)
+    if not 0.0 <= parsed <= 1.0:
+        raise argparse.ArgumentTypeError("must be between 0 and 1")
+    return parsed
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Browse SAE feature activations in a local web UI.")
     parser.add_argument("--activations", type=Path, required=True)
     parser.add_argument("--names", type=Path, help="Feature-title JSONL produced by interpret_features.py. Default: feature_names.jsonl next to the activations directory, when present.")
     parser.add_argument("--sae-dir", type=Path, help="Training output containing config.json and sae_final.pt. Default: the activations directory's parent.")
+    parser.add_argument("--feature-scores", type=Path, help="Feature-score JSONL produced by evaluate_features.py. Default: feature_scores.jsonl in --sae-dir, when present.")
+    parser.add_argument("--starred-feature-threshold", type=unit_float, default=0.6, help="Score at or above which a feature is marked high-quality and starred. Default: 0.6.")
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=positive_int, default=8000)
@@ -67,6 +76,30 @@ def load_titles(path: Path | None) -> dict[int, str | None]:
     return titles
 
 
+def load_feature_scores(path: Path | None) -> dict[int, float | None]:
+    if path is None:
+        return {}
+
+    scores = {}
+    with path.open(encoding="utf-8") as input_file:
+        for line_number, line in enumerate(input_file, start=1):
+            if not line.strip():
+                continue
+            try:
+                result = json.loads(line)
+                score = result["score"]
+                if score is not None:
+                    score = float(score)
+                    if not math.isfinite(score):
+                        raise ValueError
+                scores[int(result["feature_id"])] = score
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+                raise ValueError(
+                    f"invalid feature score on line {line_number} of {path}"
+                ) from error
+    return scores
+
+
 class FeatureContexts(NamedTuple):
     token_positions: np.ndarray
     activation_values: np.ndarray
@@ -76,7 +109,14 @@ class FeatureContexts(NamedTuple):
 
 
 class ActivationData:
-    def __init__(self, activations_path: Path, names_path: Path | None, tokenizer=None):
+    def __init__(
+        self,
+        activations_path: Path,
+        names_path: Path | None,
+        scores_path: Path | None = None,
+        starred_feature_threshold: float = 0.6,
+        tokenizer=None,
+    ):
         activations = load_activations(activations_path)
         self.metadata = activations.metadata
         self.token_ids = activations.token_ids
@@ -91,16 +131,23 @@ class ActivationData:
         )
 
         titles = load_titles(names_path)
+        self.scores = load_feature_scores(scores_path)
+        self.starred_feature_threshold = starred_feature_threshold
         counts = np.diff(self.feature_ptr)
-        self.features = [
-            {
-                "id": int(feature_id),
-                "title": titles.get(int(feature_id)),
-                "activation_count": int(counts[feature_id]),
-                "max_activation": float(activations.feature_max[feature_id]),
-            }
-            for feature_id in np.flatnonzero(counts)
-        ]
+        self.features = []
+        for feature_id in np.flatnonzero(counts):
+            feature_id = int(feature_id)
+            score = self.scores.get(feature_id)
+            self.features.append(
+                {
+                    "id": feature_id,
+                    "title": titles.get(feature_id),
+                    "score": score,
+                    "high_quality": score is not None and score >= starred_feature_threshold,
+                    "activation_count": int(counts[feature_id]),
+                    "max_activation": float(activations.feature_max[feature_id]),
+                }
+            )
 
     def summary(self) -> dict:
         return {
@@ -178,6 +225,7 @@ class ActivationData:
     def feature(self, feature_id: int) -> dict:
         contexts = self._feature_contexts(feature_id)
         activating_token_ids = self.token_ids[contexts.token_positions]
+        score = self.scores.get(feature_id)
 
         token_summaries = []
         for percentile in TOKEN_PERCENTILES:
@@ -208,6 +256,10 @@ class ActivationData:
         )
 
         return {
+            "score": score,
+            "high_quality": (
+                score is not None and score >= self.starred_feature_threshold
+            ),
             "activation_count": len(contexts.token_positions),
             "context_count": len(contexts.group_starts),
             "token_groups": token_summaries,
@@ -339,14 +391,23 @@ class VisualizerHandler(SimpleHTTPRequestHandler):
 
 def main() -> None:
     args = parse_args()
+    sae_dir = args.sae_dir or args.activations.parent
     names_path = args.names
     if names_path is None:
         default_names = args.activations.with_name("feature_names.jsonl")
         names_path = default_names if default_names.exists() else None
+    scores_path = args.feature_scores
+    if scores_path is None:
+        default_scores = sae_dir / "feature_scores.jsonl"
+        scores_path = default_scores if default_scores.exists() else None
 
     print(f"Loading {args.activations} ...")
-    data = ActivationData(args.activations, names_path)
-    sae_dir = args.sae_dir or args.activations.parent
+    data = ActivationData(
+        args.activations,
+        names_path,
+        scores_path=scores_path,
+        starred_feature_threshold=args.starred_feature_threshold,
+    )
     playground = InterventionPlayground(sae_dir, data, args.device)
     handler = partial(VisualizerHandler, data=data, playground=playground)
     with ThreadingHTTPServer((args.host, args.port), handler) as server:

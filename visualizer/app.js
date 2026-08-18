@@ -101,6 +101,12 @@ function element(tag, className, text) {
   return result;
 }
 
+function featureStar() {
+  const star = element("span", "feature-star");
+  star.setAttribute("aria-hidden", "true");
+  return star;
+}
+
 function normalizeFeatureQuery(value) {
   return value.trim().toLocaleLowerCase();
 }
@@ -256,11 +262,14 @@ function createSelectControl(select, index) {
     const fragment = document.createDocumentFragment();
     for (let index = renderedChoiceCount; index < end; index += 1) {
       const choice = matchingChoices[index];
-      const item = element("div", "custom-select-option", choice.text);
+      const item = element("div", "custom-select-option");
       item.id = `${menuId}-option-${choice.index}`;
       item.dataset.value = choice.value;
+      item.dataset.highQuality = String(choice.high_quality);
       item.setAttribute("role", "option");
       item.setAttribute("aria-selected", String(choice.value === select.value));
+      if (choice.high_quality) item.append(featureStar());
+      item.append(element("span", "feature-option-text", choice.text));
       fragment.append(item);
     }
     optionsRoot.append(fragment);
@@ -289,7 +298,9 @@ function createSelectControl(select, index) {
 
   function renderValue() {
     const selected = select.selectedOptions[0];
-    value.textContent = selected?.textContent || "";
+    value.replaceChildren();
+    if (selected?.dataset.highQuality === "true") value.append(featureStar());
+    value.append(element("span", "feature-option-text", selected?.textContent || ""));
     if (labelledBy) trigger.setAttribute("aria-labelledby", `${labelledBy} ${valueId}`);
     else if (ariaLabel) trigger.setAttribute("aria-label", `${ariaLabel}: ${value.textContent}`);
     for (const item of optionItems()) {
@@ -304,6 +315,7 @@ function createSelectControl(select, index) {
         index: optionIndex,
         value: option.value,
         text: option.textContent,
+        high_quality: option.dataset.highQuality === "true",
       }));
     if (search) renderSearchResults();
     else renderChoices(choices);
@@ -429,22 +441,28 @@ async function fetchJson(url, options) {
   return payload;
 }
 
+function compareStarred(a, b) {
+  return Number(b.high_quality) - Number(a.high_quality);
+}
+
 function initializePlayground(metadata) {
   featuresById = new Map(features.map((feature) => [feature.id, feature]));
-  const featureChoices = Array.from({ length: metadata.d_sae }, (_, id) => {
-    const feature = featuresById.get(id);
-    return {
-      id,
-      activationCount: feature?.activation_count ?? 0,
-      title: feature?.title,
-    };
-  });
-  featureChoices.sort((a, b) => b.activationCount - a.activationCount || a.id - b.id);
+  const featureChoices = Array.from(
+    { length: metadata.d_sae },
+    (_, id) => featuresById.get(id) || { id, activation_count: 0, high_quality: false },
+  );
+  featureChoices.sort((a, b) => (
+    compareStarred(a, b)
+    || b.activation_count - a.activation_count
+    || a.id - b.id
+  ));
 
   const options = document.createDocumentFragment();
   for (const feature of featureChoices) {
     const label = feature.title ? `${feature.id}: ${feature.title}` : `Feature ${feature.id}`;
-    options.append(new Option(label, String(feature.id)));
+    const option = new Option(label, String(feature.id));
+    option.dataset.highQuality = String(feature.high_quality);
+    options.append(option);
   }
   ui.featureInput.append(options);
   featureSelectControl.updateOptions();
@@ -628,8 +646,12 @@ function visibleFeatures() {
     ) return false;
     return matchesFeatureQuery(feature.id, feature.title, query);
   });
-  visible.sort(sorters[ui.sort.value]);
-  return reverseFeatureOrder ? visible.reverse() : visible;
+  const sorter = sorters[ui.sort.value];
+  visible.sort((a, b) => (
+    compareStarred(a, b)
+    || (reverseFeatureOrder ? -sorter(a, b) : sorter(a, b))
+  ));
+  return visible;
 }
 
 function activationCountAt(position) {
@@ -686,8 +708,10 @@ function renderFeatureList() {
     details.id = `feature-${feature.id}`;
     const summary = element("summary");
     const title = feature.title || `Feature ${feature.id}`;
-    const titleElement = element("span", "feature-title", title);
+    const titleElement = element("span", "feature-title");
     titleElement.title = title;
+    if (feature.high_quality) titleElement.append(featureStar());
+    titleElement.append(element("span", "feature-title-text", title));
     summary.append(
       element("span", "feature-id", `#${feature.id}`),
       titleElement,

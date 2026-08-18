@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate with a range of activated SAE features and rank how well the completions match their feature titles.")
     parser.add_argument("--sae-dir", type=Path, required=True)
     parser.add_argument("--prompt", required=True)
-    parser.add_argument("--output", type=Path, required=True, help="Output JSONL path.")
+    parser.add_argument("--output", type=Path, help="Output JSONL path. Default: feature_scores.jsonl in --sae-dir.")
     parser.add_argument("--base-url", required=True, help="OpenAI-compatible judge URL. Default: http://127.0.0.1:9000/v1.")
     parser.add_argument("--model", required=True, help="Judge model name. Default: model_default.")
     parser.add_argument("--api-key", required=True, help="Judge API key")
@@ -39,7 +39,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
     parser.add_argument("--generation-concurrent", type=int, default=1, help="Generation batch size. Default: 1.")
     parser.add_argument("--judge-concurrent", type=int, default=1, help="Concurrent judge requests. Default: 1.")
-    return parser.parse_args()
+    args = parser.parse_args()
+    args.output = args.output or args.sae_dir / "feature_scores.jsonl"
+    return args
 
 
 def load_titles(path: Path) -> dict[int, str]:

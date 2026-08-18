@@ -15,7 +15,7 @@ from tqdm.auto import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from visualize import ActivationData, STATIC_DIR
+from visualize import ActivationData, STATIC_DIR, unit_float
 
 
 CONTEXTS_PER_FEATURE = 40
@@ -36,6 +36,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--activations", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--names", type=Path, help="Feature-title JSONL. Default: feature_names.jsonl next to the activation directory, when present.")
+    parser.add_argument("--feature-scores", type=Path, help="Feature-score JSONL produced by evaluate_features.py. Default: feature_scores.jsonl next to the activation directory, when present.")
+    parser.add_argument("--starred-feature-threshold", type=unit_float, default=0.6, help="Score at or above which a feature is marked high-quality and starred. Default: 0.6.")
     parser.add_argument("--intervention-url", help="Public intervention endpoint. The playground is hidden when omitted.")
     parser.add_argument("--workers", type=positive_int, default=DEFAULT_WORKERS, help=f"Concurrent export workers. Default: {DEFAULT_WORKERS}.")
     return parser.parse_args()
@@ -121,8 +123,17 @@ def main() -> None:
     if names_path is None:
         default_names = args.activations.with_name("feature_names.jsonl")
         names_path = default_names if default_names.exists() else None
+    scores_path = args.feature_scores
+    if scores_path is None:
+        default_scores = args.activations.with_name("feature_scores.jsonl")
+        scores_path = default_scores if default_scores.exists() else None
 
-    data = ActivationData(args.activations, names_path)
+    data = ActivationData(
+        args.activations,
+        names_path,
+        scores_path=scores_path,
+        starred_feature_threshold=args.starred_feature_threshold,
+    )
     temporary = args.output.with_name(args.output.name + ".tmp")
     if temporary.exists():
         raise FileExistsError(f"temporary export output already exists: {temporary}")

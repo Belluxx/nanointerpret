@@ -186,10 +186,29 @@ main {
   &[aria-invalid="true"] { border-color: var(--accent); }
 }
 .custom-select-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  min-width: 0;
+  white-space: nowrap;
+}
+.feature-option-text {
   overflow: hidden;
   min-width: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.feature-star {
+  --icon: url("icons/star.svg");
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  color: var(--accent);
+  background: currentcolor;
+  mask: var(--icon) center / contain no-repeat;
+  -webkit-mask: var(--icon) center / contain no-repeat;
 }
 .dropdown-chevron {
   width: 6px;
@@ -480,8 +499,10 @@ input.progress-range::-moz-range-thumb,
   color: var(--muted);
 }
 .searchable-select-menu .custom-select-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 .amount-control {
   display: grid;
@@ -826,10 +847,17 @@ input.progress-range::-moz-range-thumb,
   font-size: 11px;
 }
 .feature-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   overflow: hidden;
   padding-right: 20px;
   font-size: 13px;
   font-weight: 600;
+}
+.feature-title-text {
+  overflow: hidden;
+  min-width: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
