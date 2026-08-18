@@ -39,6 +39,8 @@ const ui = {
   samplingInputs: [...samplingSettings.querySelectorAll("input[type='number']")],
   generateButton: playgroundForm.querySelector("[type='submit']"),
   generationResults: document.querySelector("#generation-results"),
+  interventionExamples: document.querySelector("#intervention-examples"),
+  interventionExampleList: document.querySelector("#intervention-example-list"),
   baselineOutput: document.querySelector("#baseline-output"),
   intervenedOutput: document.querySelector("#intervened-output"),
 };
@@ -418,8 +420,11 @@ async function fetchJson(url, options) {
   return payload;
 }
 
-function compareStarred(a, b) {
-  return Number(b.high_quality) - Number(a.high_quality);
+function starredFirst(sorter) {
+  return (a, b) => (
+    Number(b.high_quality) - Number(a.high_quality)
+    || sorter(a, b)
+  );
 }
 
 function initializePlayground(metadata) {
@@ -428,11 +433,9 @@ function initializePlayground(metadata) {
     { length: metadata.d_sae },
     (_, id) => featuresById.get(id) || { id, activation_count: 0, high_quality: false },
   );
-  featureChoices.sort((a, b) => (
-    compareStarred(a, b)
-    || b.activation_count - a.activation_count
-    || a.id - b.id
-  ));
+  featureChoices.sort(starredFirst((a, b) => (
+    b.activation_count - a.activation_count || a.id - b.id
+  )));
 
   const options = document.createDocumentFragment();
   for (const feature of featureChoices) {
@@ -443,6 +446,66 @@ function initializePlayground(metadata) {
   }
   ui.featureInput.append(options);
   featureSelectControl.updateOptions();
+}
+
+function tryInterventionExample(example) {
+  ui.prompt.value = example.prompt;
+  ui.prompt.setCustomValidity("");
+
+  ui.featureInput.value = String(example.feature_id);
+  ui.featureInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+  const multiplier = example.target_activation_pct;
+  ui.amountMultiplier.value = String(multiplier);
+  if (ui.amountMultiplier.valueAsNumber === multiplier) {
+    amountIsCustom = false;
+    updateAmountControl();
+    return;
+  }
+
+  const featureMaximum = selectedFeatureMaximum();
+  amountIsCustom = true;
+  ui.amountInput.value = featureMaximum === null
+    ? ""
+    : String(Number((featureMaximum * multiplier).toPrecision(4)));
+  updateAmountMultiplierFromCustomValue();
+}
+
+function exampleField(label, value, className) {
+  const cell = element("span", `intervention-example-value ${className}`, value);
+  cell.dataset.label = label;
+  cell.setAttribute("aria-label", `${label}: ${value}`);
+  return cell;
+}
+
+function renderInterventionExamples(examples) {
+  if (!examples?.length) return;
+
+  const fragment = document.createDocumentFragment();
+  for (const example of examples) {
+    const featureTitle = featuresById.get(example.feature_id)?.title;
+    const featureLabel = featureTitle
+      ? `${featureTitle} (#${example.feature_id})`
+      : `Feature ${example.feature_id}`;
+    const button = element("button", "intervention-example-button", "Try example");
+    button.type = "button";
+    button.addEventListener("click", () => tryInterventionExample(example));
+
+    const item = element("div", "intervention-example");
+    item.append(
+      exampleField("Prompt", `“${example.prompt}”`, "example-prompt"),
+      exampleField("Feature", featureLabel, "example-feature"),
+      exampleField(
+        "Strength",
+        formatPercentage(example.target_activation_pct),
+        "example-strength",
+      ),
+      button,
+    );
+    fragment.append(item);
+  }
+  ui.interventionExampleList.replaceChildren(fragment);
+  ui.interventionExamples.hidden = false;
 }
 
 function selectedFeatureId() {
@@ -624,10 +687,9 @@ function visibleFeatures() {
     return matchesFeatureQuery(feature.id, feature.title, query);
   });
   const sorter = sorters[ui.sort.value];
-  visible.sort((a, b) => (
-    compareStarred(a, b)
-    || (reverseFeatureOrder ? -sorter(a, b) : sorter(a, b))
-  ));
+  visible.sort(starredFirst((a, b) => (
+    reverseFeatureOrder ? -sorter(a, b) : sorter(a, b)
+  )));
   return visible;
 }
 
@@ -1025,6 +1087,7 @@ async function initialize() {
     ui.maximumActivationBound.textContent = maximumActivationCount.toLocaleString();
     renderMetadata(payload.metadata);
     initializePlayground(payload.metadata);
+    renderInterventionExamples(payload.intervention_examples);
     updateActivationCountRange();
     renderFeatureList();
   } catch (error) {

@@ -41,13 +41,17 @@ def unit_float(value: str) -> float:
     return parsed
 
 
+def existing_file(path: Path) -> Path | None:
+    return path if path.exists() else None
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Browse SAE feature activations in a local web UI.")
     parser.add_argument("--activations", type=Path, required=True)
     parser.add_argument("--names", type=Path, help="Feature-title JSONL produced by interpret_features.py. Default: feature_names.jsonl next to the activations directory, when present.")
     parser.add_argument("--sae-dir", type=Path, help="Training output containing config.json and sae_final.pt. Default: the activations directory's parent.")
     parser.add_argument("--feature-scores", type=Path, help="Feature-score JSONL produced by evaluate_features.py. Default: feature_scores.jsonl in --sae-dir, when present.")
-    parser.add_argument("--starred-feature-threshold", type=unit_float, default=0.9, help="Score at or above which a feature is marked high-quality and starred. Default: 0.6.")
+    parser.add_argument("--starred-feature-threshold", type=unit_float, default=0.6, help="Score at or above which a feature is marked high-quality and starred. Default: 0.6.")
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=positive_int, default=8000)
@@ -74,6 +78,39 @@ def load_titles(path: Path | None) -> dict[int, str | None]:
                     f"invalid feature title on line {line_number} of {path}"
                 ) from error
     return titles
+
+
+def load_intervention_examples(path: Path | None) -> list[dict]:
+    if path is None:
+        return []
+
+    examples = []
+    with path.open(encoding="utf-8") as input_file:
+        for line_number, line in enumerate(input_file, start=1):
+            if not line.strip():
+                continue
+            try:
+                result = json.loads(line)
+                prompt = result["prompt"]
+                feature_id = int(result["feature_id"])
+                target_activation_pct = float(result["target_activation_pct"])
+                if (
+                    not isinstance(prompt, str)
+                    or not math.isfinite(target_activation_pct)
+                ):
+                    raise ValueError
+                examples.append(
+                    {
+                        "prompt": prompt,
+                        "feature_id": feature_id,
+                        "target_activation_pct": target_activation_pct,
+                    }
+                )
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+                raise ValueError(
+                    f"invalid intervention example on line {line_number} of {path}"
+                ) from error
+    return examples
 
 
 def load_feature_scores(path: Path | None) -> dict[int, float | None]:
@@ -114,6 +151,7 @@ class ActivationData:
         activations_path: Path,
         names_path: Path | None,
         scores_path: Path | None = None,
+        intervention_examples_path: Path | None = None,
         starred_feature_threshold: float = 0.6,
         tokenizer=None,
     ):
@@ -131,23 +169,31 @@ class ActivationData:
         )
 
         titles = load_titles(names_path)
+        self.intervention_examples = load_intervention_examples(intervention_examples_path)
         self.scores = load_feature_scores(scores_path)
         self.starred_feature_threshold = starred_feature_threshold
         counts = np.diff(self.feature_ptr)
         self.features = []
         for feature_id in np.flatnonzero(counts):
             feature_id = int(feature_id)
-            score = self.scores.get(feature_id)
             self.features.append(
                 {
                     "id": feature_id,
                     "title": titles.get(feature_id),
-                    "score": score,
-                    "high_quality": score is not None and score >= starred_feature_threshold,
+                    **self._score_metadata(feature_id),
                     "activation_count": int(counts[feature_id]),
                     "max_activation": float(activations.feature_max[feature_id]),
                 }
             )
+
+    def _score_metadata(self, feature_id: int) -> dict:
+        score = self.scores.get(feature_id)
+        return {
+            "score": score,
+            "high_quality": (
+                score is not None and score >= self.starred_feature_threshold
+            ),
+        }
 
     def summary(self) -> dict:
         return {
@@ -158,6 +204,7 @@ class ActivationData:
                 "d_sae": self.d_sae,
             },
             "features": self.features,
+            "intervention_examples": self.intervention_examples,
         }
 
     @cache
@@ -225,7 +272,6 @@ class ActivationData:
     def feature(self, feature_id: int) -> dict:
         contexts = self._feature_contexts(feature_id)
         activating_token_ids = self.token_ids[contexts.token_positions]
-        score = self.scores.get(feature_id)
 
         token_summaries = []
         for percentile in TOKEN_PERCENTILES:
@@ -256,10 +302,7 @@ class ActivationData:
         )
 
         return {
-            "score": score,
-            "high_quality": (
-                score is not None and score >= self.starred_feature_threshold
-            ),
+            **self._score_metadata(feature_id),
             "activation_count": len(contexts.token_positions),
             "context_count": len(contexts.group_starts),
             "token_groups": token_summaries,
@@ -392,20 +435,18 @@ class VisualizerHandler(SimpleHTTPRequestHandler):
 def main() -> None:
     args = parse_args()
     sae_dir = args.sae_dir or args.activations.parent
-    names_path = args.names
-    if names_path is None:
-        default_names = args.activations.with_name("feature_names.jsonl")
-        names_path = default_names if default_names.exists() else None
-    scores_path = args.feature_scores
-    if scores_path is None:
-        default_scores = sae_dir / "feature_scores.jsonl"
-        scores_path = default_scores if default_scores.exists() else None
+    names_path = args.names or existing_file(
+        args.activations.with_name("feature_names.jsonl")
+    )
+    scores_path = args.feature_scores or existing_file(sae_dir / "feature_scores.jsonl")
+    intervention_examples_path = existing_file(sae_dir / "intervention_examples.jsonl")
 
     print(f"Loading {args.activations} ...")
     data = ActivationData(
         args.activations,
         names_path,
         scores_path=scores_path,
+        intervention_examples_path=intervention_examples_path,
         starred_feature_threshold=args.starred_feature_threshold,
     )
     playground = InterventionPlayground(sae_dir, data, args.device)

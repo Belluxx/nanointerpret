@@ -15,7 +15,7 @@ from tqdm.auto import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from visualize import ActivationData, STATIC_DIR, unit_float
+from visualize import ActivationData, STATIC_DIR, existing_file, unit_float
 
 
 CONTEXTS_PER_FEATURE = 40
@@ -119,19 +119,21 @@ def main() -> None:
     if args.output.exists():
         raise FileExistsError(f"export output already exists: {args.output}")
 
-    names_path = args.names
-    if names_path is None:
-        default_names = args.activations.with_name("feature_names.jsonl")
-        names_path = default_names if default_names.exists() else None
-    scores_path = args.feature_scores
-    if scores_path is None:
-        default_scores = args.activations.with_name("feature_scores.jsonl")
-        scores_path = default_scores if default_scores.exists() else None
+    names_path = args.names or existing_file(
+        args.activations.with_name("feature_names.jsonl")
+    )
+    scores_path = args.feature_scores or existing_file(
+        args.activations.with_name("feature_scores.jsonl")
+    )
+    intervention_examples_path = existing_file(
+        args.activations.parent / "intervention_examples.jsonl"
+    )
 
     data = ActivationData(
         args.activations,
         names_path,
         scores_path=scores_path,
+        intervention_examples_path=intervention_examples_path,
         starred_feature_threshold=args.starred_feature_threshold,
     )
     temporary = args.output.with_name(args.output.name + ".tmp")
