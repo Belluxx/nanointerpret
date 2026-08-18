@@ -58,29 +58,6 @@ const FEATURES_PER_PAGE = 50;
 const SEARCH_RESULT_BATCH_SIZE = 100;
 const generateButtonLabel = ui.generateButton.textContent.trim();
 
-document.addEventListener("pointermove", (event) => {
-  if (!event.buttons) return;
-  const pointerTarget = document.elementFromPoint(event.clientX, event.clientY);
-  for (const popover of document.querySelectorAll(".popover-dialog:popover-open")) {
-    if (!popover.contains(pointerTarget)) popover.hidePopover();
-  }
-});
-
-function positionFilterPopover() {
-  const buttonRect = ui.filterButton.getBoundingClientRect();
-  const preferredLeft = innerWidth <= 720
-    ? buttonRect.left
-    : buttonRect.right - 260;
-  const left = Math.max(8, Math.min(preferredLeft, innerWidth - 268));
-
-  ui.filterPopover.style.top = `${buttonRect.bottom + 8}px`;
-  ui.filterPopover.style.left = `${left}px`;
-}
-
-ui.filterPopover.addEventListener("beforetoggle", (event) => {
-  if (event.newState === "open") positionFilterPopover();
-});
-
 function featureUrl(featureId) {
   if (!staticData) return `/api/features/${featureId}`;
   const fileId = Math.floor(featureId / config.featuresPerFile);

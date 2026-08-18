@@ -658,6 +658,7 @@ input.progress-range::-moz-range-thumb,
   }
 }
 .filter-button {
+  anchor-name: --filter-button;
   display: grid;
   place-items: center;
   width: 40px;
@@ -672,9 +673,8 @@ input.progress-range::-moz-range-thumb,
   height: 16px;
 }
 .filter-popover {
-  inset: auto;
+  position-anchor: --filter-button;
   width: 260px;
-  margin: 0;
   > header { padding: 12px 14px; }
   h3 { font-size: 12px; }
 }
@@ -760,6 +760,25 @@ input.progress-range::-moz-range-thumb,
   font-size: 9px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
+}
+.list-summary,
+.feature-quality-legend {
+  display: flex;
+  align-items: center;
+}
+.list-summary {
+  gap: 12px;
+  min-width: 0;
+}
+.feature-quality-legend {
+  gap: 2px;
+  flex: 0 0 auto;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.feature-quality-legend .feature-star {
+  width: 10px;
+  height: 10px;
 }
 .column-labels {
   display: grid;
@@ -1105,6 +1124,9 @@ input.progress-range::-moz-range-thumb,
   .filter-button {
     justify-self: start;
     margin-left: 0;
+  }
+  .filter-popover {
+    inset: anchor(bottom) auto auto anchor(left);
   }
   .sort-group {
     grid-column: 2;
