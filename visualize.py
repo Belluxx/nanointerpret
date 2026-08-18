@@ -47,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--names", type=Path, help="Feature-title JSONL produced by interpret_features.py. Default: feature_names.jsonl next to the activations directory, when present.")
     parser.add_argument("--sae-dir", type=Path, help="Training output containing config.json and sae_final.pt. Default: the activations directory's parent.")
     parser.add_argument("--feature-scores", type=Path, help="Feature-score JSONL produced by evaluate_features.py. Default: feature_scores.jsonl in --sae-dir, when present.")
-    parser.add_argument("--starred-feature-threshold", type=unit_float, default=0.6, help="Score at or above which a feature is marked high-quality and starred. Default: 0.6.")
+    parser.add_argument("--starred-feature-threshold", type=unit_float, default=0.9, help="Score at or above which a feature is marked high-quality and starred. Default: 0.6.")
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=positive_int, default=8000)
