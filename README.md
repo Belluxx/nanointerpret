@@ -31,6 +31,7 @@ Then proceed to a guide:
 The repo takes different ideas from [OpenAI](https://arxiv.org/abs/2406.04093) and [Anthropic](https://transformer-circuits.pub/2024/scaling-monosemanticity/index.html). It also includes some ablation experiments I did to see what works best ([experiments.md](docs/experiments.md))
 
 Future objectives:
+- [ ] Use later layers to avoid heavily syntactic features
 - [ ] Use llama.cpp to run LLM and capture acivations
 - [ ] Test on 3B-7B models
 - [ ] Test on interactive chat tuned models (the repo uses pretrained base Gemma/Qwen)
