@@ -16,6 +16,7 @@
 - `dead_window`: Number of tokens a feature can go without firing before it becomes dead and eligible for AuxK. The default is 10M tokens.
 - `model_batch_size`: contexts processed by the language model together. The default is `32`.
 - `sae_batch_size`: residual-stream token vectors count. The default is `4096`; this is an optimization batch, not just a data-loading setting. OpenAI used much larger batches for parallelism but the converged loss was not strongly batch-dependent. [1]
+- `max_activation_l2`: Optional raw residual-stream L2 cutoff (`--max-activation-l2`). Use only for Qwen models (`1000` is a good threshold because `p99.5` is `231` and first token anomaly is `14000-16000`).
 - `learning_rate`: The default is `3e-4`.
 
 ## Methodology

@@ -55,6 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-batch-size", type=int, default=32, help="Contexts processed together; lower this if memory is limited.")
     parser.add_argument("--sae-batch-size", type=int, default=4096, help="SAE token microbatch; lower this if memory is limited.")
     parser.add_argument("--normalization-tokens", type=int, default=1_000_000, help="Training-token sample used to estimate one global activation scale.")
+    parser.add_argument("--max-activation-l2", type=float, default=None, metavar="NORM", help="Exclude residual activations whose raw pre-normalization L2 norm exceeds NORM.")
     parser.add_argument("--log-every", type=int, default=100_000)
     parser.add_argument("--checkpoint-every", type=int, default=50_000_000, help="Save and evaluate a checkpoint after this many training tokens.")
     parser.add_argument("--dead-window", type=int, default=10_000_000)
@@ -206,6 +207,7 @@ def run_training(
             device,
             args.normalization_tokens,
             args.subtract_pre_bias,
+            args.max_activation_l2,
         )
     config = ExperimentConfig(
         model_id=args.model_id,
@@ -232,6 +234,7 @@ def run_training(
         residual_cache_format=(
             args.residual_cache_format if args.cache_activations else None
         ),
+        max_activation_l2=args.max_activation_l2,
     )
     sae = TopKSAE(
         d_model,

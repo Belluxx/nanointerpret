@@ -45,6 +45,12 @@ python3 train.py --cache-activations --train-tokens 300000000 --checkpoint-every
 | ✓ (1) | 0.00239 | 99.43% | 0.18% | 63k tokens/s |
 | ✗ | **0.00236** | **99.44%** | **0.14%** | **85k tokens/s** |
 
+## Fixing Qwen first-token activation outliers
+
+Qwen tends to have extremely large residual-stream activations at the first sequence token ([paper](https://arxiv.org/pdf/2605.11887), bottom of page 2).
+
+To prevent them from dominating SAE normalization / training, a raw L2-norm filter was added (`--max-activation-l2`).
+
 ## First stable training run
 
 The first stable training run was the following:

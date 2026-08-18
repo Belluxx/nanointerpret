@@ -8,7 +8,7 @@ from pathlib import Path
 import torch
 from torch import Tensor, nn
 
-from .experiment import find_transformer_layers
+from .experiment import find_transformer_layers, raw_l2_activation_mask
 from .runtime import load_causal_lm, load_tokenizer
 from .sae import TopKSAE, load_sae
 
@@ -45,27 +45,51 @@ def apply_feature_intervention(
     amount: float | Tensor,
     *,
     activation_scale: float = 1.0,
+    max_activation_l2: float | None = None,
 ) -> Tensor:
     """Return a residual stream with SAE decoder-direction edits.
 
     The SAE operates on ``activation_scale * residual``. The edit is therefore
     calculated in the SAE's normalized coordinates and divided by that scale
-    before it is added to the model's residual stream.
+    before it is added to the model's residual stream. Raw activations rejected
+    by the L2 filter bypass the SAE and are returned unchanged.
     """
+    keep = raw_l2_activation_mask(residual, max_activation_l2)
+    if not keep.any():
+        return residual
+
     batched = isinstance(feature_id, Tensor)
     direction = sae.decoder_weight[feature_id]
     if batched:
-        direction = direction.unsqueeze(1)
-        amount = amount.unsqueeze(1)
+        broadcast_dims = residual.ndim - 2
+        direction = direction.reshape(
+            len(feature_id), *(1 for _ in range(broadcast_dims)), sae.d_model
+        )
+        if isinstance(amount, Tensor):
+            amount = amount.reshape(
+                len(feature_id), *(1 for _ in range(broadcast_dims))
+            )
     if mode == "clamp":
         normalized = residual.to(sae.decoder_weight.dtype) * activation_scale
-        current = _feature_activation(sae, normalized, feature_id)
+        filtered = normalized[keep]
+        if batched:
+            target = feature_id.reshape(
+                len(feature_id), *(1 for _ in range(keep.ndim - 1))
+            ).expand(keep.shape)[keep]
+        else:
+            target = feature_id
+        filtered_current = _feature_activation(sae, filtered, target)
+        current = torch.zeros(
+            keep.shape, dtype=filtered_current.dtype, device=residual.device
+        )
+        current[keep] = filtered_current
         delta = (amount - current).unsqueeze(-1) * direction
     elif mode == "additive":
         delta = amount.unsqueeze(-1) * direction if batched else amount * direction
     else:
         raise AssertionError(f"unexpected intervention mode: {mode}")
-    return residual + (delta / activation_scale).to(residual.dtype)
+    modified = residual + (delta / activation_scale).to(residual.dtype)
+    return torch.where(keep.unsqueeze(-1), modified, residual)
 
 
 @contextmanager
@@ -76,6 +100,7 @@ def feature_intervention_hook(
     mode: str,
     amount: float | Tensor,
     activation_scale: float,
+    max_activation_l2: float | None,
 ):
     def intervene(_module, args, kwargs):
         hidden = args[0] if args else kwargs["hidden_states"]
@@ -87,6 +112,7 @@ def feature_intervention_hook(
             mode,
             amount,
             activation_scale=activation_scale,
+            max_activation_l2=max_activation_l2,
         )
         modified = torch.cat((hidden[:, :-1], modified_last), dim=1)
         if args:
@@ -108,6 +134,7 @@ class InterventionGenerator:
         layer: nn.Module,
         sae: TopKSAE,
         activation_scale: float,
+        max_activation_l2: float | None,
         device: torch.device,
     ):
         self.model = model
@@ -115,6 +142,7 @@ class InterventionGenerator:
         self.layer = layer
         self.sae = sae
         self.activation_scale = activation_scale
+        self.max_activation_l2 = max_activation_l2
         self.device = device
         self._baseline_cache: tuple[tuple, str, int] | None = None
 
@@ -151,6 +179,7 @@ class InterventionGenerator:
             layers[layer_index],
             sae,
             float(config["activation_scale"]),
+            config["max_activation_l2"],
             device,
         )
 
@@ -185,6 +214,7 @@ class InterventionGenerator:
             request.mode,
             request.amount,
             self.activation_scale,
+            self.max_activation_l2,
         ):
             intervened_ids = self.model.generate(**generation_args)
 
@@ -219,6 +249,7 @@ class InterventionGenerator:
             first.mode,
             amounts,
             self.activation_scale,
+            self.max_activation_l2,
         ):
             intervened_ids = self.model.generate(**generation_args)
 

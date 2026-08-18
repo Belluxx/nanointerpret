@@ -34,6 +34,22 @@ def default_aux_k(d_model: int) -> int:
     return 1 << round(math.log2(d_model / 2))
 
 
+def raw_l2_activation_mask(residual: Tensor, max_activation_l2: float | None) -> Tensor:
+    # Return which raw residual vectors are eligible for SAE consumption.
+    if max_activation_l2 is None:
+        return torch.ones(residual.shape[:-1], dtype=torch.bool, device=residual.device)
+    return torch.linalg.vector_norm(residual.float(), dim=-1) <= max_activation_l2
+
+
+def filter_raw_l2_activations(
+    residual: Tensor, max_activation_l2: float | None
+) -> Tensor:
+    # Drop raw residual vectors above the L2 threshold
+    if max_activation_l2 is None:
+        return residual
+    return residual[raw_l2_activation_mask(residual, max_activation_l2)]
+
+
 @dataclass(frozen=True)
 class ExperimentConfig:
     model_id: str
@@ -53,6 +69,7 @@ class ExperimentConfig:
     seed: int
     model_dtype: str
     residual_cache_format: str | None
+    max_activation_l2: float | None = None
     normalization_tokens: int = 0
     activation_scale: float = 1.0
     subtract_pre_bias: bool = True
@@ -387,6 +404,7 @@ def estimate_activation_normalization(
     device: torch.device,
     normalization_tokens: int,
     subtract_pre_bias: bool,
+    max_activation_l2: float | None,
 ) -> tuple[float, Tensor | None]:
     target_tokens = min(normalization_tokens, train_token_count)
     tokens_seen = 0
@@ -400,6 +418,9 @@ def estimate_activation_normalization(
         dynamic_ncols=True,
     )
     for residual in train_batches(skip_batches=0):
+        residual = filter_raw_l2_activations(residual, max_activation_l2)
+        if len(residual) == 0:
+            continue
         residual = residual.to(device=device, dtype=torch.float32)
         take = min(len(residual), target_tokens - tokens_seen)
         calibration_residual = residual[:take]
@@ -411,6 +432,8 @@ def estimate_activation_normalization(
         if tokens_seen >= target_tokens:
             break
     progress.close()
+    if tokens_seen == 0:
+        raise ValueError("raw-L2 activation filter rejected every normalization token")
 
     mean_squared_norm = squared_norm_sum / tokens_seen
     scale = math.sqrt(d_model / mean_squared_norm)
@@ -507,11 +530,19 @@ def train_sae(
     start_time = time.monotonic()
     start_tokens = state.processed_tokens
     evaluation_seconds = 0.0
+    last_evaluated_training_tokens = (
+        state.processed_tokens if latest_evaluation is not None else None
+    )
     for residual in train_batches(skip_batches=state.processed_batches):
+        batch_index = state.processed_batches
+        state.processed_batches += 1
+        residual = filter_raw_l2_activations(residual, config.max_activation_l2)
+        if len(residual) == 0:
+            continue
         residual = residual.to(device=device, dtype=torch.float32)
         residual.mul_(config.activation_scale)
         batch_tokens = len(residual)
-        torch.manual_seed(config.seed + state.processed_batches)
+        torch.manual_seed(config.seed + batch_index)
         permutation = torch.randperm(len(residual), device=residual.device)
         residual = residual[permutation]
 
@@ -529,7 +560,6 @@ def train_sae(
             config.dead_window,
         )
         state.processed_tokens += batch_tokens
-        state.processed_batches += 1
         progress.update(batch_tokens)
 
         if (
@@ -568,11 +598,14 @@ def train_sae(
         ):
             save_checkpoint(checkpoint_path, sae, optimizer, state, config)
             latest_evaluation = evaluate_checkpoint()
+            last_evaluated_training_tokens = state.processed_tokens
             while next_checkpoint <= state.processed_tokens:
                 next_checkpoint += checkpoint_every
 
     metric_status.close()
     progress.close()
+    if last_evaluated_training_tokens != state.processed_tokens:
+        latest_evaluation = evaluate_checkpoint()
     torch.save(
         {"sae": sae.state_dict()},
         output_dir / "sae_final.pt",
@@ -595,24 +628,31 @@ def evaluate_sae(
         leave=False,
         disable=None,
     )
+    evaluated_tokens = 0
     for residual in validation_batches(skip_batches=0):
+        residual = filter_raw_l2_activations(residual, config.max_activation_l2)
+        if len(residual) == 0:
+            continue
         residual = residual.to(device=device, dtype=torch.float32)
         residual.mul_(config.activation_scale)
         batch_tokens = len(residual)
+        evaluated_tokens += batch_tokens
         for start in range(0, len(residual), config.sae_batch_size):
             x = residual[start : start + config.sae_batch_size]
             reconstruction, indices, values = sae(x)
             metrics.update(x, reconstruction, indices, values)
         progress.update(batch_tokens)
     progress.close()
+    if evaluated_tokens == 0:
+        raise ValueError("raw-L2 activation filter rejected every validation token")
 
     fire_counts = metrics.feature_fire_counts
     result = {
         "split": "validation",
-        "tokens": config.validation_tokens,
+        "tokens": evaluated_tokens,
         **metrics.compute(),
         "dead_feature_pct": 100.0 * (fire_counts == 0).float().mean().item(),
         "active_features": int((fire_counts > 0).sum().item()),
-        **feature_density_histogram(fire_counts, config.validation_tokens),
+        **feature_density_histogram(fire_counts, evaluated_tokens),
     }
     return result
