@@ -64,9 +64,9 @@ def load_titles(path: Path) -> dict[int, str]:
 
 def judge_prompt(completion: str, title: str) -> str:
     return (
-        f"Feature: {title}\n"
+        f"Title: {title}\n"
         f"Completion: {completion}\n"
-        "Is the completion coherent with the feature? Respond with only Yes or No. "
+        "Is the completion coherent with the title? Respond with only Yes or No. "
         "Do not reason or explain."
     )
 
