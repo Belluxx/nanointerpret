@@ -316,6 +316,7 @@ def main() -> None:
                 device,
                 args.context_size,
                 activation_scale,
+                args.max_activation_l2,
             )
 
         run_training(
@@ -383,6 +384,7 @@ def main() -> None:
                 device,
                 args.context_size,
                 activation_scale,
+                args.max_activation_l2,
             )
         finally:
             del model

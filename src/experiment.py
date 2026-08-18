@@ -52,6 +52,30 @@ def filter_raw_l2_activations(
     return residual[raw_l2_activation_mask(residual, max_activation_l2)]
 
 
+@torch.inference_mode()
+def reconstruct_sae_eligible_activations(
+    residual: Tensor,
+    sae: TopKSAE,
+    activation_scale: float,
+    max_activation_l2: float | None,
+) -> Tensor:
+    keep = raw_l2_activation_mask(residual, max_activation_l2)
+    if not bool(keep.any()):
+        return residual
+
+    flat = residual.reshape(-1, residual.shape[-1])
+    flat_keep = keep.reshape(-1)
+    normalized = flat[flat_keep].float() * activation_scale
+    reconstruction = sae(normalized)[0] / activation_scale
+
+    if bool(flat_keep.all()):
+        return reconstruction.to(residual.dtype).reshape_as(residual)
+
+    output = flat.clone()
+    output[flat_keep] = reconstruction.to(flat.dtype)
+    return output.reshape_as(residual)
+
+
 @dataclass(frozen=True)
 class ExperimentConfig:
     model_id: str
@@ -454,6 +478,7 @@ def evaluate_downstream_kl(
     device: torch.device,
     context_size: int,
     activation_scale: float,
+    max_activation_l2: float | None,
 ) -> float:
     validation_subset = validation_tokens[:DOWNSTREAM_KL_TOKENS]
     kl_sum = 0.0
@@ -468,14 +493,15 @@ def evaluate_downstream_kl(
 
     def reconstruct_layer_input(_module, args, kwargs):
         hidden = args[0] if args else kwargs["hidden_states"]
-        shape = hidden.shape
-        x = hidden.reshape(-1, shape[-1]).float() * activation_scale
-        reconstruction = sae(x)[0].reshape(shape)
-        reconstruction = (reconstruction / activation_scale).to(hidden.dtype)
+        reconstruction = reconstruct_sae_eligible_activations(
+            hidden,
+            sae,
+            activation_scale,
+            max_activation_l2,
+        )
         if args:
             return (reconstruction, *args[1:]), kwargs
-        kwargs["hidden_states"] = reconstruction
-        return args, kwargs
+        return args, {**kwargs, "hidden_states": reconstruction}
 
     for input_ids, attention_mask in iter_context_batches(
         validation_subset,
