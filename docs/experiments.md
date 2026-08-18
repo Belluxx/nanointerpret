@@ -69,7 +69,6 @@ It resulted in pretty good results, identifying interesting features:
 - `#1009` identifies **severe harm** (*injured*, *killed*, *lives*, *wounded*, *deaths*, *dead*, *lost*, ...)
 - `#9147` identifies **professions** (*fisherman*, *photographer*, *painter*, *farmer*, *artist*, ...)
 - `#382` identifies **nutrient and ingested substances** very cleanly, even at lot activations (*flavonoids*, *carotenoid*, *lead*, *calcium*, *vitamin D3*, ...)
-- `#8388` identifies **sexuality** terms (*prostitution*, *dressed indecently*, *intercourse*, *tantra*, *sperm*, ...)
 
 However many features were polysemantic, for example the severe harm feature activated both with causalities terms and with **employment terms** (*employment*, *workers*, gained and lost jobs).
 
@@ -97,7 +96,7 @@ python3 train.py \
   --sae-batch-size 4096
 ```
 
-The results were remarkably better. The feature `#1009` from the previous run (the one that mixed "severe harm" with "employment terms") was now correctly separated between `#19969` and `#13311`, where:
+The results were better. The feature `#1009` from the previous run (the one that mixed "severe harm" with "employment terms") was now correctly separated between `#19969` and `#13311`, where:
 - `#19969` isolates "casualties and destructive outcomes"
 - `#13311` isolates "workforce and human labour capacity"
 
