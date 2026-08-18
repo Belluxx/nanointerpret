@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from dataclasses import asdict
 from functools import partial
 from pathlib import Path
@@ -52,7 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--k", type=int, default=16)
     parser.add_argument("--aux-k", type=int, default=None, help="Dead latents used by AuxK. Default: nearest power of two to d_model / 2.")
     parser.add_argument("--aux-k-coef", type=float, default=1 / 32)
-    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--learning-rate", type=float, default=None)
     parser.add_argument("--model-batch-size", type=int, default=32, help="Contexts processed together; lower this if memory is limited.")
     parser.add_argument("--sae-batch-size", type=int, default=4096, help="SAE token microbatch; lower this if memory is limited.")
     parser.add_argument("--normalization-tokens", type=int, default=1_000_000, help="Training-token sample used to estimate one global activation scale.")
@@ -159,6 +160,10 @@ def run_training(
     d_model = int(metadata["d_model"])
     d_sae = args.width_multiplier * d_model
     aux_k = default_aux_k(d_model) if args.aux_k is None else args.aux_k
+
+    if args.learning_rate is None:
+        args.learning_rate = 3e-4 * math.sqrt(32768 / d_sae)
+
     if args.output_dir is None:
         args.output_dir = experiment_output_dir(
             args.model_id,
