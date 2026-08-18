@@ -14,6 +14,8 @@ from tqdm.auto import tqdm
 from src.interventions import InterventionGenerator, InterventionRequest
 from src.runtime import choose_device
 
+from interpret_features import INSUFFICIENT_TITLE, UNCLEAR_TITLE
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate with a range of activated SAE features and rank how well the completions match their feature titles.")
@@ -130,6 +132,19 @@ def main() -> None:
         feature_ids = np.flatnonzero((activation_counts >= minimum) & (activation_counts <= maximum)).tolist()
 
     titles = load_titles(names_path)
+    skipped_feature_ids = [
+        feature_id
+        for feature_id in feature_ids
+        if titles.get(feature_id) in (INSUFFICIENT_TITLE, UNCLEAR_TITLE)
+    ]
+    feature_ids = [
+        feature_id
+        for feature_id in feature_ids
+        if titles.get(feature_id) not in (INSUFFICIENT_TITLE, UNCLEAR_TITLE)
+    ]
+    if skipped_feature_ids:
+        print(f"Skipping {len(skipped_feature_ids):,} features with insufficient activation data or no coherent interpretation.")
+
     missing_title = next(
         (feature_id for feature_id in feature_ids if feature_id not in titles), None
     )
