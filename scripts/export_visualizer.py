@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--names", type=Path, help="Feature-title JSONL. Default: feature_names.jsonl next to the activation directory, when present.")
     parser.add_argument("--feature-scores", type=Path, help="Feature-score JSONL produced by evaluate_features.py. Default: feature_scores.jsonl next to the activation directory, when present.")
-    parser.add_argument("--starred-feature-threshold", type=unit_float, default=0.6, help="Score at or above which a feature is marked high-quality and starred. Default: 0.6.")
+    parser.add_argument("--starred-feature-threshold", type=unit_float, default=0.9, help="Score at or above which a feature is marked high-quality and starred. Default: 0.6.")
     parser.add_argument("--intervention-url", help="Public intervention endpoint. The playground is hidden when omitted.")
     parser.add_argument("--workers", type=positive_int, default=DEFAULT_WORKERS, help=f"Concurrent export workers. Default: {DEFAULT_WORKERS}.")
     return parser.parse_args()
