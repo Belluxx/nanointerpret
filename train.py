@@ -67,7 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--activation-layer", type=int, default=None, help="Layer whose input is captured. Default: len(transformer.layers) // 2.")
     parser.add_argument("--no-subtract-pre-bias", action="store_false", dest="subtract_pre_bias", help="Do not subtract the learned decoder bias from activations before encoding.")
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
-    parser.add_argument("--model-dtype", choices=("float32", "float16", "bfloat16"), default="float32")
+    parser.add_argument("--model-dtype", choices=("float32", "float16", "bfloat16"), default="bfloat16")
     parser.add_argument("--output-dir", type=Path, default=None, help="Training output directory. Default: generated automatically under artifacts/.",)
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"))
     parser.add_argument("--residual-cache-dir", type=Path, default=Path("artifacts/residual_cache"))
