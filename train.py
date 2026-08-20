@@ -22,6 +22,7 @@ from src.data import (
 from src.experiment import (
     ExperimentConfig,
     capture_residual_cache,
+    compile_transformer_prefix,
     default_aux_k,
     estimate_activation_normalization,
     evaluate_downstream_kl,
@@ -66,6 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-subtract-pre-bias", action="store_false", dest="subtract_pre_bias", help="Do not subtract the learned decoder bias from activations before encoding.")
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
     parser.add_argument("--model-dtype", choices=("float32", "float16", "bfloat16"), default="bfloat16")
+    parser.add_argument("--no-compile-model", action="store_false", dest="compile_model", help="Disable compilation of transformer layers before the capture point on MPS.")
     parser.add_argument("--output-dir", type=Path, default=None, help="Training output directory. Default: generated automatically under artifacts/.",)
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"))
     parser.add_argument("--residual-cache-dir", type=Path, default=Path("artifacts/residual_cache"))
@@ -111,6 +113,10 @@ def load_capture_inputs(
         raise ValueError(
             f"activation layer must be in [0, {len(layers) - 1}], got {layer_index}"
         )
+    layer = layers[layer_index]
+    if args.compile_model and device.type == "mps":
+        compile_transformer_prefix(layers, layer_index)
+        print(f"Compiling {layer_index} transformer layers for MPS")
     metadata = {
         "layer_index": layer_index,
         "layer_path": layer_path,
@@ -118,7 +124,7 @@ def load_capture_inputs(
         "residual_location": "layer_input",
         "d_model": int(model.config.hidden_size),
     }
-    return tokenizer, model, layers[layer_index], train_tokens, validation_tokens, metadata
+    return tokenizer, model, layer, train_tokens, validation_tokens, metadata
 
 
 def build_residual_cache(

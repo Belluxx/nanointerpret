@@ -3,6 +3,38 @@
 > [!CAUTION]
 > Using `--cache-activations` saves LLM activations to disk for reuse across runs. The default fp16 cache takes up a LOT of space (about 1.3GB every 1M tokens for the 270m Gemma model). `--residual-cache-format int8` takes about half as much space.
 
+Hardware: M4 Max Mac Studio (CPU 16C, GPU 40C, 64GB RAM)
+
+## MPS streaming performance
+On Apple Silicon compiling each LLM layer before the activation capture point is a substantial improvement.
+
+<details>
+<summary>Command</summary>
+
+```sh
+python train.py \
+  --model-id unsloth/Qwen3-0.6B-Base \
+  --activation-layer 14 \
+  --train-tokens 1000000 \
+  --validation-tokens 100000 \
+  --normalization-tokens 100000 \
+  --dead-window 100000 \
+  --model-batch-size 32 \
+  --sae-batch-size 4096 \
+  --width-multiplier 16 \
+  --k 16 \
+  --model-dtype bfloat16
+```
+
+</details>
+
+| Model | Prefix compilation | Activation capture | SAE training | Streamed training |
+|---|:---:|---:|---:|---:|
+| Qwen3-0.6B, layer 14 | No | 18.35k tok/s | 35.47k tok/s | 12.12k tok/s |
+| Qwen3-0.6B, layer 14 | Yes | **28.54k tok/s** | 35.22k tok/s | **15.89k tok/s (+31%)** |
+| Qwen3-1.7B, layer 14 | No | 7.89k tok/s | 17.41k tok/s | 5.41k tok/s |
+| Qwen3-1.7B, layer 14 | Yes | **9.70k tok/s** | 17.39k tok/s | **6.18k tok/s (+14%)** |
+
 ## Pre-bias subtraction and AuxK
 
 Pre-bias subtraction and AuxK were both useful for training SAEs.

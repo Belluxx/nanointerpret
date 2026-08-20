@@ -122,6 +122,12 @@ def find_transformer_layers(model: nn.Module) -> tuple[str, nn.ModuleList]:
     return max(candidates, key=lambda item: len(item[1]))
 
 
+def compile_transformer_prefix(layers: nn.ModuleList, layer_index: int) -> None:
+    # Keep the capture layer eager so its forward pre-hook remains visible.
+    for index in range(layer_index):
+        layers[index] = torch.compile(layers[index], dynamic=False)
+
+
 class _ActivationCaptured(Exception):
     pass
 
