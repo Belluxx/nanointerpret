@@ -2,6 +2,7 @@ torch>=2.5
 transformers>=4.50
 huggingface_hub>=0.28
 datasets>=2.20
+gigatoken==0.10.0
 numpy>=1.26
 tqdm>=4.66
 matplotlib>=3.8

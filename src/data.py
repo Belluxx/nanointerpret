@@ -18,6 +18,7 @@ RESIDUAL_FP16_SCALE = 1 / 256
 RESIDUAL_INT8_GROUP_SIZE = 128
 ACTIVATION_VALUE_DTYPE = np.float16
 TRANSPOSE_TOKENS = 1_000_000
+TOKEN_CACHE_BATCH_CHARS = 32 << 20
 
 
 @dataclass(frozen=True)
@@ -301,7 +302,9 @@ def build_token_cache(tokenizer, spec: TokenCacheSpec) -> tuple[Path, Path]:
         print(f"using token cache at {spec.cache_dir}")
         return train_path, validation_path
 
+    import awkward as ak
     from datasets import load_dataset
+    from gigatoken import Tokenizer as GigaTokenizer
 
     train_tmp = train_path.with_suffix(train_path.suffix + ".tmp")
     validation_tmp = validation_path.with_suffix(validation_path.suffix + ".tmp")
@@ -315,36 +318,45 @@ def build_token_cache(tokenizer, spec: TokenCacheSpec) -> tuple[Path, Path]:
     )
     bos = tokenizer.bos_token_id
     eos = tokenizer.eos_token_id
+    giga_tokenizer = GigaTokenizer(tokenizer)
 
     with train_tmp.open("wb") as train_file, validation_tmp.open("wb") as validation_file:
         progress = tqdm(total=target_total, unit="tok", desc="Token cache")
         text_batch: list[str] = []
+        batch_chars = 0
 
         def write_documents(texts: list[str]) -> None:
             nonlocal written
-            encoded = tokenizer(texts, add_special_tokens=False, truncation=False)["input_ids"]
-            for document in encoded:
-                if written >= target_total:
-                    break
-                ids = ([] if bos is None else [bos]) + document + ([] if eos is None else [eos])
-                array = np.asarray(ids, dtype=np.uint32)
-                take = min(len(array), target_total - written)
+            rows = giga_tokenizer.encode_batch(texts)
+            parts = [rows]
+            if bos is not None:
+                parts.insert(
+                    0,
+                    np.full((len(texts), 1), bos, dtype=np.uint32),
+                )
+            if eos is not None:
+                parts.append(np.full((len(texts), 1), eos, dtype=np.uint32))
+            if len(parts) > 1:
+                rows = ak.concatenate(parts, axis=1)
+            array = ak.to_numpy(ak.flatten(rows))
+            take = min(len(array), target_total - written)
 
-                split_at = max(0, min(take, spec.train_tokens - written))
-                if split_at:
-                    array[:split_at].tofile(train_file)
-                if split_at < take:
-                    array[split_at:take].tofile(validation_file)
-                written += take
-                progress.update(take)
+            split_at = max(0, min(take, spec.train_tokens - written))
+            if split_at:
+                array[:split_at].tofile(train_file)
+            if split_at < take:
+                array[split_at:take].tofile(validation_file)
+            written += take
+            progress.update(take)
 
-        for row in dataset:
-            text = row.get("text")
+        for text in dataset["text"]:
             if text:
                 text_batch.append(text)
-            if len(text_batch) >= 32:
+                batch_chars += len(text)
+            if batch_chars >= TOKEN_CACHE_BATCH_CHARS:
                 write_documents(text_batch)
                 text_batch.clear()
+                batch_chars = 0
             if written >= target_total:
                 break
         if text_batch and written < target_total:
