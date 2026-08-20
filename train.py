@@ -79,13 +79,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_capture_inputs(
-    args: argparse.Namespace,
-    device: torch.device,
-    model_dtype: torch.dtype,
-) -> tuple:
-    tokenizer = load_tokenizer(args.model_id)
-    token_spec = TokenCacheSpec(
+def token_cache_spec(args: argparse.Namespace) -> TokenCacheSpec:
+    return TokenCacheSpec(
         cache_dir=args.cache_dir,
         model_id=args.model_id,
         dataset_id=args.dataset_id,
@@ -93,7 +88,15 @@ def load_capture_inputs(
         train_tokens=args.train_tokens,
         validation_tokens=args.validation_tokens,
     )
-    train_path, validation_path = build_token_cache(tokenizer, token_spec)
+
+
+def load_capture_inputs(
+    args: argparse.Namespace,
+    device: torch.device,
+    model_dtype: torch.dtype,
+) -> tuple:
+    tokenizer = load_tokenizer(args.model_id)
+    train_path, validation_path = build_token_cache(tokenizer, token_cache_spec(args))
     train_tokens = np.memmap(train_path, mode="r", dtype=np.uint32)
     validation_tokens = np.memmap(validation_path, mode="r", dtype=np.uint32)
 
@@ -189,14 +192,14 @@ def run_training(
     checkpoint_path = args.output_dir / "checkpoint_latest.pt"
     final_path = args.output_dir / "sae_final.pt"
     if args.resume:
-        checkpoint = torch.load(
-            checkpoint_path, map_location="cpu", weights_only=False
+        config_path = args.output_dir / "config.json"
+        activation_scale = float(
+            json.loads(config_path.read_text())["activation_scale"]
         )
-        activation_scale = float(checkpoint["config"]["activation_scale"])
         initial_pre_bias = None
         print(
             f"reusing activation scale {activation_scale:.8g} "
-            f"from {checkpoint_path}"
+            f"from {config_path}"
         )
     else:
         if final_path.exists():
@@ -358,15 +361,9 @@ def main() -> None:
         return
 
     kl_tokenizer = load_tokenizer(args.model_id)
-    kl_token_spec = TokenCacheSpec(
-        cache_dir=args.cache_dir,
-        model_id=args.model_id,
-        dataset_id=args.dataset_id,
-        dataset_config=args.dataset_config,
-        train_tokens=args.train_tokens,
-        validation_tokens=args.validation_tokens,
+    _, kl_validation_path = build_token_cache(
+        kl_tokenizer, token_cache_spec(args)
     )
-    _kl_train_path, kl_validation_path = build_token_cache(kl_tokenizer, kl_token_spec)
     kl_validation_tokens = np.memmap(
         kl_validation_path, mode="r", dtype=np.uint32
     )

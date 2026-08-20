@@ -654,7 +654,6 @@ def train_sae(
     )
     start_time = time.monotonic()
     start_tokens = state.processed_tokens
-    evaluation_seconds = 0.0
     last_evaluated_training_tokens = (
         state.processed_tokens if latest_evaluation is not None else None
     )
@@ -731,7 +730,6 @@ def train_sae(
     metric_status.close()
     progress.close()
     save_checkpoint(checkpoint_path, sae, optimizer, state, config)
-    save_checkpoint(output_dir / "checkpoint_final.pt", sae, optimizer, state, config)
     if last_evaluated_training_tokens != state.processed_tokens:
         latest_evaluation = evaluate_checkpoint()
     torch.save(

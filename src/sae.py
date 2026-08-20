@@ -106,13 +106,9 @@ def normalized_auxk_loss(
     dead_indices: Tensor,
     aux_k: int,
 ) -> Tensor:
-    dead_count = len(dead_indices)
-    if dead_count == 0:
-        return pre_activations.sum() * 0.0
-
     dead_pre_activations = pre_activations.index_select(1, dead_indices)
     values, indices = torch.topk(
-        dead_pre_activations, min(aux_k, dead_count), dim=-1, sorted=False
+        dead_pre_activations, min(aux_k, len(dead_indices)), dim=-1, sorted=False
     )
     values = F.relu(values)
     # MPS dense matmul is much faster than embedding_bag at AuxK's large k.
