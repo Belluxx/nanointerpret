@@ -83,6 +83,8 @@ Qwen tends to have extremely large residual-stream activations at the first sequ
 
 To prevent them from dominating SAE normalization / training, a raw L2-norm filter was added (`--max-activation-l2`).
 
+Gemma 3 270M also has very large residual-stream activations, however they occur over tokens like BOS and punctuation. So they are more complex and potentially meaningful, unlike Qwen's case. I would not recommend L2 filtering for Gemma by default but feel free to test it.
+
 ## First stable training run
 
 The first stable training run was the following:
