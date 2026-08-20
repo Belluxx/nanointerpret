@@ -1,18 +1,15 @@
-const playgroundForm = document.querySelector(".intervention-form");
+const playgroundForm = document.querySelector("#intervention-form");
 const formFields = playgroundForm.elements;
-const samplingSettings = document.querySelector("#sampling-settings-dialog");
 const config = window.NANOINTERPRET_CONFIG;
-const staticData = Boolean(config.dataDirectory);
-const coldStartNote = staticData
+const isStatic = Boolean(config.dataDirectory);
+const coldStartNote = isStatic
   ? "The GPU may be cold, please wait a minute the first time"
   : null;
-const featureFiles = new Map();
 
 const ui = {
   list: document.querySelector("#feature-list"),
   count: document.querySelector("#result-count"),
   search: document.querySelector("#search-input"),
-  filterButton: document.querySelector("#filter-button"),
   filterPopover: document.querySelector("#filter-popover"),
   clearFiltersButton: document.querySelector("#clear-filters-button"),
   activationCountRange: document.querySelector("#activation-count-range"),
@@ -30,13 +27,14 @@ const ui = {
   pageSelect: document.querySelector("#page-select"),
   pageCount: document.querySelector("#page-count"),
   nextPage: document.querySelector("#next-page-button"),
-  playgroundForm,
   prompt: formFields.prompt,
   featureInput: formFields.feature_id,
   amountMultiplier: playgroundForm.querySelector(".amount-preset-control input"),
   amountInput: formFields.amount,
-  samplingSettings,
-  samplingInputs: [...samplingSettings.querySelectorAll("input[type='number']")],
+  samplingSettings: document.querySelector("#sampling-settings-dialog"),
+  samplingInputs: [
+    ...document.querySelectorAll("#sampling-settings-dialog input[type='number']"),
+  ],
   generateButton: playgroundForm.querySelector("[type='submit']"),
   generationResults: document.querySelector("#generation-results"),
   interventionExamples: document.querySelector("#intervention-examples"),
@@ -44,6 +42,13 @@ const ui = {
   baselineOutput: document.querySelector("#baseline-output"),
   intervenedOutput: document.querySelector("#intervened-output"),
 };
+
+const DEFAULT_CONTEXT_RANGE_START = 0.7;
+const CONTEXT_LOAD_DELAY_MS = 120;
+const FEATURES_PER_PAGE = 50;
+const SEARCH_RESULT_BATCH_SIZE = 100;
+const generateButtonLabel = ui.generateButton.textContent.trim();
+const featureFiles = new Map();
 
 let features = [];
 let featuresById = new Map();
@@ -54,21 +59,15 @@ let maximumActivationCount = 0;
 let reverseFeatureOrder = false;
 let currentFeaturePage = 1;
 
-const DEFAULT_CONTEXT_RANGE_START = 0.7;
-const CONTEXT_LOAD_DELAY_MS = 120;
-const FEATURES_PER_PAGE = 50;
-const SEARCH_RESULT_BATCH_SIZE = 100;
-const generateButtonLabel = ui.generateButton.textContent.trim();
-
 function featureUrl(featureId) {
-  if (!staticData) return `/api/features/${featureId}`;
+  if (!isStatic) return `/api/features/${featureId}`;
   const fileId = Math.floor(featureId / config.featuresPerFile);
   return `${config.dataDirectory}/features/${fileId}.json`;
 }
 
 async function fetchFeature(featureId) {
   const url = featureUrl(featureId);
-  if (!staticData) return fetchJson(url);
+  if (!isStatic) return fetchJson(url);
   if (!featureFiles.has(url)) featureFiles.set(url, fetchJson(url));
   return (await featureFiles.get(url))[featureId];
 }
@@ -98,94 +97,6 @@ function matchesFeatureQuery(id, title, query) {
 
 const dropdowns = [];
 
-function createDropdown(trigger, menu, onChoose) {
-  let activeIndex = 0;
-  const root = menu.parentElement;
-  const options = () => [...menu.querySelectorAll('[role="option"]')];
-
-  function close() {
-    menu.hidden = true;
-    root.classList.remove("is-open");
-    trigger.setAttribute("aria-expanded", "false");
-    trigger.removeAttribute("aria-activedescendant");
-  }
-
-  function activate(index, scroll = true) {
-    const items = options();
-    if (!items.length) {
-      activeIndex = 0;
-      trigger.removeAttribute("aria-activedescendant");
-      return;
-    }
-    activeIndex = Math.max(0, Math.min(index, items.length - 1));
-    items.forEach((item, itemIndex) => {
-      item.classList.toggle("is-active", itemIndex === activeIndex);
-    });
-    trigger.setAttribute("aria-activedescendant", items[activeIndex].id);
-    if (scroll) items[activeIndex].scrollIntoView({ block: "nearest" });
-  }
-
-  function open(index = 0) {
-    for (const dropdown of dropdowns) {
-      if (dropdown !== controller) dropdown.close();
-    }
-    menu.hidden = false;
-    root.classList.add("is-open");
-    trigger.setAttribute("aria-expanded", "true");
-    activate(index);
-  }
-
-  function choose(index) {
-    const item = options()[index];
-    if (!item) return false;
-    onChoose(item);
-    close();
-    return true;
-  }
-
-  trigger.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !menu.hidden) {
-      event.preventDefault();
-      close();
-    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      if (menu.hidden) open();
-      else activate(activeIndex + (event.key === "ArrowDown" ? 1 : -1));
-    } else if (!menu.hidden && (event.key === "Home" || event.key === "End")) {
-      event.preventDefault();
-      activate(event.key === "Home" ? 0 : options().length - 1);
-    } else if (
-      !menu.hidden
-      && (event.key === "Enter" || (event.key === " " && trigger.matches("button")))
-    ) {
-      event.preventDefault();
-      choose(activeIndex);
-    } else if (event.key === "Tab") {
-      close();
-    }
-  });
-  menu.addEventListener("click", (event) => {
-    const item = event.target.closest('[role="option"]');
-    if (!item) return;
-    event.preventDefault();
-    choose(options().indexOf(item));
-  });
-  menu.addEventListener("pointermove", (event) => {
-    const item = event.target.closest('[role="option"]');
-    if (item) activate(options().indexOf(item), false);
-  });
-
-  const controller = {
-    root,
-    open,
-    close,
-    move: (offset) => activate(activeIndex + offset),
-    chooseActive: () => choose(activeIndex),
-  };
-  dropdowns.push(controller);
-  return controller;
-}
-
 function createSelectControl(select, index) {
   const control = element("div", "custom-select");
   const trigger = element("button", "custom-select-trigger");
@@ -202,6 +113,7 @@ function createSelectControl(select, index) {
   const labelledBy = select.getAttribute("aria-labelledby");
   const ariaLabel = select.getAttribute("aria-label");
   const optionItems = () => [...optionsRoot.querySelectorAll('[role="option"]')];
+  let activeIndex = 0;
   let choices = [];
   let matchingChoices = [];
   let renderedChoiceCount = 0;
@@ -232,6 +144,49 @@ function createSelectControl(select, index) {
   select.before(control);
   control.append(select, trigger, menu);
   trigger.append(value, element("span", "dropdown-chevron"));
+
+  function close() {
+    menu.hidden = true;
+    control.classList.remove("is-open");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.removeAttribute("aria-activedescendant");
+  }
+
+  function activate(index, scroll = true) {
+    const items = optionItems();
+    if (!items.length) {
+      activeIndex = 0;
+      trigger.removeAttribute("aria-activedescendant");
+      return;
+    }
+    activeIndex = Math.max(0, Math.min(index, items.length - 1));
+    items.forEach((item, itemIndex) => {
+      item.classList.toggle("is-active", itemIndex === activeIndex);
+    });
+    trigger.setAttribute("aria-activedescendant", items[activeIndex].id);
+    if (scroll) items[activeIndex].scrollIntoView({ block: "nearest" });
+  }
+
+  function open(index = 0) {
+    for (const dropdown of dropdowns) {
+      if (dropdown !== controller) dropdown.close();
+    }
+    menu.hidden = false;
+    control.classList.add("is-open");
+    trigger.setAttribute("aria-expanded", "true");
+    activate(index);
+  }
+
+  function choose(index) {
+    const item = optionItems()[index];
+    if (!item) return false;
+    if (select.value !== item.dataset.value) {
+      select.value = item.dataset.value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    close();
+    return true;
+  }
 
   function appendChoices() {
     const end = Math.min(
@@ -301,34 +256,57 @@ function createSelectControl(select, index) {
     renderValue();
   }
 
-  const dropdown = createDropdown(trigger, menu, (item) => {
-    if (select.value === item.dataset.value) return;
-    select.value = item.dataset.value;
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-  });
+  const controller = { root: control, close };
+  dropdowns.push(controller);
+
   trigger.addEventListener("click", () => {
     if (menu.hidden) {
       const selectedIndex = optionItems()
         .findIndex((item) => item.dataset.value === select.value);
-      dropdown.open(Math.max(0, selectedIndex));
+      open(Math.max(0, selectedIndex));
       search?.focus();
     } else {
-      dropdown.close();
+      close();
     }
   });
+  trigger.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !menu.hidden) {
+      event.preventDefault();
+      close();
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (menu.hidden) open();
+      else activate(activeIndex + (event.key === "ArrowDown" ? 1 : -1));
+      search?.focus();
+    } else if (!menu.hidden && (event.key === "Home" || event.key === "End")) {
+      event.preventDefault();
+      activate(event.key === "Home" ? 0 : optionItems().length - 1);
+    } else if (!menu.hidden && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      choose(activeIndex);
+    } else if (event.key === "Tab") {
+      close();
+    }
+  });
+  menu.addEventListener("click", (event) => {
+    const item = event.target.closest('[role="option"]');
+    if (!item) return;
+    event.preventDefault();
+    choose(optionItems().indexOf(item));
+  });
+  menu.addEventListener("pointermove", (event) => {
+    const item = event.target.closest('[role="option"]');
+    if (item) activate(optionItems().indexOf(item), false);
+  });
+
   if (search) {
     let searchFrame;
-    trigger.addEventListener("keydown", (event) => {
-      if (!menu.hidden && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
-        search.focus();
-      }
-    });
     search.addEventListener("input", () => {
       cancelAnimationFrame(searchFrame);
       searchFrame = requestAnimationFrame(() => {
         if (menu.hidden) return;
         renderSearchResults();
-        dropdown.open();
+        open();
       });
     });
     optionsRoot.addEventListener("scroll", () => {
@@ -340,16 +318,16 @@ function createSelectControl(select, index) {
     search.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        dropdown.close();
+        close();
         trigger.focus();
       } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
-        dropdown.move(event.key === "ArrowDown" ? 1 : -1);
+        activate(activeIndex + (event.key === "ArrowDown" ? 1 : -1));
       } else if (event.key === "Enter") {
         event.preventDefault();
-        if (dropdown.chooseActive()) trigger.focus();
+        if (choose(activeIndex)) trigger.focus();
       } else if (event.key === "Tab") {
-        dropdown.close();
+        close();
       }
     });
   }
@@ -593,7 +571,7 @@ ui.samplingSettings.addEventListener("invalid", () => {
     ui.samplingSettings.showPopover();
   }
 }, true);
-ui.playgroundForm.addEventListener("submit", async (event) => {
+playgroundForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!ui.prompt.value.trim()) {
     ui.prompt.setCustomValidity("Enter a prompt to continue.");
@@ -608,9 +586,9 @@ ui.playgroundForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  const request = Object.fromEntries(new FormData(ui.playgroundForm));
+  const request = Object.fromEntries(new FormData(playgroundForm));
   request.feature_id = featureId;
-  for (const input of ui.playgroundForm.elements) {
+  for (const input of playgroundForm.elements) {
     if (input.type === "number") request[input.name] = input.valueAsNumber;
   }
 
@@ -626,7 +604,7 @@ ui.playgroundForm.addEventListener("submit", async (event) => {
 
   ui.generateButton.disabled = true;
   ui.generateButton.textContent = "Generating...";
-  ui.playgroundForm.querySelector(".playground-error")?.remove();
+  playgroundForm.querySelector(".playground-error")?.remove();
   try {
     const payload = await fetchJson(config.interventionUrl, {
       method: "POST",
@@ -708,18 +686,28 @@ function keepRangeOrdered(minimumInput, maximumInput, changedInput) {
   target.value = source.value;
 }
 
-function updateActivationCountRange(changedInput) {
+function updateDualRange(range, minimumInput, maximumInput, changedInput) {
   keepRangeOrdered(
+    minimumInput,
+    maximumInput,
+    changedInput,
+  );
+  const minimumPosition = minimumInput.valueAsNumber;
+  const maximumPosition = maximumInput.valueAsNumber;
+  range.style.setProperty("--range-start", `${100 * minimumPosition}%`);
+  range.style.setProperty("--range-end", `${100 * maximumPosition}%`);
+  return [minimumPosition, maximumPosition];
+}
+
+function updateActivationCountRange(changedInput) {
+  const [minimumPosition, maximumPosition] = updateDualRange(
+    ui.activationCountRange,
     ui.minimumActivationCount,
     ui.maximumActivationCount,
     changedInput,
   );
-  const minimumPosition = ui.minimumActivationCount.valueAsNumber;
-  const maximumPosition = ui.maximumActivationCount.valueAsNumber;
   const selectedMinimum = activationCountAt(minimumPosition);
   const selectedMaximum = activationCountAt(maximumPosition);
-  ui.activationCountRange.style.setProperty("--range-start", `${100 * minimumPosition}%`);
-  ui.activationCountRange.style.setProperty("--range-end", `${100 * maximumPosition}%`);
   ui.activationCountOutput.value =
     `${selectedMinimum.toLocaleString()}–${selectedMaximum.toLocaleString()}`;
   ui.clearFiltersButton.disabled = minimumPosition === 0 && maximumPosition === 1;
@@ -731,45 +719,31 @@ function resetActivationCountRange() {
   updateActivationCountRange();
 }
 
-function renderFeatureList() {
-  const visible = visibleFeatures();
-  const pageCount = Math.max(1, Math.ceil(visible.length / FEATURES_PER_PAGE));
-  currentFeaturePage = Math.min(currentFeaturePage, pageCount);
-  const pageStart = (currentFeaturePage - 1) * FEATURES_PER_PAGE;
-  const pageFeatures = visible.slice(pageStart, pageStart + FEATURES_PER_PAGE);
-  ui.count.textContent = visible.length === features.length
-    ? `${visible.length.toLocaleString()} active features`
-    : `${visible.length.toLocaleString()} of ${features.length.toLocaleString()} features`;
+function renderFeature(feature) {
+  const details = element("details", "feature");
+  details.id = `feature-${feature.id}`;
 
-  const fragment = document.createDocumentFragment();
-  for (const feature of pageFeatures) {
-    const details = element("details", "feature");
-    details.id = `feature-${feature.id}`;
-    const summary = element("summary");
-    const title = feature.title || `Feature ${feature.id}`;
-    const titleElement = element("span", "feature-title");
-    titleElement.title = title;
-    if (feature.high_quality) titleElement.append(featureStar());
-    titleElement.append(element("span", "feature-title-text", title));
-    summary.append(
-      element("span", "feature-id", `#${feature.id}`),
-      titleElement,
-      element(
-        "span",
-        "feature-stat",
-        feature.activation_count.toLocaleString(),
-      ),
-      element("span", "chevron"),
-    );
-    details.append(summary, element("div", "feature-body"));
-    details.addEventListener("toggle", () => {
-      if (details.open && !details.dataset.loaded) {
-        loadFeature(details, feature);
-      }
-    });
-    fragment.append(details);
-  }
-  ui.list.replaceChildren(fragment);
+  const title = feature.title || `Feature ${feature.id}`;
+  const titleElement = element("span", "feature-title");
+  titleElement.title = title;
+  if (feature.high_quality) titleElement.append(featureStar());
+  titleElement.append(element("span", "feature-title-text", title));
+
+  const summary = element("summary");
+  summary.append(
+    element("span", "feature-id", `#${feature.id}`),
+    titleElement,
+    element("span", "feature-stat", feature.activation_count.toLocaleString()),
+    element("span", "chevron"),
+  );
+  details.append(summary, element("div", "feature-body"));
+  details.addEventListener("toggle", () => {
+    if (details.open && !details.dataset.loaded) loadFeature(details, feature);
+  });
+  return details;
+}
+
+function renderPagination(pageCount) {
   ui.pagination.hidden = pageCount === 1;
   if (pageCount === 1) return;
 
@@ -786,6 +760,20 @@ function renderFeatureList() {
   ui.pageCount.textContent = `of ${pageCount.toLocaleString()}`;
   ui.previousPage.disabled = currentFeaturePage === 1;
   ui.nextPage.disabled = currentFeaturePage === pageCount;
+}
+
+function renderFeatureList() {
+  const visible = visibleFeatures();
+  const pageCount = Math.max(1, Math.ceil(visible.length / FEATURES_PER_PAGE));
+  currentFeaturePage = Math.min(currentFeaturePage, pageCount);
+  const pageStart = (currentFeaturePage - 1) * FEATURES_PER_PAGE;
+  const pageFeatures = visible.slice(pageStart, pageStart + FEATURES_PER_PAGE);
+
+  ui.count.textContent = visible.length === features.length
+    ? `${visible.length.toLocaleString()} active features`
+    : `${visible.length.toLocaleString()} of ${features.length.toLocaleString()} features`;
+  ui.list.replaceChildren(...pageFeatures.map(renderFeature));
+  renderPagination(pageCount);
 }
 
 function resetFeaturePage() {
@@ -871,6 +859,27 @@ function renderOverview(feature, payload) {
   return overview;
 }
 
+async function contextsInRange(featureId, exportedContexts, minimum, maximum) {
+  if (isStatic) {
+    return {
+      contexts: exportedContexts.filter((context) => (
+        context.peak_activation >= minimum && context.peak_activation <= maximum
+      )),
+    };
+  }
+  const query = new URLSearchParams({ min: minimum, max: maximum });
+  return fetchJson(`${featureUrl(featureId)}?${query}`);
+}
+
+function contextCountLabel(payload) {
+  const shown = payload.contexts.length;
+  if (isStatic) return `${shown.toLocaleString()} representative contexts`;
+  if (shown === payload.matching_context_count) {
+    return `${shown.toLocaleString()} contexts`;
+  }
+  return `Sampled ${shown.toLocaleString()} of ${payload.matching_context_count.toLocaleString()}`;
+}
+
 function renderDistribution(feature, payload) {
   const counts = payload.activation_histogram;
   const exportedContexts = payload.contexts || [];
@@ -900,7 +909,10 @@ function renderDistribution(feature, payload) {
     input.setAttribute("aria-label", label);
     return input;
   }
-  const minimumInput = rangeInput("Minimum peak activation", DEFAULT_CONTEXT_RANGE_START);
+  const minimumInput = rangeInput(
+    "Minimum peak activation",
+    DEFAULT_CONTEXT_RANGE_START,
+  );
   const maximumInput = rangeInput("Maximum peak activation", 1);
   const minimumLabel = element("span", "range-value");
   const maximumLabel = element("span", "range-value");
@@ -930,11 +942,12 @@ function renderDistribution(feature, payload) {
   let descending = true;
 
   function updateSelection(changedInput) {
-    keepRangeOrdered(minimumInput, maximumInput, changedInput);
-    const minimumFraction = minimumInput.valueAsNumber;
-    const maximumFraction = maximumInput.valueAsNumber;
-    selector.style.setProperty("--range-start", `${100 * minimumFraction}%`);
-    selector.style.setProperty("--range-end", `${100 * maximumFraction}%`);
+    const [minimumFraction, maximumFraction] = updateDualRange(
+      selector,
+      minimumInput,
+      maximumInput,
+      changedInput,
+    );
 
     const minimum = feature.max_activation * minimumFraction;
     const maximum = feature.max_activation * maximumFraction;
@@ -968,26 +981,19 @@ function renderDistribution(feature, payload) {
       results.append(element("p", "loading", "Loading contexts..."));
     }
     try {
-      let payload;
-      if (staticData) {
-        const contexts = exportedContexts.filter((context) => (
-          context.peak_activation >= minimum && context.peak_activation <= maximum
-        ));
-        payload = { contexts };
-      } else {
-        const query = new URLSearchParams({ min: minimum, max: maximum });
-        payload = await fetchJson(`${featureUrl(feature.id)}?${query}`);
-      }
+      const contextPayload = await contextsInRange(
+        feature.id,
+        exportedContexts,
+        minimum,
+        maximum,
+      );
       if (currentRequest !== requestId) return;
-      const contexts = descending ? payload.contexts : [...payload.contexts].reverse();
+      const contexts = descending
+        ? contextPayload.contexts
+        : [...contextPayload.contexts].reverse();
       const shown = contexts.length;
-      const label = staticData
-        ? `${shown.toLocaleString()} representative contexts`
-        : shown === payload.matching_context_count
-        ? `${shown.toLocaleString()} contexts`
-        : `Sampled ${shown.toLocaleString()} of ${payload.matching_context_count.toLocaleString()}`;
       orderLabel.textContent = descending ? "(high to low)" : "(low to high)";
-      resultCount.replaceChildren(label, orderLabel);
+      resultCount.replaceChildren(contextCountLabel(contextPayload), orderLabel);
       if (shown) {
         results.replaceChildren(
           ...contexts.map((context) => renderContext(context, feature)),
@@ -1070,8 +1076,8 @@ document.addEventListener("keydown", (event) => {
 
 async function initialize() {
   try {
-    if (!config.interventionUrl) ui.playgroundForm.closest(".playground").hidden = true;
-    const summaryUrl = staticData
+    if (!config.interventionUrl) playgroundForm.closest(".playground").hidden = true;
+    const summaryUrl = isStatic
       ? `${config.dataDirectory}/summary.json`
       : "/api/summary";
     const payload = await fetchJson(summaryUrl);

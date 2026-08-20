@@ -10,7 +10,6 @@ from functools import partial
 from itertools import groupby
 from pathlib import Path
 
-import numpy as np
 from tqdm.auto import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -37,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--names", type=Path, help="Feature-title JSONL. Default: feature_names.jsonl next to the activation directory, when present.")
     parser.add_argument("--feature-scores", type=Path, help="Feature-score JSONL produced by evaluate_features.py. Default: feature_scores.jsonl next to the activation directory, when present.")
-    parser.add_argument("--starred-feature-threshold", type=unit_float, default=0.9, help="Score at or above which a feature is marked high-quality and starred. Default: 0.6.")
+    parser.add_argument("--starred-feature-threshold", type=unit_float, default=0.9, help="Score at or above which a feature is marked high-quality and starred. Default: 0.9.")
     parser.add_argument("--intervention-url", help="Public intervention endpoint. The playground is hidden when omitted.")
     parser.add_argument("--workers", type=positive_int, default=DEFAULT_WORKERS, help=f"Concurrent export workers. Default: {DEFAULT_WORKERS}.")
     return parser.parse_args()
@@ -50,55 +49,6 @@ def write_json(path: Path, payload: dict) -> None:
     )
 
 
-def render_context(
-    data: ActivationData,
-    contexts,
-    group_index: int,
-) -> dict:
-    activation_start = int(contexts.group_starts[group_index])
-    activation_stop = (
-        int(contexts.group_starts[group_index + 1])
-        if group_index + 1 < len(contexts.group_starts)
-        else len(contexts.token_positions)
-    )
-    positions = contexts.token_positions[activation_start:activation_stop]
-    values = contexts.activation_values[activation_start:activation_stop]
-    focus = int(positions[np.argmax(values)])
-    context_id = focus // data.context_size
-    context_start = context_id * data.context_size
-    context_stop = min(context_start + data.context_size, len(data.token_ids))
-    window_start = max(context_start, focus - CONTEXT_TOKENS // 2)
-    window_start = min(window_start, context_stop - CONTEXT_TOKENS)
-    window_start = max(context_start, window_start)
-    window_stop = min(window_start + CONTEXT_TOKENS, context_stop)
-    included = (positions >= window_start) & (positions < window_stop)
-
-    return {
-        "context_id": context_id,
-        "peak_activation": float(contexts.peaks[group_index]),
-        "tokens": [
-            data.decode_token(int(token_id))
-            for token_id in data.token_ids[window_start:window_stop]
-        ],
-        "activation_positions": (
-            positions[included] - window_start
-        ).astype(int).tolist(),
-        "activation_values": values[included].astype(float).tolist(),
-    }
-
-
-def representative_contexts(data: ActivationData, feature_id: int) -> list[dict]:
-    contexts = data._feature_contexts(feature_id)
-    ordered_peaks = contexts.peaks[contexts.peak_order]
-    targets = np.linspace(0.0, float(ordered_peaks[-1]), CONTEXTS_PER_FEATURE)
-    ranks = np.minimum(
-        np.searchsorted(ordered_peaks, targets), len(ordered_peaks) - 1
-    )
-    group_indices = np.unique(contexts.peak_order[ranks])
-    group_indices = group_indices[np.argsort(contexts.peaks[group_indices])[::-1]]
-    return [render_context(data, contexts, int(index)) for index in group_indices]
-
-
 def export_feature_file(
     data: ActivationData,
     output_directory: Path,
@@ -109,7 +59,11 @@ def export_feature_file(
     for feature in features:
         feature_id = feature["id"]
         feature_payload = data.feature(feature_id)
-        feature_payload["contexts"] = representative_contexts(data, feature_id)
+        feature_payload["contexts"] = data.representative_contexts(
+            feature_id,
+            CONTEXTS_PER_FEATURE,
+            CONTEXT_TOKENS,
+        )
         payload[feature_id] = feature_payload
     write_json(output_directory / f"{shard_id}.json", payload)
 

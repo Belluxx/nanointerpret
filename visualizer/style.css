@@ -247,13 +247,11 @@ main {
   max-width: min(360px, calc(100vw - 32px));
 }
 .custom-select-option {
+  padding: 8px 10px;
   cursor: pointer;
   user-select: none;
-  &.is-active { background: var(--subtle); }
-}
-.custom-select-option {
-  padding: 8px 10px;
   white-space: nowrap;
+  &.is-active { background: var(--subtle); }
   &[aria-selected="true"] {
     color: var(--accent);
     background: var(--accent-soft);
@@ -567,18 +565,16 @@ input.progress-range::-moz-range-thumb,
   }
 }
 .amount-step-labels {
-  font-family: var(--mono);
-  font-size: 8px;
-  letter-spacing: 0;
-  line-height: 1;
-}
-.amount-step-labels {
   display: flex;
   justify-content: space-between;
   height: 8px;
   margin: 0 6px;
   color: var(--muted);
+  font-family: var(--mono);
+  font-size: 8px;
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  line-height: 1;
   span {
     display: flex;
     flex: 0 0 0;
@@ -679,12 +675,12 @@ input.progress-range::-moz-range-thumb,
   border-bottom: 1px solid var(--line);
   input[type="search"] {
     height: var(--control-height);
+    padding: 0 12px;
     border: 1px solid var(--line);
     color: var(--text);
     background-color: var(--subtle);
     font-size: 13px;
   }
-  input[type="search"] { padding: 0 12px; }
   > input[type="search"] {
     flex: 1 1 320px;
     width: auto;
@@ -1205,12 +1201,12 @@ input.progress-range::-moz-range-thumb,
   .intervention-example { gap: 7px; }
   .example-strength { display: none; }
 }
-@media (max-width: 480px) {
-  .example-prompt { display: none; }
-}
 @media (max-width: 560px) {
   .intervention-controls { grid-template-columns: 1fr; }
   .amount-control { grid-template-columns: minmax(0, 1fr) 82px; }
+}
+@media (max-width: 480px) {
+  .example-prompt { display: none; }
 }
 @media (max-width: 380px) {
   .playground-actions {

@@ -45,6 +45,24 @@ def existing_file(path: Path) -> Path | None:
     return path if path.exists() else None
 
 
+def _load_jsonl(path: Path | None, item_name: str, parse_record) -> list:
+    if path is None:
+        return []
+
+    records = []
+    with path.open(encoding="utf-8") as input_file:
+        for line_number, line in enumerate(input_file, start=1):
+            if not line.strip():
+                continue
+            try:
+                records.append(parse_record(json.loads(line)))
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+                raise ValueError(
+                    f"invalid {item_name} on line {line_number} of {path}"
+                ) from error
+    return records
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Browse SAE feature activations in a local web UI.")
     parser.add_argument("--activations", type=Path, required=True)
@@ -59,82 +77,40 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_titles(path: Path | None) -> dict[int, str | None]:
-    if path is None:
-        return {}
+    def parse_title(result):
+        title = result["title"]
+        if title is not None and not isinstance(title, str):
+            raise TypeError("feature title must be a string or null")
+        return int(result["feature_id"]), title
 
-    titles = {}
-    with path.open(encoding="utf-8") as input_file:
-        for line_number, line in enumerate(input_file, start=1):
-            if not line.strip():
-                continue
-            try:
-                result = json.loads(line)
-                title = result["title"]
-                if title is not None and not isinstance(title, str):
-                    raise TypeError("feature title must be a string or null")
-                titles[int(result["feature_id"])] = title
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-                raise ValueError(
-                    f"invalid feature title on line {line_number} of {path}"
-                ) from error
-    return titles
+    return dict(_load_jsonl(path, "feature title", parse_title))
 
 
 def load_intervention_examples(path: Path | None) -> list[dict]:
-    if path is None:
-        return []
+    def parse_example(result):
+        prompt = result["prompt"]
+        target_activation_pct = float(result["target_activation_pct"])
+        if not isinstance(prompt, str) or not math.isfinite(target_activation_pct):
+            raise ValueError
+        return {
+            "prompt": prompt,
+            "feature_id": int(result["feature_id"]),
+            "target_activation_pct": target_activation_pct,
+        }
 
-    examples = []
-    with path.open(encoding="utf-8") as input_file:
-        for line_number, line in enumerate(input_file, start=1):
-            if not line.strip():
-                continue
-            try:
-                result = json.loads(line)
-                prompt = result["prompt"]
-                feature_id = int(result["feature_id"])
-                target_activation_pct = float(result["target_activation_pct"])
-                if (
-                    not isinstance(prompt, str)
-                    or not math.isfinite(target_activation_pct)
-                ):
-                    raise ValueError
-                examples.append(
-                    {
-                        "prompt": prompt,
-                        "feature_id": feature_id,
-                        "target_activation_pct": target_activation_pct,
-                    }
-                )
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-                raise ValueError(
-                    f"invalid intervention example on line {line_number} of {path}"
-                ) from error
-    return examples
+    return _load_jsonl(path, "intervention example", parse_example)
 
 
 def load_feature_scores(path: Path | None) -> dict[int, float | None]:
-    if path is None:
-        return {}
+    def parse_score(result):
+        score = result["score"]
+        if score is not None:
+            score = float(score)
+            if not math.isfinite(score):
+                raise ValueError
+        return int(result["feature_id"]), score
 
-    scores = {}
-    with path.open(encoding="utf-8") as input_file:
-        for line_number, line in enumerate(input_file, start=1):
-            if not line.strip():
-                continue
-            try:
-                result = json.loads(line)
-                score = result["score"]
-                if score is not None:
-                    score = float(score)
-                    if not math.isfinite(score):
-                        raise ValueError
-                scores[int(result["feature_id"])] = score
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-                raise ValueError(
-                    f"invalid feature score on line {line_number} of {path}"
-                ) from error
-    return scores
+    return dict(_load_jsonl(path, "feature score", parse_score))
 
 
 class FeatureContexts(NamedTuple):
@@ -240,7 +216,12 @@ class ActivationData:
             np.argsort(peaks, kind="stable"),
         )
 
-    def _render_context(self, contexts: FeatureContexts, group_index: int) -> dict:
+    def _render_context(
+        self,
+        contexts: FeatureContexts,
+        group_index: int,
+        token_limit: int | None = None,
+    ) -> dict:
         activation_start = int(contexts.group_starts[group_index])
         activation_stop = (
             int(contexts.group_starts[group_index + 1])
@@ -252,22 +233,56 @@ class ActivationData:
         )
         context_start = context_id * self.context_size
         context_stop = min(context_start + self.context_size, len(self.token_ids))
-        token_slice = self.token_ids[context_start:context_stop]
+        positions = contexts.token_positions[activation_start:activation_stop]
+        values = contexts.activation_values[activation_start:activation_stop]
 
-        positions = (
-            contexts.token_positions[activation_start:activation_stop] - context_start
-        )
-        context_activations = np.zeros(len(token_slice), dtype=np.float32)
-        context_activations[positions] = contexts.activation_values[
-            activation_start:activation_stop
-        ]
+        window_start = context_start
+        window_stop = context_stop
+        if token_limit is not None:
+            focus = int(positions[np.argmax(values)])
+            window_start = max(context_start, focus - token_limit // 2)
+            window_start = min(window_start, context_stop - token_limit)
+            window_start = max(context_start, window_start)
+            window_stop = min(window_start + token_limit, context_stop)
 
-        return {
+        payload = {
             "context_id": context_id,
             "peak_activation": float(contexts.peaks[group_index]),
-            "tokens": [self.decode_token(int(token_id)) for token_id in token_slice],
-            "activations": context_activations.tolist(),
+            "tokens": [
+                self.decode_token(int(token_id))
+                for token_id in self.token_ids[window_start:window_stop]
+            ],
         }
+        if token_limit is None:
+            activations = np.zeros(window_stop - window_start, dtype=np.float32)
+            activations[positions - window_start] = values
+            payload["activations"] = activations.tolist()
+        else:
+            included = (positions >= window_start) & (positions < window_stop)
+            payload["activation_positions"] = (
+                positions[included] - window_start
+            ).astype(int).tolist()
+            payload["activation_values"] = values[included].astype(float).tolist()
+        return payload
+
+    def representative_contexts(
+        self,
+        feature_id: int,
+        count: int,
+        token_limit: int,
+    ) -> list[dict]:
+        contexts = self._feature_contexts(feature_id)
+        ordered_peaks = contexts.peaks[contexts.peak_order]
+        targets = np.linspace(0.0, float(ordered_peaks[-1]), count)
+        ranks = np.minimum(
+            np.searchsorted(ordered_peaks, targets), len(ordered_peaks) - 1
+        )
+        group_indices = np.unique(contexts.peak_order[ranks])
+        group_indices = group_indices[np.argsort(contexts.peaks[group_indices])[::-1]]
+        return [
+            self._render_context(contexts, int(index), token_limit)
+            for index in group_indices
+        ]
 
     def feature(self, feature_id: int) -> dict:
         contexts = self._feature_contexts(feature_id)
