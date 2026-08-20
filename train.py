@@ -21,8 +21,6 @@ from src.data import (
 )
 from src.experiment import (
     ExperimentConfig,
-    ResidualBatchFactory,
-    ResidualStreamCapture,
     capture_residual_cache,
     default_aux_k,
     estimate_activation_normalization,
@@ -137,10 +135,9 @@ def build_residual_cache(
     metadata.pop("cache_dir")
     metadata.update(layer_metadata)
 
-    capture = ResidualStreamCapture(layer)
     capture_residual_cache(
         model,
-        capture,
+        layer,
         train_tokens,
         validation_tokens,
         tokenizer.pad_token_id,
@@ -156,8 +153,8 @@ def run_training(
     args: argparse.Namespace,
     device: torch.device,
     metadata: dict,
-    train_batches: ResidualBatchFactory,
-    validation_batches: ResidualBatchFactory,
+    train_batches,
+    validation_batches,
     downstream_kl_evaluator,
 ) -> None:
     d_model = int(metadata["d_model"])
@@ -297,11 +294,10 @@ def main() -> None:
         tokenizer, model, layer, train_data, validation_data, metadata = (
             load_capture_inputs(args, device, model_dtype)
         )
-        capture = ResidualStreamCapture(layer)
         batch_function = partial(
             iter_captured_residual_batches,
             model,
-            capture,
+            layer,
             pad_token_id=tokenizer.pad_token_id,
             device=device,
             context_size=args.context_size,

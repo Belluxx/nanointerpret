@@ -18,7 +18,7 @@ from src.data import (
     token_cache_paths,
 )
 from src.experiment import (
-    ResidualStreamCapture,
+    capture_layer_input,
     find_transformer_layers,
     raw_l2_activation_mask,
 )
@@ -114,7 +114,7 @@ def write_activations(
     output_path: Path,
     pad_token_id: int,
     model,
-    capture: ResidualStreamCapture,
+    layer,
     sae: TopKSAE,
     evaluation_tokens: np.ndarray,
     config: dict,
@@ -174,8 +174,8 @@ def write_activations(
             for input_ids, attention_mask in batches:
                 device_input_ids = input_ids.to(device, non_blocking=True)
                 device_attention_mask = attention_mask.to(device, non_blocking=True)
-                residuals = capture(
-                    model, device_input_ids, device_attention_mask
+                residuals = capture_layer_input(
+                    model, layer, device_input_ids, device_attention_mask
                 )[device_attention_mask.bool()]
                 counts, feature_ids, active_values = encode_activations(
                     sae,
@@ -284,12 +284,11 @@ def main() -> None:
         f"Device: {device} | Evaluation: {token_count:,} tokens | "
         f"Layer: {layer_index} | Output: {output_path}"
     )
-    capture = ResidualStreamCapture(layers[layer_index])
     write_activations(
         output_path,
         tokenizer.pad_token_id,
         model,
-        capture,
+        layers[layer_index],
         sae,
         evaluation_tokens,
         config,

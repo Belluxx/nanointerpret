@@ -27,8 +27,6 @@ from .sae import (
     normalized_auxk_loss,
 )
 
-ResidualBatchFactory = Callable[..., Iterator[Tensor]]
-
 DOWNSTREAM_KL_TOKENS = 4096
 
 
@@ -128,33 +126,32 @@ class _ActivationCaptured(Exception):
     pass
 
 
-class ResidualStreamCapture:
-    def __init__(self, layer: nn.Module):
-        self.layer = layer
+@torch.no_grad()
+def capture_layer_input(
+    model: nn.Module,
+    layer: nn.Module,
+    input_ids: Tensor,
+    attention_mask: Tensor | None,
+) -> Tensor:
+    activation = None
 
-    @torch.no_grad()
-    def __call__(
-        self, model: nn.Module, input_ids: Tensor, attention_mask: Tensor | None
-    ) -> Tensor:
-        activation = None
+    def capture(_module, args, kwargs):
+        nonlocal activation
+        hidden = args[0] if args else kwargs["hidden_states"]
+        activation = hidden.detach()
+        raise _ActivationCaptured
 
-        def capture(_module, args, kwargs):
-            nonlocal activation
-            hidden = args[0] if args else kwargs["hidden_states"]
-            activation = hidden.detach()
-            raise _ActivationCaptured
-
-        handle = self.layer.register_forward_pre_hook(capture, with_kwargs=True)
+    handle = layer.register_forward_pre_hook(capture, with_kwargs=True)
+    try:
         try:
-            try:
-                model(input_ids=input_ids, attention_mask=attention_mask, use_cache=False)
-            except _ActivationCaptured:
-                pass
-        finally:
-            handle.remove()
-        if activation is None:
-            raise RuntimeError("the residual-stream hook did not run")
-        return activation
+            model(input_ids=input_ids, attention_mask=attention_mask, use_cache=False)
+        except _ActivationCaptured:
+            pass
+    finally:
+        handle.remove()
+    if activation is None:
+        raise RuntimeError("the residual-stream hook did not run")
+    return activation
 
 
 def save_checkpoint(
@@ -227,7 +224,7 @@ def load_checkpoint_evaluation(path: Path, training_tokens: int) -> dict | None:
 
 def capture_residual_batch(
     model: nn.Module,
-    capture: ResidualStreamCapture,
+    layer: nn.Module,
     input_ids: Tensor,
     attention_mask: Tensor,
     batch_tokens: int,
@@ -236,16 +233,16 @@ def capture_residual_batch(
     full_batch = batch_tokens == input_ids.numel()
     input_ids = input_ids.to(device, non_blocking=True)
     if full_batch:
-        return capture(model, input_ids, None).flatten(0, 1)
+        return capture_layer_input(model, layer, input_ids, None).flatten(0, 1)
 
     attention_mask = attention_mask.to(device, non_blocking=True)
     valid_mask = attention_mask.bool()
-    return capture(model, input_ids, attention_mask)[valid_mask]
+    return capture_layer_input(model, layer, input_ids, attention_mask)[valid_mask]
 
 
 def iter_captured_residual_batches(
     model: nn.Module,
-    capture: ResidualStreamCapture,
+    layer: nn.Module,
     tokens: np.memmap,
     pad_token_id: int,
     device: torch.device,
@@ -267,14 +264,14 @@ def iter_captured_residual_batches(
     for input_ids, attention_mask in batches:
         batch_tokens = int(attention_mask.sum())
         yield capture_residual_batch(
-            model, capture, input_ids, attention_mask, batch_tokens, device
+            model, layer, input_ids, attention_mask, batch_tokens, device
         )
 
 
 @torch.inference_mode()
 def capture_residual_cache(
     model: nn.Module,
-    capture: ResidualStreamCapture,
+    layer: nn.Module,
     train_tokens: np.memmap,
     validation_tokens: np.memmap,
     pad_token_id: int,
@@ -314,7 +311,7 @@ def capture_residual_cache(
         for input_ids, attention_mask in batches:
             batch_tokens = int(attention_mask.sum())
             residual = capture_residual_batch(
-                model, capture, input_ids, attention_mask, batch_tokens, device
+                model, layer, input_ids, attention_mask, batch_tokens, device
             )
             residual = residual.float()
             output_slice = slice(written, written + batch_tokens)
@@ -424,7 +421,7 @@ def optimize_residual_batch(
 
 @torch.inference_mode()
 def estimate_activation_normalization(
-    train_batches: ResidualBatchFactory,
+    train_batches,
     train_token_count: int,
     d_model: int,
     device: torch.device,
@@ -547,8 +544,8 @@ def evaluate_downstream_kl(
 
 def train_sae(
     sae: TopKSAE,
-    train_batches: ResidualBatchFactory,
-    validation_batches: ResidualBatchFactory,
+    train_batches,
+    validation_batches,
     device: torch.device,
     config: ExperimentConfig,
     output_dir: Path,
@@ -742,7 +739,7 @@ def train_sae(
 @torch.inference_mode()
 def evaluate_sae(
     sae: TopKSAE,
-    validation_batches: ResidualBatchFactory,
+    validation_batches,
     device: torch.device,
     config: ExperimentConfig,
 ) -> dict:
