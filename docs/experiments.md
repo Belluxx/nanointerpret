@@ -6,34 +6,26 @@
 Hardware: M4 Max Mac Studio (CPU 16C, GPU 40C, 64GB RAM)
 
 ## MPS streaming performance
-On Apple Silicon compiling each LLM layer before the activation capture point is a substantial improvement.
+On Apple Silicon compiling each LLM layer improves its throughput by ~100% for Gemma3 270M, ~50% for Qwen3 0.6B, ~8% for Qwen3 1.7B.
 
 <details>
 <summary>Command</summary>
 
 ```sh
-python train.py \
-  --model-id unsloth/Qwen3-0.6B-Base \
-  --activation-layer 14 \
-  --train-tokens 1000000 \
-  --validation-tokens 100000 \
-  --normalization-tokens 100000 \
-  --dead-window 100000 \
-  --model-batch-size 32 \
-  --sae-batch-size 4096 \
-  --width-multiplier 16 \
-  --k 16 \
-  --model-dtype bfloat16
+python train.py --model-id unsloth/Qwen3-0.6B-Base --activation-layer 14 --train-tokens 1000000 --validation-tokens 100000 --normalization-tokens 100000 --dead-window 100000 --model-batch-size 32 --sae-batch-size 4096 --width-multiplier 16 --k 16
+python train.py --model-id unsloth/Qwen3-0.6B-Base --activation-layer 14 --train-tokens 1000000 --validation-tokens 100000 --normalization-tokens 100000 --dead-window 100000 --model-batch-size 32 --sae-batch-size 4096 --width-multiplier 16 --k 16 --no-compile-model
+python train.py --model-id unsloth/Qwen3-1.7B-Base --activation-layer 14 --train-tokens 1000000 --validation-tokens 100000 --normalization-tokens 100000 --dead-window 100000 --model-batch-size 32 --sae-batch-size 4096 --width-multiplier 16 --k 16
+python train.py --model-id unsloth/Qwen3-1.7B-Base --activation-layer 14 --train-tokens 1000000 --validation-tokens 100000 --normalization-tokens 100000 --dead-window 100000 --model-batch-size 32 --sae-batch-size 4096 --width-multiplier 16 --k 16 --no-compile-model
 ```
 
 </details>
 
 | Model | Prefix compilation | Activation capture | SAE training | Streamed training |
 |---|:---:|---:|---:|---:|
-| Qwen3-0.6B, layer 14 | No | 18.35k tok/s | 35.47k tok/s | 12.12k tok/s |
-| Qwen3-0.6B, layer 14 | Yes | **28.54k tok/s** | 35.22k tok/s | **15.89k tok/s (+31%)** |
-| Qwen3-1.7B, layer 14 | No | 7.89k tok/s | 17.41k tok/s | 5.41k tok/s |
-| Qwen3-1.7B, layer 14 | Yes | **9.70k tok/s** | 17.39k tok/s | **6.18k tok/s (+14%)** |
+| Qwen3-0.6B, layer 14 | ✗ | 18.35k tok/s | 35.47k tok/s | 12.12k tok/s |
+| Qwen3-0.6B, layer 14 | ✓ | **28.54k tok/s** | 35.22k tok/s | **15.89k tok/s (+31%)** |
+| Qwen3-1.7B, layer 14 | ✗ | 7.89k tok/s | 17.41k tok/s | 5.41k tok/s |
+| Qwen3-1.7B, layer 14 | ✓ | **9.70k tok/s** | 17.39k tok/s | **6.18k tok/s (+14%)** |
 
 ## Pre-bias subtraction and AuxK
 
@@ -60,7 +52,7 @@ python3 train.py --cache-activations --train-tokens 300000000 --checkpoint-every
 
 ## Gradient clipping is unnecessary
 
-Disabling gradient clipping slightly improved validation metrics and increased training throughput by 35%.
+Disabling gradient clipping slightly improved validation metrics and increased training throughput by ~35%.
 
 <details>
 <summary>Commands</summary>
@@ -75,7 +67,7 @@ python3 train.py --cache-activations --train-tokens 300000000 --checkpoint-every
 | Gradient clipping | Validation MSE | Explained variance | Dead features | Training throughput |
 |:---:|---:|---:|---:|---:|
 | ✓ (1) | 0.00239 | 99.43% | 0.18% | 63k tokens/s |
-| ✗ | **0.00236** | **99.44%** | **0.14%** | **85k tokens/s** |
+| ✗ | **0.00236** | **99.44%** | **0.14%** | **85k tokens/s (+35%)** |
 
 ## Fixing Qwen first-token activation outliers
 
