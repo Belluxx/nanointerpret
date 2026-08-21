@@ -10,7 +10,9 @@ python3 train.py \
   --k 16 \
   --train-tokens 500000000 \
   --checkpoint-every 250000000 \
-  --validation-tokens 100000000 \
+  --validation-tokens 10000000 \
+  --validate-every 100000000 \
+  --recording-tokens 100000000 \
   --model-dtype bfloat16
 ```
 

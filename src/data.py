@@ -29,6 +29,7 @@ class TokenCacheSpec:
     dataset_config: str
     train_tokens: int
     validation_tokens: int
+    recording_tokens: int
 
 
 @dataclass(frozen=True)
@@ -175,17 +176,18 @@ def save_activations(
         raise
 
 
-def token_cache_paths(spec: TokenCacheSpec) -> tuple[Path, Path, Path]:
+def token_cache_paths(spec: TokenCacheSpec) -> tuple[Path, Path, Path, Path]:
     safe_model = spec.model_id.replace("/", "--")
     safe_dataset = spec.dataset_id.replace("/", "--")
     safe_config = spec.dataset_config.replace("/", "--")
     stem = (
         f"{safe_model}_{safe_dataset}_{safe_config}_{spec.train_tokens}_"
-        f"{spec.validation_tokens}"
+        f"{spec.validation_tokens}_{spec.recording_tokens}"
     )
     return (
         spec.cache_dir / f"{stem}_train.uint32",
         spec.cache_dir / f"{stem}_validation.uint32",
+        spec.cache_dir / f"{stem}_recording.uint32",
         spec.cache_dir / f"{stem}_metadata.json",
     )
 
@@ -272,12 +274,12 @@ def load_residual_cache_metadata(spec: ResidualCacheSpec) -> dict | None:
 
 
 def token_cache_is_valid(
-    spec: TokenCacheSpec, *, validation_only: bool = False
+    spec: TokenCacheSpec, *, recording_only: bool = False
 ) -> bool:
-    train_path, validation_path, metadata_path = token_cache_paths(spec)
-    required_paths = (validation_path, metadata_path)
-    if not validation_only:
-        required_paths += (train_path,)
+    train_path, validation_path, recording_path, metadata_path = token_cache_paths(spec)
+    required_paths = (recording_path, metadata_path)
+    if not recording_only:
+        required_paths += (train_path, validation_path)
     if not all(path.exists() for path in required_paths):
         return False
     metadata = json.loads(metadata_path.read_text())
@@ -287,16 +289,20 @@ def token_cache_is_valid(
     item_size = np.dtype(np.uint32).itemsize
     return (
         all(metadata.get(key) == value for key, value in expected.items())
-        and validation_path.stat().st_size == spec.validation_tokens * item_size
+        and recording_path.stat().st_size == spec.recording_tokens * item_size
         and (
-            validation_only
-            or train_path.stat().st_size == spec.train_tokens * item_size
+            recording_only
+            or (
+                train_path.stat().st_size == spec.train_tokens * item_size
+                and validation_path.stat().st_size
+                == spec.validation_tokens * item_size
+            )
         )
     )
 
 
 def build_token_cache(tokenizer, spec: TokenCacheSpec) -> tuple[Path, Path]:
-    train_path, validation_path, metadata_path = token_cache_paths(spec)
+    train_path, validation_path, recording_path, metadata_path = token_cache_paths(spec)
     spec.cache_dir.mkdir(parents=True, exist_ok=True)
     if token_cache_is_valid(spec):
         print(f"using token cache at {spec.cache_dir}")
@@ -308,7 +314,8 @@ def build_token_cache(tokenizer, spec: TokenCacheSpec) -> tuple[Path, Path]:
 
     train_tmp = train_path.with_suffix(train_path.suffix + ".tmp")
     validation_tmp = validation_path.with_suffix(validation_path.suffix + ".tmp")
-    target_total = spec.train_tokens + spec.validation_tokens
+    recording_tmp = recording_path.with_suffix(recording_path.suffix + ".tmp")
+    target_total = spec.train_tokens + spec.validation_tokens + spec.recording_tokens
     written = 0
     dataset = load_dataset(
         spec.dataset_id,
@@ -320,7 +327,11 @@ def build_token_cache(tokenizer, spec: TokenCacheSpec) -> tuple[Path, Path]:
     eos = tokenizer.eos_token_id
     giga_tokenizer = GigaTokenizer(tokenizer)
 
-    with train_tmp.open("wb") as train_file, validation_tmp.open("wb") as validation_file:
+    with (
+        train_tmp.open("wb") as train_file,
+        validation_tmp.open("wb") as validation_file,
+        recording_tmp.open("wb") as recording_file,
+    ):
         progress = tqdm(total=target_total, unit="tok", desc="Token cache")
         text_batch: list[str] = []
         batch_chars = 0
@@ -341,11 +352,20 @@ def build_token_cache(tokenizer, spec: TokenCacheSpec) -> tuple[Path, Path]:
             array = ak.to_numpy(ak.flatten(rows))
             take = min(len(array), target_total - written)
 
-            split_at = max(0, min(take, spec.train_tokens - written))
-            if split_at:
-                array[:split_at].tofile(train_file)
-            if split_at < take:
-                array[split_at:take].tofile(validation_file)
+            chunk_start = written
+            chunk_stop = written + take
+            split_start = 0
+            for split_file, split_size in (
+                (train_file, spec.train_tokens),
+                (validation_file, spec.validation_tokens),
+                (recording_file, spec.recording_tokens),
+            ):
+                split_stop = split_start + split_size
+                start = max(chunk_start, split_start)
+                stop = min(chunk_stop, split_stop)
+                if start < stop:
+                    array[start - chunk_start : stop - chunk_start].tofile(split_file)
+                split_start = split_stop
             written += take
             progress.update(take)
 
@@ -368,12 +388,14 @@ def build_token_cache(tokenizer, spec: TokenCacheSpec) -> tuple[Path, Path]:
 
     os.replace(train_tmp, train_path)
     os.replace(validation_tmp, validation_path)
+    os.replace(recording_tmp, recording_path)
     metadata = {
         "model_id": spec.model_id,
         "dataset_id": spec.dataset_id,
         "dataset_config": spec.dataset_config,
         "train_tokens": spec.train_tokens,
         "validation_tokens": spec.validation_tokens,
+        "recording_tokens": spec.recording_tokens,
         "bos_token_id": bos,
         "eos_token_id": eos,
     }

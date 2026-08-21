@@ -37,11 +37,11 @@ def positive_int(value: str) -> int:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Record SAE feature activations on the local evaluation set.")
+    parser = argparse.ArgumentParser(description="Record SAE feature activations on the dedicated recording set.")
     parser.add_argument("--sae-dir", type=Path, required=True, help="Training output directory containing config.json and sae_final.pt.")
     parser.add_argument("--cache-dir", type=Path, default=CACHE_DIR)
     parser.add_argument("--output", type=Path, default=None, help="Output directory. Default: <sae-dir>/activations.")
-    parser.add_argument("--max-tokens", type=positive_int, default=None, help="Process at most this many evaluation tokens.")
+    parser.add_argument("--tokens", type=positive_int, default=None, help="Exact number of recording tokens to process. Default: the full recording split.")
     parser.add_argument("--model-batch-size", type=positive_int, default=None, help="Contexts processed together. Default: the training configuration.")
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
     return parser.parse_args()
@@ -54,7 +54,7 @@ def load_config(sae_dir: Path) -> dict:
     return json.loads(config_path.read_text())
 
 
-def evaluation_cache(config: dict, cache_dir: Path) -> tuple[Path, int] | None:
+def recording_cache(config: dict, cache_dir: Path) -> tuple[Path, int] | None:
     spec = TokenCacheSpec(
         cache_dir=cache_dir,
         model_id=config["model_id"],
@@ -62,13 +62,14 @@ def evaluation_cache(config: dict, cache_dir: Path) -> tuple[Path, int] | None:
         dataset_config=config["dataset_config"],
         train_tokens=int(config["train_tokens"]),
         validation_tokens=int(config["validation_tokens"]),
+        recording_tokens=int(config["recording_tokens"]),
     )
-    _, validation_path, _ = token_cache_paths(spec)
-    if spec.validation_tokens <= 0 or not token_cache_is_valid(
-        spec, validation_only=True
+    _, _, recording_path, _ = token_cache_paths(spec)
+    if spec.recording_tokens <= 0 or not token_cache_is_valid(
+        spec, recording_only=True
     ):
         return None
-    return validation_path, spec.validation_tokens
+    return recording_path, spec.recording_tokens
 
 
 def encode_activations(
@@ -116,13 +117,13 @@ def write_activations(
     model,
     layer,
     sae: TopKSAE,
-    evaluation_tokens: np.ndarray,
+    recording_tokens: np.ndarray,
     config: dict,
     device: torch.device,
     model_batch_size: int,
 ) -> None:
     context_size = int(config["context_size"])
-    token_count = len(evaluation_tokens)
+    token_count = len(recording_tokens)
     metadata = {
         "model_id": config["model_id"],
         "context_size": context_size,
@@ -164,7 +165,7 @@ def write_activations(
             dynamic_ncols=True,
         ) as progress:
             batches = iter_context_batches(
-                evaluation_tokens,
+                recording_tokens,
                 context_size,
                 model_batch_size,
                 pad_token_id,
@@ -228,7 +229,7 @@ def write_activations(
         save_activations(
             output_path,
             metadata,
-            evaluation_tokens,
+            recording_tokens,
             row_ptr,
             feature_ids,
             active_values,
@@ -246,19 +247,20 @@ def write_activations(
 def main() -> None:
     args = parse_args()
     config = load_config(args.sae_dir)
-    cache = evaluation_cache(config, args.cache_dir)
+    cache = recording_cache(config, args.cache_dir)
     if cache is None:
-        print("No local evaluation set is available; exiting.")
+        print("No local recording set is available; exiting.")
         return
 
-    evaluation_path, available_tokens = cache
-    token_count = (
-        available_tokens
-        if args.max_tokens is None
-        else min(args.max_tokens, available_tokens)
-    )
-    evaluation_tokens = np.memmap(
-        evaluation_path, mode="r", dtype=np.uint32, shape=(available_tokens,)
+    recording_path, available_tokens = cache
+    token_count = available_tokens if args.tokens is None else args.tokens
+    if token_count > available_tokens:
+        raise ValueError(
+            f"--tokens requests {token_count:,} tokens, but the recording cache "
+            f"contains {available_tokens:,}"
+        )
+    recording_tokens = np.memmap(
+        recording_path, mode="r", dtype=np.uint32, shape=(available_tokens,)
     )[:token_count]
     output_path = args.output or args.sae_dir / "activations"
     if output_path.exists():
@@ -281,7 +283,7 @@ def main() -> None:
     sae = load_sae(args.sae_dir, config, device)
     model_batch_size = args.model_batch_size or int(config["model_batch_size"])
     print(
-        f"Device: {device} | Evaluation: {token_count:,} tokens | "
+        f"Device: {device} | Recording: {token_count:,} tokens | "
         f"Layer: {layer_index} | Output: {output_path}"
     )
     write_activations(
@@ -290,7 +292,7 @@ def main() -> None:
         model,
         layers[layer_index],
         sae,
-        evaluation_tokens,
+        recording_tokens,
         config,
         device,
         model_batch_size,

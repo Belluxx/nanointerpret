@@ -81,6 +81,7 @@ class ExperimentConfig:
     dataset_config: str
     train_tokens: int
     validation_tokens: int
+    recording_tokens: int
     context_size: int
     layer_index: int
     width_multiplier: int

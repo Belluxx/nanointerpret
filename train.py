@@ -47,6 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset-config", default=DATASET_CONFIG)
     parser.add_argument("--train-tokens", type=int, default=100_000_000)
     parser.add_argument("--validation-tokens", type=int, default=10_000_000)
+    parser.add_argument("--recording-tokens", type=int, default=10_000_000, help="Dedicated token split for recording feature activations. Default: 10000000.")
     parser.add_argument("--context-size", type=int, default=256)
     parser.add_argument("--width-multiplier", type=int, default=16)
     parser.add_argument("--k", type=int, default=16)
@@ -87,6 +88,7 @@ def token_cache_spec(args: argparse.Namespace) -> TokenCacheSpec:
         dataset_config=args.dataset_config,
         train_tokens=args.train_tokens,
         validation_tokens=args.validation_tokens,
+        recording_tokens=args.recording_tokens,
     )
 
 
@@ -229,6 +231,7 @@ def run_training(
         dataset_config=args.dataset_config,
         train_tokens=args.train_tokens,
         validation_tokens=args.validation_tokens,
+        recording_tokens=args.recording_tokens,
         context_size=args.context_size,
         layer_index=int(metadata["layer_index"]),
         width_multiplier=args.width_multiplier,
