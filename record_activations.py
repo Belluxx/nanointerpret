@@ -29,21 +29,14 @@ from src.sae import FIRING_THRESHOLD, TopKSAE, load_sae
 CACHE_DIR = Path("artifacts/token_cache")
 
 
-def positive_int(value: str) -> int:
-    parsed = int(value)
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError("must be positive")
-    return parsed
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Record SAE feature activations on the dedicated recording set.")
     parser.add_argument("--sae-dir", type=Path, required=True, help="Training output directory containing config.json and sae_final.pt.")
-    parser.add_argument("--cache-dir", type=Path, default=CACHE_DIR)
-    parser.add_argument("--output", type=Path, default=None, help="Output directory. Default: <sae-dir>/activations.")
-    parser.add_argument("--tokens", type=positive_int, default=None, help="Exact number of recording tokens to process. Default: the full recording split.")
-    parser.add_argument("--model-batch-size", type=positive_int, default=None, help="Contexts processed together. Default: the training configuration.")
+    parser.add_argument("--cache-dir", type=Path, default=CACHE_DIR, help="Token-cache directory populated during training. Default: artifacts/token_cache.")
+    parser.add_argument("--tokens", type=int, default=None, help="Exact number of recording tokens to process. Default: the full recording split.")
+    parser.add_argument("--model-batch-size", type=int, default=None, help="Contexts processed together. Default: the training configuration.")
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
+    parser.add_argument("--output", type=Path, default=None, help="Output directory. Default: <sae-dir>/activations.")
     return parser.parse_args()
 
 

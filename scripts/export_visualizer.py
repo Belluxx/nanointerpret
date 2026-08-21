@@ -14,7 +14,7 @@ from tqdm.auto import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from visualize import ActivationData, STATIC_DIR, existing_file, unit_float
+from visualize import ActivationData, STATIC_DIR, existing_file
 
 
 CONTEXTS_PER_FEATURE = 40
@@ -23,22 +23,15 @@ FEATURES_PER_FILE = 32
 DEFAULT_WORKERS = min(8, os.cpu_count() or 1)
 
 
-def positive_int(value: str) -> int:
-    parsed = int(value)
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError("must be positive")
-    return parsed
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export a compact, static SAE feature visualizer.")
-    parser.add_argument("--activations", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--activations", type=Path, required=True, help="Activation directory produced by record_activations.py.")
     parser.add_argument("--names", type=Path, help="Feature-title JSONL. Default: feature_names.jsonl next to the activation directory, when present.")
     parser.add_argument("--feature-scores", type=Path, help="Feature-score JSONL produced by evaluate_features.py. Default: feature_scores.jsonl next to the activation directory, when present.")
-    parser.add_argument("--starred-feature-threshold", type=unit_float, default=0.9, help="Score at or above which a feature is marked high-quality and starred. Default: 0.9.")
+    parser.add_argument("--starred-feature-threshold", type=float, default=0.9, help="Score at or above which a feature is marked high-quality and starred. Default: 0.9.")
     parser.add_argument("--intervention-url", help="Public intervention endpoint. The playground is hidden when omitted.")
-    parser.add_argument("--workers", type=positive_int, default=DEFAULT_WORKERS, help=f"Concurrent export workers. Default: {DEFAULT_WORKERS}.")
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS, help=f"Concurrent export workers. Default: {DEFAULT_WORKERS}.")
+    parser.add_argument("--output", type=Path, required=True, help="New directory in which to write the static visualizer bundle.")
     return parser.parse_args()
 
 

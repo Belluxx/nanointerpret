@@ -27,20 +27,6 @@ TOKENS_PER_PERCENTILE = 4
 TOKEN_PERCENTILES = (95, 50, 25)
 
 
-def positive_int(value: str) -> int:
-    parsed = int(value)
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError("must be positive")
-    return parsed
-
-
-def unit_float(value: str) -> float:
-    parsed = float(value)
-    if not 0.0 <= parsed <= 1.0:
-        raise argparse.ArgumentTypeError("must be between 0 and 1")
-    return parsed
-
-
 def existing_file(path: Path) -> Path | None:
     return path if path.exists() else None
 
@@ -65,14 +51,14 @@ def _load_jsonl(path: Path | None, item_name: str, parse_record) -> list:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Browse SAE feature activations in a local web UI.")
-    parser.add_argument("--activations", type=Path, required=True)
+    parser.add_argument("--activations", type=Path, required=True, help="Activation directory produced by record_activations.py.")
     parser.add_argument("--names", type=Path, help="Feature-title JSONL produced by interpret_features.py. Default: feature_names.jsonl next to the activations directory, when present.")
-    parser.add_argument("--sae-dir", type=Path, help="Training output containing config.json and sae_final.pt. Default: the activations directory's parent.")
     parser.add_argument("--feature-scores", type=Path, help="Feature-score JSONL produced by evaluate_features.py. Default: feature_scores.jsonl in --sae-dir, when present.")
-    parser.add_argument("--starred-feature-threshold", type=unit_float, default=0.6, help="Score at or above which a feature is marked high-quality and starred. Default: 0.6.")
+    parser.add_argument("--starred-feature-threshold", type=float, default=0.6, help="Score at or above which a feature is marked high-quality and starred. Default: 0.6.")
+    parser.add_argument("--sae-dir", type=Path, help="Training output containing config.json and sae_final.pt. Default: the activations directory's parent.")
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=positive_int, default=8000)
+    parser.add_argument("--port", type=int, default=8000)
     return parser.parse_args()
 
 

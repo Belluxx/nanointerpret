@@ -39,32 +39,18 @@ PERCENTILE_BUCKETS = (
 )
 
 
-def nonnegative_int(value: str) -> int:
-    parsed = int(value)
-    if parsed < 0:
-        raise argparse.ArgumentTypeError("must be nonnegative")
-    return parsed
-
-
-def positive_int(value: str) -> int:
-    parsed = int(value)
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError("must be positive")
-    return parsed
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Ask an OpenAI-compatible LLM to name SAE features.")
-    parser.add_argument("--base-url", required=True)
-    parser.add_argument("--model", required=True)
-    parser.add_argument("--api-key", help="API key. Default: OPENAI_API_KEY, or 'not-needed' if unset.")
-    parser.add_argument("--activations", type=Path, required=True)
-    parser.add_argument("--output", type=Path, help="Output JSONL path. Default: next to the activation data.")
-    parser.add_argument("--feature-ids", type=nonnegative_int, nargs="+", help="Interpret only these features. Default: every SAE feature.")
+    parser.add_argument("--activations", type=Path, required=True, help="Activation directory produced by record_activations.py.")
+    parser.add_argument("--feature-ids", type=int, nargs="+", help="Interpret only these features. Default: every SAE feature.")
+    parser.add_argument("--base-url", required=True, help="Base URL of the OpenAI-compatible API.")
+    parser.add_argument("--model", required=True, help="Model identifier sent to the API.")
+    parser.add_argument("--api-key")
     parser.add_argument("--no-reasoning", action="store_true", help="Disable model reasoning. Reasoning is enabled by default.")
-    parser.add_argument("--max-tokens", type=positive_int, help="Completion-token budget. Default: 32768, or 64 with --no-reasoning.")
-    parser.add_argument("--concurrent", type=positive_int, default=1, help="Number of concurrent interpretation requests. Default: 1.")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--max-tokens", type=int, help="Completion-token budget. Default: 32768, or 64 with --no-reasoning.")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed used to sample representative activation examples. Default: 42.")
+    parser.add_argument("--concurrent", type=int, default=1, help="Number of concurrent interpretation requests. Default: 1.")
+    parser.add_argument("--output", type=Path, help="Output JSONL path. Default: next to the activation data.")
     return parser.parse_args()
 
 
