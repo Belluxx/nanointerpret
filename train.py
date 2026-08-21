@@ -353,6 +353,8 @@ def main() -> None:
     train_path, validation_path, _ = cache_paths
     metadata = load_residual_cache_metadata(spec)
     if metadata is None:
+        if any(path.exists() for path in cache_paths):
+            raise RuntimeError("Corrupted residual cache, delete it and rerun to rebuild")
         build_residual_cache(args, device, model_dtype, spec, cache_paths)
         if device.type == "cuda":
             torch.cuda.empty_cache()
