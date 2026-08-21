@@ -97,10 +97,19 @@ def save_feature_density_plot(metrics_path: Path, output_path: Path) -> None:
     )
 
 
-def save_training_plot(metrics_path: Path, output_path: Path) -> None:
+def save_training_plot(
+    metrics_path: Path,
+    checkpoint_metrics_path: Path,
+    output_path: Path,
+) -> None:
     records = [
         json.loads(line)
         for line in metrics_path.read_text().splitlines()
+        if line.strip()
+    ]
+    checkpoint_records = [
+        json.loads(line)
+        for line in checkpoint_metrics_path.read_text().splitlines()
         if line.strip()
     ]
     if not records:
@@ -114,10 +123,10 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
     token_counts = values("tokens")
     tokens = token_counts / 1_000_000
     with rc_context(STYLE):
-        figure = Figure(figsize=(10.5, 4.4), constrained_layout=True, facecolor="#F8FAFC")
+        figure = Figure(figsize=(15.0, 4.4), constrained_layout=True, facecolor="#F8FAFC")
         figure.set_constrained_layout_pads(w_pad=0.12, h_pad=0.12, wspace=0.08)
         FigureCanvasAgg(figure)
-        mse_axis, feature_axis = figure.subplots(1, 2)
+        mse_axis, feature_axis, kl_axis = figure.subplots(1, 3)
         auxk_axis = feature_axis.twinx()
 
         mse = values("mse")
@@ -174,11 +183,30 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
                 loc="center right",
             )
 
+        kl_tokens = np.asarray(
+            [record["training_tokens"] for record in checkpoint_records],
+            dtype=float,
+        ) / 1_000_000
+        downstream_kl = np.asarray(
+            [record["downstream_kl"] for record in checkpoint_records],
+            dtype=float,
+        )
+        kl_axis.plot(
+            kl_tokens,
+            downstream_kl,
+            color="#059669",
+            linewidth=1.5,
+            marker="o",
+            markersize=5,
+        )
+        kl_axis.set_ylabel("KL(base || SAE)")
+
         for axis, title in zip(
-            (mse_axis, feature_axis),
+            (mse_axis, feature_axis, kl_axis),
             (
                 "Reconstruction error",
                 "Dead features and AuxK" if has_auxk else "Dead features",
+                "Next-token KL divergence",
             ),
         ):
             axis.set_title(title, loc="left", pad=14)
@@ -188,6 +216,7 @@ def save_training_plot(metrics_path: Path, output_path: Path) -> None:
             axis.tick_params(which="both", length=0)
         _despine(mse_axis)
         _despine(feature_axis)
+        _despine(kl_axis)
         _despine(auxk_axis, left=False, right=True)
 
     figure.savefig(
