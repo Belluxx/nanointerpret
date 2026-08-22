@@ -14,7 +14,11 @@ from urllib.parse import parse_qs, urlsplit
 import numpy as np
 from transformers import AutoTokenizer
 
-from src.data import load_activations
+from src.data import (
+    INTERPRETATIONS_FILENAME,
+    load_activations,
+    load_interpretations,
+)
 from src.interventions import InterventionGenerator, InterventionRequest
 from src.runtime import choose_device
 
@@ -52,7 +56,7 @@ def _load_jsonl(path: Path | None, item_name: str, parse_record) -> list:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Browse SAE feature activations in a local web UI.")
     parser.add_argument("--activations", type=Path, required=True, help="Activation directory produced by record_activations.py.")
-    parser.add_argument("--names", type=Path, help="Feature-title JSONL produced by interpret_features.py. Default: feature_names.jsonl next to the activations directory, when present.")
+    parser.add_argument("--interpretations", type=Path, help=f"Feature-interpretation JSONL produced by interpret_features.py. Default: {INTERPRETATIONS_FILENAME} next to the activations directory, when present.")
     parser.add_argument("--feature-scores", type=Path, help="Feature-score JSONL produced by evaluate_features.py. Default: feature_scores.jsonl in --sae-dir, when present.")
     parser.add_argument("--starred-feature-threshold", type=float, default=0.6, help="Score at or above which a feature is marked high-quality and starred. Default: 0.6.")
     parser.add_argument("--sae-dir", type=Path, help="Training output containing config.json and sae_final.pt. Default: the activations directory's parent.")
@@ -60,16 +64,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     return parser.parse_args()
-
-
-def load_titles(path: Path | None) -> dict[int, str | None]:
-    def parse_title(result):
-        title = result["title"]
-        if title is not None and not isinstance(title, str):
-            raise TypeError("feature title must be a string or null")
-        return int(result["feature_id"]), title
-
-    return dict(_load_jsonl(path, "feature title", parse_title))
 
 
 def load_intervention_examples(path: Path | None) -> list[dict]:
@@ -111,7 +105,7 @@ class ActivationData:
     def __init__(
         self,
         activations_path: Path,
-        names_path: Path | None,
+        interpretations_path: Path | None,
         scores_path: Path | None = None,
         intervention_examples_path: Path | None = None,
         starred_feature_threshold: float = 0.6,
@@ -130,7 +124,7 @@ class ActivationData:
             self.metadata["model_id"]
         )
 
-        titles = load_titles(names_path)
+        interpretations = load_interpretations(interpretations_path)
         self.intervention_examples = load_intervention_examples(intervention_examples_path)
         self.scores = load_feature_scores(scores_path)
         self.starred_feature_threshold = starred_feature_threshold
@@ -138,10 +132,12 @@ class ActivationData:
         self.features = []
         for feature_id in np.flatnonzero(counts):
             feature_id = int(feature_id)
+            interpretation = interpretations.get(feature_id, {})
             self.features.append(
                 {
                     "id": feature_id,
-                    "title": titles.get(feature_id),
+                    "title": interpretation.get("title"),
+                    "category": interpretation.get("category"),
                     **self._score_metadata(feature_id),
                     "activation_count": int(counts[feature_id]),
                     "max_activation": float(activations.feature_max[feature_id]),
@@ -436,8 +432,8 @@ class VisualizerHandler(SimpleHTTPRequestHandler):
 def main() -> None:
     args = parse_args()
     sae_dir = args.sae_dir or args.activations.parent
-    names_path = args.names or existing_file(
-        args.activations.with_name("feature_names.jsonl")
+    interpretations_path = args.interpretations or existing_file(
+        args.activations.with_name(INTERPRETATIONS_FILENAME)
     )
     scores_path = args.feature_scores or existing_file(sae_dir / "feature_scores.jsonl")
     intervention_examples_path = existing_file(sae_dir / "intervention_examples.jsonl")
@@ -445,7 +441,7 @@ def main() -> None:
     print(f"Loading {args.activations} ...")
     data = ActivationData(
         args.activations,
-        names_path,
+        interpretations_path,
         scores_path=scores_path,
         intervention_examples_path=intervention_examples_path,
         starred_feature_threshold=args.starred_feature_threshold,

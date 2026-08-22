@@ -14,6 +14,7 @@ from tqdm.auto import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.data import INTERPRETATIONS_FILENAME
 from visualize import ActivationData, STATIC_DIR, existing_file
 
 
@@ -26,7 +27,7 @@ DEFAULT_WORKERS = min(8, os.cpu_count() or 1)
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export a compact, static SAE feature visualizer.")
     parser.add_argument("--activations", type=Path, required=True, help="Activation directory produced by record_activations.py.")
-    parser.add_argument("--names", type=Path, help="Feature-title JSONL. Default: feature_names.jsonl next to the activation directory, when present.")
+    parser.add_argument("--interpretations", type=Path, help=f"Feature-interpretation JSONL. Default: {INTERPRETATIONS_FILENAME} next to the activation directory, when present.")
     parser.add_argument("--feature-scores", type=Path, help="Feature-score JSONL produced by evaluate_features.py. Default: feature_scores.jsonl next to the activation directory, when present.")
     parser.add_argument("--starred-feature-threshold", type=float, default=0.9, help="Score at or above which a feature is marked high-quality and starred. Default: 0.9.")
     parser.add_argument("--intervention-url", help="Public intervention endpoint. The playground is hidden when omitted.")
@@ -66,8 +67,8 @@ def main() -> None:
     if args.output.exists():
         raise FileExistsError(f"export output already exists: {args.output}")
 
-    names_path = args.names or existing_file(
-        args.activations.with_name("feature_names.jsonl")
+    interpretations_path = args.interpretations or existing_file(
+        args.activations.with_name(INTERPRETATIONS_FILENAME)
     )
     scores_path = args.feature_scores or existing_file(
         args.activations.with_name("feature_scores.jsonl")
@@ -78,7 +79,7 @@ def main() -> None:
 
     data = ActivationData(
         args.activations,
-        names_path,
+        interpretations_path,
         scores_path=scores_path,
         intervention_examples_path=intervention_examples_path,
         starred_feature_threshold=args.starred_feature_threshold,

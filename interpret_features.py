@@ -15,7 +15,13 @@ from openai import APIConnectionError, APIStatusError, OpenAI
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
 
-from src.data import load_activations
+from src.data import (
+    INSUFFICIENT_TITLE,
+    INTERPRETATIONS_FILENAME,
+    UNCLEAR_TITLE,
+    load_activations,
+    validate_interpretation,
+)
 
 
 MAX_RETRIES = 3
@@ -23,8 +29,6 @@ RETRY_DELAY_SECONDS = 3
 REQUEST_TIMEOUT_SECONDS = 300
 RETRYABLE_STATUS_CODES = {408, 409, 429}
 
-INSUFFICIENT_TITLE = "Insufficient activation data"
-UNCLEAR_TITLE = "No coherent interpretation"
 MAX_PREFIX_TOKENS = 64
 MAX_ACTIVATED_TOKENS = 5
 
@@ -40,7 +44,7 @@ PERCENTILE_BUCKETS = (
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Ask an OpenAI-compatible LLM to name SAE features.")
+    parser = argparse.ArgumentParser(description="Ask an OpenAI-compatible LLM to interpret and categorize SAE features.")
     parser.add_argument("--activations", type=Path, required=True, help="Activation directory produced by record_activations.py.")
     parser.add_argument("--feature-ids", type=int, nargs="+", help="Interpret only these features. Default: every SAE feature.")
     parser.add_argument("--base-url", required=True, help="Base URL of the OpenAI-compatible API.")
@@ -50,7 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-tokens", type=int, help="Completion-token budget. Default: 32768, or 64 with --no-reasoning.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed used to sample representative activation examples. Default: 42.")
     parser.add_argument("--concurrent", type=int, default=1, help="Number of concurrent interpretation requests. Default: 1.")
-    parser.add_argument("--output", type=Path, help="Output JSONL path. Default: next to the activation data.")
+    parser.add_argument("--output", type=Path, help=f"Output JSONL path. Default: {INTERPRETATIONS_FILENAME} next to the activation directory.")
     return parser.parse_args()
 
 
@@ -194,7 +198,12 @@ def choose_examples(
 def feature_prompt(examples: dict[str, list[str]]) -> str:
     sections = [
         "Infer the feature's core concept from the examples below.\n"
-        "Focus primarily on high-activation examples, but use weaker examples to detect broader meanings or polysemanticity."
+        "Focus primarily on high-activation examples, but use weaker examples to detect broader meanings or polysemanticity.\n\n"
+        "Classify the feature by what its activations primarily depend on:\n"
+        "- token-specific: one exact tokenizer token, or a very small fixed set of tokens, regardless of context.\n"
+        "- lexical: surface-level vocabulary, word-form, morphology, syntax, punctuation, or formatting patterns shared across tokens.\n"
+        "- semantic: an underlying concept expressed through varied words or constructions.\n"
+        "Prefer the most specific applicable category: token-specific over lexical, and lexical over semantic."
     ]
     for heading, texts in examples.items():
         sections.append(
@@ -202,33 +211,36 @@ def feature_prompt(examples: dict[str, list[str]]) -> str:
             + "\n".join(f"```\n{text.strip()}\n```" for text in texts)
         )
     sections.append(
-        f"If the examples do not support one coherent concept, return exactly \"{UNCLEAR_TITLE}\". "
-        "Give this feature a very concise, specific title. "
-        "Return only the plain title, with no quotes, label or explanation."
+        f'If the examples do not support one coherent concept, return exactly '
+        f'{{"title":"{UNCLEAR_TITLE}","category":null}}. '
+        "Otherwise, give the feature a very concise, specific title and return exactly one JSON object in the form "
+        '{"title":"Concise title","category":"token-specific"}. '
+        "The category must be token-specific, lexical, or semantic. Return no markdown or explanation."
     )
     return "\n\n".join(sections)
 
 
-def clean_title(content: str | None) -> str:
+def parse_interpretation(content: str | None) -> tuple[str, str | None]:
     if not content or not content.strip():
-        raise ValueError("the model returned an empty feature title")
+        raise ValueError("the model returned an empty feature interpretation")
 
-    title = content.strip().splitlines()[0].strip()
-    if title.lower().startswith("title:"):
-        title = title[6:].strip()
-    title = title.strip('"\'`').strip()
-    if not title:
-        raise ValueError("the model returned an empty feature title")
-    return title
+    try:
+        result = json.loads(content)
+        title, category = validate_interpretation(
+            result["title"], result["category"]
+        )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError("the model returned an invalid feature interpretation") from error
+    return title, category
 
 
-def request_title(
+def request_interpretation(
     client: OpenAI,
     model: str,
     prompt: str,
     reasoning: bool = True,
     max_tokens: int | None = None,
-) -> str:
+) -> tuple[str, str | None]:
     reasoning_options = {} if reasoning else {"reasoning_effort": "none"}
     if max_tokens is None:
         max_tokens = 32_768 if reasoning else 64
@@ -252,7 +264,7 @@ def request_title(
             )
             if not completion.choices:
                 raise ValueError("the model returned no completion choices")
-            return clean_title(completion.choices[0].message.content)
+            return parse_interpretation(completion.choices[0].message.content)
         except Exception as error:
             retryable = (
                 isinstance(error, (ValueError, APIConnectionError))
@@ -273,10 +285,10 @@ def request_title(
 
 def map_bounded(
     executor: ThreadPoolExecutor,
-    function: Callable[[int], tuple[int, str]],
+    function: Callable[[int], dict],
     items: Iterable[int],
     max_pending: int,
-) -> Iterator[tuple[int, str]]:
+) -> Iterator[dict]:
     items = iter(items)
     pending = deque()
     for item in items:
@@ -306,6 +318,9 @@ def resume_progress(temporary: Path, requested: list[int]) -> tuple[int, int]:
     with temporary.open(encoding="utf-8") as saved_output:
         for completed, line in enumerate(saved_output, start=1):
             record = json.loads(line)
+            title, _ = validate_interpretation(
+                record["title"], record["category"]
+            )
             if (
                 completed > len(requested)
                 or record["feature_id"] != requested[completed - 1]
@@ -313,7 +328,7 @@ def resume_progress(temporary: Path, requested: list[int]) -> tuple[int, int]:
                 raise ValueError(
                     f"{temporary} does not match the requested feature order"
                 )
-            insufficient += record["title"] == INSUFFICIENT_TITLE
+            insufficient += title == INSUFFICIENT_TITLE
 
     print(f"Continuing after {completed:,} completed features.")
     return completed, insufficient
@@ -321,7 +336,9 @@ def resume_progress(temporary: Path, requested: list[int]) -> tuple[int, int]:
 
 def main() -> None:
     args = parse_args()
-    output_path = args.output or args.activations.with_name("feature_names.jsonl")
+    output_path = args.output or args.activations.with_name(
+        INTERPRETATIONS_FILENAME
+    )
     client = OpenAI(
         base_url=args.base_url,
         api_key=args.api_key or os.environ.get("OPENAI_API_KEY") or "not-needed",
@@ -345,7 +362,7 @@ def main() -> None:
 
     completed, insufficient = resume_progress(temporary, requested)
 
-    def interpret_feature(feature_id: int) -> tuple[int, str]:
+    def interpret_feature(feature_id: int) -> dict:
         start, stop = map(
             int, activations.feature_ptr[feature_id : feature_id + 2]
         )
@@ -359,18 +376,25 @@ def main() -> None:
             args.seed,
         )
         if examples is None:
-            return feature_id, INSUFFICIENT_TITLE
-        try:
-            title = request_title(
-                client,
-                args.model,
-                feature_prompt(examples),
-                reasoning=not args.no_reasoning,
-                max_tokens=args.max_tokens,
-            )
-        except Exception as error:
-            raise RuntimeError(f"failed to interpret feature {feature_id}") from error
-        return feature_id, title
+            title, category = INSUFFICIENT_TITLE, None
+        else:
+            try:
+                title, category = request_interpretation(
+                    client,
+                    args.model,
+                    feature_prompt(examples),
+                    reasoning=not args.no_reasoning,
+                    max_tokens=args.max_tokens,
+                )
+            except Exception as error:
+                raise RuntimeError(
+                    f"failed to interpret feature {feature_id}"
+                ) from error
+        return {
+            "feature_id": feature_id,
+            "title": title,
+            "category": category,
+        }
 
     executor = ThreadPoolExecutor(max_workers=args.concurrent)
     try:
@@ -381,7 +405,7 @@ def main() -> None:
                 requested[completed:],
                 args.concurrent,
             )
-            for feature_id, title in tqdm(
+            for record in tqdm(
                 results,
                 total=len(requested),
                 initial=completed,
@@ -389,8 +413,7 @@ def main() -> None:
                 desc="Interpret",
                 dynamic_ncols=True,
             ):
-                insufficient += title == INSUFFICIENT_TITLE
-                record = {"feature_id": feature_id, "title": title}
+                insufficient += record["title"] == INSUFFICIENT_TITLE
                 output.write(json.dumps(record, ensure_ascii=False) + "\n")
                 output.flush()
     except BaseException:
@@ -400,7 +423,7 @@ def main() -> None:
         executor.shutdown()
     os.replace(temporary, output_path)
 
-    print(f"Saved {len(requested):,} feature names to {output_path}")
+    print(f"Saved {len(requested):,} feature interpretations to {output_path}")
     if insufficient:
         print(
             f"Used '{INSUFFICIENT_TITLE}' for {insufficient:,} features "

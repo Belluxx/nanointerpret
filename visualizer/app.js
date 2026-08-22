@@ -12,6 +12,7 @@ const ui = {
   search: document.querySelector("#search-input"),
   filterPopover: document.querySelector("#filter-popover"),
   clearFiltersButton: document.querySelector("#clear-filters-button"),
+  category: document.querySelector("#category-select"),
   activationCountRange: document.querySelector("#activation-count-range"),
   minimumActivationCount: document.querySelector("#minimum-activation-count"),
   maximumActivationCount: document.querySelector("#maximum-activation-count"),
@@ -661,6 +662,7 @@ function visibleFeatures() {
     if (
       feature.activation_count < selectedMinimumActivationCount
       || feature.activation_count > selectedMaximumActivationCount
+      || (ui.category.value && feature.category !== ui.category.value)
     ) return false;
     return matchesFeatureQuery(feature.id, feature.title, query);
   });
@@ -710,7 +712,14 @@ function updateActivationCountRange(changedInput) {
   const selectedMaximum = activationCountAt(maximumPosition);
   ui.activationCountOutput.value =
     `${selectedMinimum.toLocaleString()}–${selectedMaximum.toLocaleString()}`;
-  ui.clearFiltersButton.disabled = minimumPosition === 0 && maximumPosition === 1;
+  updateClearFiltersButton();
+}
+
+function updateClearFiltersButton() {
+  ui.clearFiltersButton.disabled =
+    ui.minimumActivationCount.valueAsNumber === 0
+    && ui.maximumActivationCount.valueAsNumber === 1
+    && !ui.category.value;
 }
 
 function resetActivationCountRange() {
@@ -728,6 +737,11 @@ function renderFeature(feature) {
   titleElement.title = title;
   if (feature.high_quality) titleElement.append(featureStar());
   titleElement.append(element("span", "feature-title-text", title));
+  if (feature.category) {
+    titleElement.append(
+      element("span", "feature-category", feature.category),
+    );
+  }
 
   const summary = element("summary");
   summary.append(
@@ -1051,7 +1065,13 @@ for (const input of [ui.minimumActivationCount, ui.maximumActivationCount]) {
   input.addEventListener("input", () => updateActivationCountRange(input));
   input.addEventListener("change", resetFeaturePage);
 }
+ui.category.addEventListener("change", () => {
+  updateClearFiltersButton();
+  resetFeaturePage();
+});
 ui.clearFiltersButton.addEventListener("click", () => {
+  ui.category.value = "";
+  selectControls.get(ui.category).updateOptions();
   resetActivationCountRange();
   resetFeaturePage();
   ui.filterPopover.hidePopover();

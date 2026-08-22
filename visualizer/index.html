@@ -280,6 +280,15 @@
               <h3 id="filter-title">Filters</h3>
             </header>
             <div class="filter-options">
+              <section class="category-filter" aria-labelledby="category-filter-title">
+                <span id="category-filter-title">Category</span>
+                <select id="category-select" aria-labelledby="category-filter-title" hidden>
+                  <option value="" selected>All categories</option>
+                  <option value="token-specific">Token-specific</option>
+                  <option value="lexical">Lexical</option>
+                  <option value="semantic">Semantic</option>
+                </select>
+              </section>
               <section aria-labelledby="activation-count-title">
                 <div class="activation-count-heading">
                   <span id="activation-count-title">Activation count</span>

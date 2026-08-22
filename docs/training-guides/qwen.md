@@ -22,7 +22,7 @@ python3 train.py \
 python3 record_activations.py --sae-dir artifacts/qwen3_1.7b_l14_w16_k16_500m
 ```
 
-3. Name the features with an LLM (want to do it locally? Check [here](interpret-locally.md)):
+3. Interpret and categorize the features with an LLM (want to do it locally? Check [here](interpret-locally.md)):
 
 ```sh
 # Around $6-$16 in API cost for 32K features
@@ -37,7 +37,7 @@ python3 interpret_features.py \
 ```
 
 > [!TIP]
-> If you want you can run it without `--no-reasoning` and it will produce higher quality feature titles but at a **MUCH** higher API cost (up to $640 depending on how long the model thinks)
+> If you want you can run it without `--no-reasoning` and it will produce higher quality feature interpretations but at a **MUCH** higher API cost (up to $640 depending on how long the model thinks)
 
 4. Browse the features and their activation contexts:
 

@@ -11,17 +11,16 @@ import numpy as np
 from openai import OpenAI
 from tqdm.auto import tqdm
 
+from src.data import INTERPRETATIONS_FILENAME, load_interpretations
 from src.interventions import InterventionGenerator, InterventionRequest
 from src.runtime import choose_device
-
-from interpret_features import INSUFFICIENT_TITLE, UNCLEAR_TITLE
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate with a range of activated SAE features and rank how well the completions match their feature titles.")
     parser.add_argument("--sae-dir", type=Path, required=True, help="Training output containing config.json and sae_final.pt.")
     parser.add_argument("--activations", type=Path, help="Activation data directory. Default: activations in --sae-dir.")
-    parser.add_argument("--names", type=Path, help="Feature-title JSONL. Default: feature_names.jsonl in --sae-dir.")
+    parser.add_argument("--interpretations", type=Path, help=f"Feature-interpretation JSONL. Default: {INTERPRETATIONS_FILENAME} in --sae-dir.")
     feature_selection = parser.add_mutually_exclusive_group(required=True)
     feature_selection.add_argument("--feature-id-range", type=int, nargs=2, metavar=("START", "STOP"), help="Half-open feature range: START is included and STOP is excluded.")
     feature_selection.add_argument("--feature-activation-range", type=int, nargs=2, metavar=("MIN", "MAX"), help="Select features with an activation count between MIN and MAX, inclusive.")
@@ -42,26 +41,6 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     args.output = args.output or args.sae_dir / "feature_scores.jsonl"
     return args
-
-
-def load_titles(path: Path) -> dict[int, str]:
-    titles = {}
-    with path.open(encoding="utf-8") as input_file:
-        for line_number, line in enumerate(input_file, start=1):
-            if not line.strip():
-                continue
-            try:
-                record = json.loads(line)
-                feature_id = int(record["feature_id"])
-                title = record["title"]
-                if not isinstance(title, str) or not title.strip():
-                    raise TypeError
-                titles[feature_id] = title
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-                raise ValueError(
-                    f"invalid feature title on line {line_number} of {path}"
-                ) from error
-    return titles
 
 
 def judge_prompt(completion: str, title: str) -> str:
@@ -121,7 +100,9 @@ def coherence_score(
 
 def main() -> None:
     args = parse_args()
-    names_path = args.names or args.sae_dir / "feature_names.jsonl"
+    interpretations_path = (
+        args.interpretations or args.sae_dir / INTERPRETATIONS_FILENAME
+    )
     activations_path = args.activations or args.sae_dir / "activations"
     feature_max = np.load(activations_path / "feature_max.npy", mmap_mode="r")
 
@@ -133,25 +114,30 @@ def main() -> None:
         activation_counts = np.diff(feature_ptr)
         feature_ids = np.flatnonzero((activation_counts >= minimum) & (activation_counts <= maximum)).tolist()
 
-    titles = load_titles(names_path)
-    skipped_feature_ids = [
-        feature_id
-        for feature_id in feature_ids
-        if titles.get(feature_id) in (INSUFFICIENT_TITLE, UNCLEAR_TITLE)
-    ]
+    feature_ids = list(feature_ids)
+    interpretations = load_interpretations(interpretations_path)
+    missing_interpretation = next(
+        (feature_id for feature_id in feature_ids if feature_id not in interpretations),
+        None,
+    )
+    if missing_interpretation is not None:
+        raise ValueError(
+            f"feature {missing_interpretation} has no interpretation in "
+            f"{interpretations_path}"
+        )
+
+    selected_count = len(feature_ids)
     feature_ids = [
         feature_id
         for feature_id in feature_ids
-        if titles.get(feature_id) not in (INSUFFICIENT_TITLE, UNCLEAR_TITLE)
+        if interpretations[feature_id]["category"] is not None
     ]
-    if skipped_feature_ids:
-        print(f"Skipping {len(skipped_feature_ids):,} features with insufficient activation data or no coherent interpretation.")
-
-    missing_title = next(
-        (feature_id for feature_id in feature_ids if feature_id not in titles), None
-    )
-    if missing_title is not None:
-        raise ValueError(f"feature {missing_title} has no title in {names_path}")
+    skipped_count = selected_count - len(feature_ids)
+    if skipped_count:
+        print(
+            f"Skipping {skipped_count:,} features with insufficient activation "
+            "data or no coherent interpretation."
+        )
 
     device = choose_device(args.device)
     print(f"Loading intervention model on {device} ...")
@@ -187,7 +173,7 @@ def main() -> None:
             results.extend(
                 {
                     "feature_id": feature_id,
-                    "title": titles[feature_id],
+                    **interpretations[feature_id],
                     "completion": completion,
                 }
                 for feature_id, completion in zip(batch_ids, completions)

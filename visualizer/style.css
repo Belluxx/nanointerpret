@@ -725,6 +725,17 @@ input.progress-range::-moz-range-thumb,
   gap: 14px;
   padding: 14px;
 }
+.category-filter {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  .custom-select { width: 100%; }
+  .custom-select-trigger {
+    width: 100%;
+    background: var(--surface);
+  }
+}
 .clear-filters-button {
   min-height: 34px;
   padding: 0 12px;
@@ -921,6 +932,18 @@ input.progress-range::-moz-range-thumb,
   min-width: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.feature-category {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-transform: uppercase;
 }
 .feature-stat { text-align: right; }
 .chevron {
