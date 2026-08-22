@@ -27,7 +27,7 @@ from .sae import (
     normalized_auxk_loss,
 )
 
-DOWNSTREAM_KL_TOKENS = 4096
+DOWNSTREAM_KL_TOKENS = 100_000
 
 
 def default_aux_k(d_model: int) -> int:
@@ -483,10 +483,11 @@ def evaluate_downstream_kl(
     context_size: int,
     activation_scale: float,
     max_activation_l2: float | None,
-) -> float:
+) -> dict:
     validation_subset = validation_tokens[:DOWNSTREAM_KL_TOKENS]
     kl_sum = 0.0
     prediction_count = 0
+    context_kl_means = []
     progress = tqdm(
         total=len(validation_subset),
         unit="tok",
@@ -541,12 +542,22 @@ def evaluate_downstream_kl(
         token_kl.add_(sae_log_z).sub_(base_log_z)
 
         valid = attention_mask[:, 1:].bool()
-        kl_sum += token_kl[valid].sum().item()
-        prediction_count += int(valid.sum().item())
+        valid_token_kl = token_kl[valid]
+        kl_sum += valid_token_kl.sum().item()
+        prediction_count += len(valid_token_kl)
+        context_kl_means.append(valid_token_kl.mean().item())
         progress.update(int(attention_mask.sum().item()))
 
     progress.close()
-    return kl_sum / prediction_count
+    mean_kl = kl_sum / prediction_count
+    standard_error = float(
+        np.std(context_kl_means, ddof=1) / math.sqrt(len(context_kl_means))
+    )
+    margin = 1.96 * standard_error
+    return {
+        "downstream_kl": mean_kl,
+        "downstream_kl_ci": [max(0.0, mean_kl - margin), mean_kl + margin],
+    }
 
 
 def train_sae(
@@ -560,7 +571,7 @@ def train_sae(
     log_every: int,
     checkpoint_every: int,
     validate_every: int,
-    downstream_kl_evaluator: Callable[[TopKSAE, float], float],
+    downstream_kl_evaluator: Callable[[TopKSAE, float], dict],
 ) -> dict:
     optimizer = torch.optim.Adam(sae.parameters(), lr=config.learning_rate)
     checkpoint_path = output_dir / "checkpoint_latest.pt"
@@ -612,9 +623,7 @@ def train_sae(
             device,
             config,
         )
-        evaluation["downstream_kl"] = downstream_kl_evaluator(
-            sae, config.activation_scale
-        )
+        evaluation.update(downstream_kl_evaluator(sae, config.activation_scale))
         if evaluation["downstream_kl"] < best_downstream_kl:
             best_downstream_kl = float(evaluation["downstream_kl"])
             save_checkpoint(

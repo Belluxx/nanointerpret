@@ -198,7 +198,22 @@ def save_training_plot(
             linewidth=1.5,
             marker="o",
             markersize=5,
+            label="Mean KL",
         )
+        downstream_kl_ci = np.asarray(
+            [record["downstream_kl_ci"] for record in checkpoint_records],
+            dtype=float,
+        )
+        kl_axis.fill_between(
+            kl_tokens,
+            downstream_kl_ci[:, 0],
+            downstream_kl_ci[:, 1],
+            color="#059669",
+            alpha=0.15,
+            linewidth=0,
+            label="95% context CI",
+        )
+        kl_axis.legend(frameon=False, loc="best")
         kl_axis.set_ylabel("KL(base || SAE)")
 
         for axis, title in zip(

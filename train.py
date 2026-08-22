@@ -315,7 +315,7 @@ def main() -> None:
             seed=args.seed,
         )
 
-        def downstream_kl_evaluator(sae: TopKSAE, activation_scale: float) -> float:
+        def downstream_kl_evaluator(sae: TopKSAE, activation_scale: float) -> dict:
             return evaluate_downstream_kl(
                 sae,
                 model,
@@ -376,7 +376,7 @@ def main() -> None:
         kl_validation_path, mode="r", dtype=np.uint32
     )
 
-    def downstream_kl_evaluator(sae: TopKSAE, activation_scale: float) -> float:
+    def downstream_kl_evaluator(sae: TopKSAE, activation_scale: float) -> dict:
         model = load_causal_lm(args.model_id, model_dtype, device)
         try:
             _, layers = find_transformer_layers(model)
