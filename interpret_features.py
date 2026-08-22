@@ -41,6 +41,7 @@ PERCENTILE_BUCKETS = (
     ("Medium activations", 50, 75),
     ("Low activations", 25, 50),
 )
+SYSTEM_PROMPT = "You are an expert at interpreting sparse autoencoder features."
 
 
 def parse_args() -> argparse.Namespace:
@@ -252,10 +253,7 @@ def request_interpretation(
                 messages=[
                     {
                         "role": "system",
-                        "content": (
-                            "You are an expert at interpreting sparse autoencoder "
-                            "features."
-                        ),
+                        "content": (SYSTEM_PROMPT),
                     },
                     {"role": "user", "content": prompt},
                 ],
