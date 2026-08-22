@@ -45,14 +45,14 @@ python3 train.py --cache-activations --train-tokens 300000000 --checkpoint-every
 
 | Pre-bias subtraction | AuxK | Validation MSE | Explained variance | Dead features |
 |:---:|:---:|---:|---:|---:|
-| ✓ | ✓ | **0.00236** | **99.44%** | **0.14%** |
-| ✓ | ✗ | 0.00244 | 99.42% | 6.88% |
-| ✗ | ✓ | 0.00252 | 99.40% | 16.32% |
-| ✗ | ✗ | 0.00406 | 99.03% | 91.56% |
+| ✓ | ✓ | **0.002327** | **99.444%** | **0.107%** |
+| ✓ | ✗ | 0.002485 | 99.407% | 23.779% |
+| ✗ | ✓ | 0.002549 | 99.391% | 21.270% |
+| ✗ | ✗ | 0.004399 | 98.949% | 94.570% |
 
 ## Gradient clipping is unnecessary
 
-Disabling gradient clipping slightly improved validation metrics and increased training throughput by ~35%.
+Disabling gradient clipping slightly improved validation metrics and increased training throughput by ~40%.
 
 <details>
 <summary>Commands</summary>
@@ -66,8 +66,8 @@ python3 train.py --cache-activations --train-tokens 300000000 --checkpoint-every
 
 | Gradient clipping | Validation MSE | Explained variance | Dead features | Training throughput |
 |:---:|---:|---:|---:|---:|
-| ✓ (1) | 0.00239 | 99.43% | 0.18% | 63k tokens/s |
-| ✗ | **0.00236** | **99.44%** | **0.14%** | **85k tokens/s (+35%)** |
+| ✓ (1) | 0.002335 | 99.442% | 0.127% | 65k tokens/s |
+| ✗ | **0.002327** | **99.444%** | **0.107%** | **91k tokens/s (+40%)** |
 
 ## Fixing Qwen first-token activation outliers
 
