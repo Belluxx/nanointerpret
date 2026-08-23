@@ -99,7 +99,7 @@ def save_feature_density_plot(metrics_path: Path, output_path: Path) -> None:
 
 def save_training_plot(
     metrics_path: Path,
-    checkpoint_metrics_path: Path,
+    evaluation_metrics_path: Path,
     output_path: Path,
 ) -> None:
     records = [
@@ -107,9 +107,9 @@ def save_training_plot(
         for line in metrics_path.read_text().splitlines()
         if line.strip()
     ]
-    checkpoint_records = [
+    evaluation_records = [
         json.loads(line)
-        for line in checkpoint_metrics_path.read_text().splitlines()
+        for line in evaluation_metrics_path.read_text().splitlines()
         if line.strip()
     ]
     if not records:
@@ -184,11 +184,11 @@ def save_training_plot(
             )
 
         kl_tokens = np.asarray(
-            [record["training_tokens"] for record in checkpoint_records],
+            [record["training_tokens"] for record in evaluation_records],
             dtype=float,
         ) / 1_000_000
         downstream_kl = np.asarray(
-            [record["downstream_kl"] for record in checkpoint_records],
+            [record["downstream_kl"] for record in evaluation_records],
             dtype=float,
         )
         kl_axis.plot(
@@ -201,7 +201,7 @@ def save_training_plot(
             label="Mean KL",
         )
         downstream_kl_ci = np.asarray(
-            [record["downstream_kl_ci"] for record in checkpoint_records],
+            [record["downstream_kl_ci"] for record in evaluation_records],
             dtype=float,
         )
         kl_axis.fill_between(

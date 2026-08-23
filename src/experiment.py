@@ -215,7 +215,7 @@ def format_metrics_line(record: dict) -> str:
     return f"{'train':<10} {record['tokens']:>12,} tok | {format_metrics(record)}"
 
 
-def load_checkpoint_evaluation(path: Path, training_tokens: int) -> dict | None:
+def load_evaluation(path: Path, training_tokens: int) -> dict | None:
     if not path.exists():
         return None
     for line in reversed(path.read_text().splitlines()):
@@ -576,7 +576,7 @@ def train_sae(
     optimizer = torch.optim.Adam(sae.parameters(), lr=config.learning_rate)
     checkpoint_path = output_dir / "checkpoint_latest.pt"
     metrics_path = output_dir / "train_metrics.jsonl"
-    checkpoint_metrics_path = output_dir / "checkpoint_metrics.jsonl"
+    evaluation_metrics_path = output_dir / "evaluation_metrics.jsonl"
     if resume:
         checkpoint = torch.load(
             checkpoint_path, map_location=device, weights_only=False
@@ -593,7 +593,7 @@ def train_sae(
         print(f"resumed at {state.processed_tokens:,} training tokens")
     else:
         metrics_path.write_text("")
-        checkpoint_metrics_path.write_text("")
+        evaluation_metrics_path.write_text("")
         state = TrainingState(
             processed_tokens=0,
             processed_batches=0,
@@ -608,13 +608,13 @@ def train_sae(
     evaluation_seconds = 0.0
     best_downstream_kl = math.inf
     if resume:
-        for line in checkpoint_metrics_path.read_text().splitlines():
+        for line in evaluation_metrics_path.read_text().splitlines():
             if line.strip():
                 best_downstream_kl = min(
                     best_downstream_kl, float(json.loads(line)["downstream_kl"])
                 )
 
-    def evaluate_checkpoint() -> dict:
+    def evaluate() -> dict:
         nonlocal evaluation_seconds, best_downstream_kl
         evaluation_start = time.monotonic()
         evaluation = evaluate_sae(
@@ -634,17 +634,17 @@ def train_sae(
                 config,
             )
         evaluation_seconds += time.monotonic() - evaluation_start
-        checkpoint_record = {
+        evaluation_record = {
             **evaluation,
             "training_tokens": state.processed_tokens,
         }
-        append_jsonl(checkpoint_metrics_path, checkpoint_record)
-        tqdm.write(format_metrics_line(checkpoint_record))
+        append_jsonl(evaluation_metrics_path, evaluation_record)
+        tqdm.write(format_metrics_line(evaluation_record))
         return evaluation
 
     if resume:
-        latest_evaluation = load_checkpoint_evaluation(
-            checkpoint_metrics_path, state.processed_tokens
+        latest_evaluation = load_evaluation(
+            evaluation_metrics_path, state.processed_tokens
         )
 
     metrics = RunningMetrics(sae.d_model, sae.d_sae, device)
@@ -735,7 +735,7 @@ def train_sae(
                 next_checkpoint += checkpoint_every
 
         if state.processed_tokens >= next_validation:
-            latest_evaluation = evaluate_checkpoint()
+            latest_evaluation = evaluate()
             last_evaluated_training_tokens = state.processed_tokens
             while next_validation <= state.processed_tokens:
                 next_validation += validate_every
@@ -744,7 +744,7 @@ def train_sae(
     progress.close()
     save_checkpoint(checkpoint_path, sae, optimizer, state, config)
     if last_evaluated_training_tokens != state.processed_tokens:
-        latest_evaluation = evaluate_checkpoint()
+        latest_evaluation = evaluate()
     torch.save(
         {"sae": sae.state_dict()},
         output_dir / "sae_final.pt",

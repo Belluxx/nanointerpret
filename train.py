@@ -280,11 +280,11 @@ def run_training(
 
     save_training_plot(
         args.output_dir / "train_metrics.jsonl",
-        args.output_dir / "checkpoint_metrics.jsonl",
+        args.output_dir / "evaluation_metrics.jsonl",
         args.output_dir / "training_metrics.png",
     )
     save_feature_density_plot(
-        args.output_dir / "checkpoint_metrics.jsonl",
+        args.output_dir / "evaluation_metrics.jsonl",
         args.output_dir / "validation_feature_density.png",
     )
 

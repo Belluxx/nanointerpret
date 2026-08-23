@@ -27,7 +27,7 @@
 - By default, activations come from the input to the middle transformer layer. A single scale is applied so their average squared L2 norm equals the residual width. [2]
 - The SAE uses Top-K sparsification, tied encoder/decoder initialization, a shared geometric-median bias, unit-norm decoder directions, and AuxK. AuxK helps revive features that have not fired after many tokens. [1]
 - Gradient clipping is disabled by default after [experiments found no benefit](experiments.md#gradient-clipping-is-unnecessary).
-- Checkpoint validation measures mean `KL(base_logits || sae_logits)`. Lower KL is the primary model-preservation metric and logged in `checkpoint_metrics.jsonl`.
+- Periodic evaluation measures mean `KL(base_logits || sae_logits)`. Lower KL is the primary model-preservation metric and logged in `evaluation_metrics.jsonl`.
 
 Sources:
 - [1] [Scaling and evaluating sparse autoencoders](https://arxiv.org/abs/2406.04093)
