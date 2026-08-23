@@ -32,12 +32,11 @@ python3 interpret_features.py \
   --base-url https://openrouter.ai/api/v1 \
   --api-key "[API_KEY]" \
   --model openai/gpt-5.6-luna \
-  --no-reasoning \
   --concurrent 8
 ```
 
 > [!TIP]
-> If you want you can run it without `--no-reasoning` and it will produce higher quality feature interpretations but at a **MUCH** higher API cost (up to $640 depending on how long the model thinks)
+> Add `--reasoning` for potentially higher-quality feature interpretations at a **MUCH** higher API cost (up to $640 depending on how long the model thinks).
 
 4. Browse the features and their activation contexts:
 

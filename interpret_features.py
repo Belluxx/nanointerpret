@@ -67,8 +67,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", required=True, help="Base URL of the OpenAI-compatible API.")
     parser.add_argument("--model", required=True, help="Model identifier sent to the API.")
     parser.add_argument("--api-key")
-    parser.add_argument("--no-reasoning", action="store_true", help="Disable model reasoning. Reasoning is enabled by default.")
-    parser.add_argument("--max-tokens", type=int, help="Completion-token budget. Default: 32768, or 64 with --no-reasoning.")
+    parser.add_argument("--reasoning", action="store_true", help="Enable model reasoning. Disabled by default.")
+    parser.add_argument("--max-tokens", type=int, help="Completion-token budget. Default: 64, or 32768 with --reasoning.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed used to sample representative activation examples. Default: 42.")
     parser.add_argument("--concurrent", type=int, default=1, help="Number of concurrent interpretation requests. Default: 1.")
     parser.add_argument("--output", type=Path, help=f"Output JSONL path. Default: {INTERPRETATIONS_FILENAME} next to the activation directory.")
@@ -255,7 +255,7 @@ def request_interpretation(
     client: OpenAI,
     model: str,
     prompt: str,
-    reasoning: bool = True,
+    reasoning: bool = False,
     max_tokens: int | None = None,
 ) -> tuple[str, str | None]:
     reasoning_options = {} if reasoning else {"reasoning_effort": "none"}
@@ -398,7 +398,7 @@ def main() -> None:
                     client,
                     args.model,
                     feature_prompt(examples),
-                    reasoning=not args.no_reasoning,
+                    reasoning=args.reasoning,
                     max_tokens=args.max_tokens,
                 )
             except Exception as error:
