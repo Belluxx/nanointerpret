@@ -42,6 +42,22 @@ PERCENTILE_BUCKETS = (
     ("Low activations", 25, 50),
 )
 SYSTEM_PROMPT = "You are an expert at interpreting sparse autoencoder features."
+INTERPRETATION_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "feature_interpretation",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "category": { "enum": ["token-specific", "lexical", "semantic", None], },
+            },
+            "required": ["title", "category"],
+            "additionalProperties": False,
+        },
+    },
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -258,6 +274,7 @@ def request_interpretation(
                     {"role": "user", "content": prompt},
                 ],
                 max_tokens=max_tokens,
+                response_format=INTERPRETATION_RESPONSE_FORMAT,
                 **reasoning_options,
             )
             if not completion.choices:
