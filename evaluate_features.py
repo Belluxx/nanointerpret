@@ -21,9 +21,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sae-dir", type=Path, required=True, help="Training output containing config.json and sae_final.pt.")
     parser.add_argument("--activations", type=Path, help="Activation data directory. Default: activations in --sae-dir.")
     parser.add_argument("--interpretations", type=Path, help=f"Feature-interpretation JSONL. Default: {INTERPRETATIONS_FILENAME} in --sae-dir.")
-    feature_selection = parser.add_mutually_exclusive_group(required=True)
-    feature_selection.add_argument("--feature-id-range", type=int, nargs=2, metavar=("START", "STOP"), help="Half-open feature range: START is included and STOP is excluded.")
-    feature_selection.add_argument("--feature-activation-range", type=int, nargs=2, metavar=("MIN", "MAX"), help="Select features with an activation count between MIN and MAX, inclusive.")
+    feature_selection = parser.add_mutually_exclusive_group()
+    feature_selection.add_argument("--feature-ids", type=int, nargs="+", help="Analyze only these features. Default: every SAE feature.")
+    feature_selection.add_argument("--feature-id-range", type=int, nargs=2, metavar=("START", "STOP"), help="Analyze a half-open feature range: START is included and STOP is excluded.")
+    feature_selection.add_argument("--feature-activation-range", type=int, nargs=2, metavar=("MIN", "MAX"), help="Analyze features with an activation count between MIN and MAX, inclusive.")
     parser.add_argument("--prompt", required=True, help="Shared prompt used to generate a completion while each feature is clamped.")
     parser.add_argument("--strength", type=float, default=1.0, help="Clamp strength as a multiple of each feature's recorded maximum. Default: 1.")
     parser.add_argument("--max-new-tokens", type=int, default=64, help="Maximum tokens generated for each feature. Default: 64.")
@@ -108,11 +109,13 @@ def main() -> None:
 
     if args.feature_id_range is not None:
         feature_ids = range(*args.feature_id_range)
-    else:
+    elif args.feature_activation_range is not None:
         minimum, maximum = args.feature_activation_range
         feature_ptr = np.load(activations_path / "feature_ptr.npy", mmap_mode="r")
         activation_counts = np.diff(feature_ptr)
         feature_ids = np.flatnonzero((activation_counts >= minimum) & (activation_counts <= maximum)).tolist()
+    else:
+        feature_ids = args.feature_ids or range(len(feature_max))
 
     feature_ids = list(feature_ids)
     interpretations = load_interpretations(interpretations_path)

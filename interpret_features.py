@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable, Iterable, Iterator
 
+import numpy as np
 from openai import APIConnectionError, APIStatusError, OpenAI
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
@@ -63,7 +64,10 @@ INTERPRETATION_RESPONSE_FORMAT = {
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Ask an OpenAI-compatible LLM to interpret and categorize SAE features.")
     parser.add_argument("--activations", type=Path, required=True, help="Activation directory produced by record_activations.py.")
-    parser.add_argument("--feature-ids", type=int, nargs="+", help="Interpret only these features. Default: every SAE feature.")
+    feature_selection = parser.add_mutually_exclusive_group()
+    feature_selection.add_argument("--feature-ids", type=int, nargs="+", help="Analyze only these features. Default: every SAE feature.")
+    feature_selection.add_argument("--feature-id-range", type=int, nargs=2, metavar=("START", "STOP"), help="Analyze a half-open feature range: START is included and STOP is excluded.")
+    feature_selection.add_argument("--feature-activation-range", type=int, nargs=2, metavar=("MIN", "MAX"), help="Analyze features with an activation count between MIN and MAX, inclusive.")
     parser.add_argument("--base-url", required=True, help="Base URL of the OpenAI-compatible API.")
     parser.add_argument("--model", required=True, help="Model identifier sent to the API.")
     parser.add_argument("--api-key")
@@ -367,7 +371,16 @@ def main() -> None:
     activations = load_activations(args.activations)
     d_sae = len(activations.feature_ptr) - 1
     context_size = int(activations.metadata["context_size"])
-    requested = list(args.feature_ids or range(d_sae))
+    if args.feature_id_range is not None:
+        requested = range(*args.feature_id_range)
+    elif args.feature_activation_range is not None:
+        minimum, maximum = args.feature_activation_range
+        activation_counts = np.diff(activations.feature_ptr)
+        requested = np.flatnonzero((activation_counts >= minimum) & (activation_counts <= maximum)).tolist()
+    else:
+        requested = args.feature_ids or range(d_sae)
+
+    requested = list(requested)
     invalid = next(
         (feature_id for feature_id in requested if feature_id >= d_sae), None
     )
