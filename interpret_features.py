@@ -279,7 +279,10 @@ def request_interpretation(
             )
             if not completion.choices:
                 raise ValueError("the model returned no completion choices")
-            return parse_interpretation(completion.choices[0].message.content)
+            message = completion.choices[0].message
+            # Some compatible servers place structured output in reasoning_content.
+            content = message.content or getattr(message, "reasoning_content", None)
+            return parse_interpretation(content)
         except Exception as error:
             retryable = (
                 isinstance(error, (ValueError, APIConnectionError))
