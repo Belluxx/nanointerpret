@@ -99,6 +99,31 @@ def coherence_score(
     return yes / (yes + no)
 
 
+def resume_progress(checkpoint: Path, requested: list[int]) -> list[dict]:
+    if not checkpoint.exists():
+        return []
+
+    answer = input(f"{checkpoint} already exists. Continue? [Y/n] ").strip().lower()
+    if answer not in {"", "y", "yes"}:
+        return []
+
+    results = []
+    with checkpoint.open(encoding="utf-8") as saved_output:
+        for completed, line in enumerate(saved_output, start=1):
+            result = json.loads(line)
+            if (
+                completed > len(requested)
+                or result["feature_id"] != requested[completed - 1]
+            ):
+                raise ValueError(
+                    f"{checkpoint} does not match the requested feature order"
+                )
+            results.append(result)
+
+    print(f"Continuing after {len(results):,} completed features.")
+    return results
+
+
 def main() -> None:
     args = parse_args()
     interpretations_path = (
@@ -142,87 +167,105 @@ def main() -> None:
             "data or no coherent interpretation."
         )
 
-    device = choose_device(args.device)
-    print(f"Loading intervention model on {device} ...")
-    generator = InterventionGenerator.from_sae_dir(args.sae_dir, device)
-    if len(feature_max) != generator.sae.d_sae:
-        raise ValueError(
-            "activation data and SAE have different numbers of features: "
-            f"{len(feature_max)} and {generator.sae.d_sae}"
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint = args.output.with_suffix(args.output.suffix + ".tmp")
+    results = resume_progress(checkpoint, feature_ids)
+    completed = len(results)
+
+    if completed < len(feature_ids):
+        device = choose_device(args.device)
+        print(f"Loading intervention model on {device} ...")
+        generator = InterventionGenerator.from_sae_dir(args.sae_dir, device)
+        if len(feature_max) != generator.sae.d_sae:
+            raise ValueError(
+                "activation data and SAE have different numbers of features: "
+                f"{len(feature_max)} and {generator.sae.d_sae}"
+            )
+
+        request_args = {
+            "prompt": args.prompt,
+            "mode": "clamp",
+            "max_new_tokens": args.max_new_tokens,
+            "temperature": args.temperature,
+            "top_p": args.top_p,
+            "top_k": args.top_k,
+            "repetition_penalty": args.repetition_penalty,
+        }
+        client = OpenAI(
+            base_url=args.base_url,
+            api_key=args.api_key,
+            timeout=300,
         )
 
-    request_args = {
-        "prompt": args.prompt,
-        "mode": "clamp",
-        "max_new_tokens": args.max_new_tokens,
-        "temperature": args.temperature,
-        "top_p": args.top_p,
-        "top_k": args.top_k,
-        "repetition_penalty": args.repetition_penalty,
-    }
-    results = []
-    with tqdm(total=len(feature_ids), unit="feature", desc="Generate") as progress:
-        for start in range(0, len(feature_ids), args.generation_concurrent):
-            batch_ids = feature_ids[start : start + args.generation_concurrent]
-            requests = [
-                InterventionRequest(
-                    feature_id=feature_id,
-                    amount=float(feature_max[feature_id]) * args.strength,
-                    **request_args,
+        def judge(result: dict) -> dict:
+            try:
+                score = coherence_score(
+                    client,
+                    args.model,
+                    result["completion"],
+                    result["title"],
                 )
-                for feature_id in batch_ids
-            ]
-            completions = generator.generate_intervened(requests)
-            results.extend(
-                {
-                    "feature_id": feature_id,
-                    **interpretations[feature_id],
-                    "completion": completion,
+                return {**result, "score": score}
+            except Exception as error:
+                return {
+                    **result,
+                    "score": None,
+                    "judge_error": f"{type(error).__name__}: {error}",
                 }
-                for feature_id, completion in zip(batch_ids, completions)
-            )
-            progress.update(len(batch_ids))
 
-    client = OpenAI(
-        base_url=args.base_url,
-        api_key=args.api_key,
-        timeout=300,
-    )
-
-    def judge(result: dict) -> dict:
-        try:
-            score = coherence_score(
-                client,
-                args.model,
-                result["completion"],
-                result["title"],
-            )
-            return {**result, "score": score}
-        except Exception as error:
-            return {
-                **result,
-                "score": None,
-                "judge_error": f"{type(error).__name__}: {error}",
-            }
-
-    with ThreadPoolExecutor(max_workers=args.judge_concurrent) as executor:
-        results = list(
-            tqdm(
-                executor.map(judge, results),
-                total=len(results),
-                unit="feature",
-                desc="Judge",
-            )
-        )
+        with checkpoint.open(
+            "a" if completed else "w", encoding="utf-8"
+        ) as output, ThreadPoolExecutor(
+            max_workers=args.judge_concurrent
+        ) as executor, tqdm(
+            total=len(feature_ids),
+            initial=completed,
+            unit="feature",
+            desc="Evaluate",
+            dynamic_ncols=True,
+        ) as progress:
+            for start in range(
+                completed, len(feature_ids), args.generation_concurrent
+            ):
+                batch_ids = feature_ids[
+                    start : start + args.generation_concurrent
+                ]
+                requests = [
+                    InterventionRequest(
+                        feature_id=feature_id,
+                        amount=float(feature_max[feature_id])
+                        * args.strength,
+                        **request_args,
+                    )
+                    for feature_id in batch_ids
+                ]
+                completions = generator.generate_intervened(requests)
+                generated = (
+                    {
+                        "feature_id": feature_id,
+                        **interpretations[feature_id],
+                        "completion": completion,
+                    }
+                    for feature_id, completion in zip(
+                        batch_ids, completions
+                    )
+                )
+                for result in executor.map(judge, generated):
+                    results.append(result)
+                    output.write(json.dumps(result, ensure_ascii=False) + "\n")
+                    output.flush()
+                    progress.update()
 
     results.sort(
         key=lambda result: result["score"] if result["score"] is not None else -1.0,
         reverse=True,
     )
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.output.open("w", encoding="utf-8") as output:
+    ranked_temporary = args.output.with_suffix(args.output.suffix + ".ranked.tmp")
+    with ranked_temporary.open("w", encoding="utf-8") as output:
         for result in results:
             output.write(json.dumps(result, ensure_ascii=False) + "\n")
+    os.replace(ranked_temporary, args.output)
+    checkpoint.unlink(missing_ok=True)
 
     print("\nRanked features:\n")
     for rank, result in enumerate(results, start=1):
