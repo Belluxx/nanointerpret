@@ -62,20 +62,20 @@ INTERPRETATION_RESPONSE_FORMAT = {
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Ask an OpenAI-compatible LLM to interpret and categorize SAE features.")
-    parser.add_argument("--activations", type=Path, required=True, help="Activation directory produced by record_activations.py.")
+    parser = argparse.ArgumentParser(description="Interpret and categorize SAE features")
+    parser.add_argument("--activations", type=Path, required=True, help="Activation data dir produced by record_activations.py.")
     feature_selection = parser.add_mutually_exclusive_group()
     feature_selection.add_argument("--feature-ids", type=int, nargs="+", help="Analyze only these features. Default: every SAE feature.")
     feature_selection.add_argument("--feature-id-range", type=int, nargs=2, metavar=("START", "STOP"), help="Analyze a half-open feature range: START is included and STOP is excluded.")
     feature_selection.add_argument("--feature-activation-range", type=int, nargs=2, metavar=("MIN", "MAX"), help="Analyze features with an activation count between MIN and MAX, inclusive.")
-    parser.add_argument("--base-url", required=True, help="Base URL of the OpenAI-compatible API.")
-    parser.add_argument("--model", required=True, help="Model identifier sent to the API.")
+    parser.add_argument("--base-url", required=True, help="OpenAI-compatible API base URL. OpenAI: https://api.openai.com/v1, LMStudio: http://localhost:1234/v1, llama.cpp: http://localhost:<PORT>/v1, Ollama: http://localhost:11434/v1")
+    parser.add_argument("--model", required=True, help="Interpreter model identifier")
     parser.add_argument("--api-key")
-    parser.add_argument("--reasoning", action="store_true", help="Enable model reasoning. Disabled by default.")
-    parser.add_argument("--max-tokens", type=int, help="Completion-token budget. Default: 64, or 32768 with --reasoning.")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed used to sample representative activation examples. Default: 42.")
-    parser.add_argument("--concurrent", type=int, default=1, help="Number of concurrent interpretation requests. Default: 1.")
-    parser.add_argument("--output", type=Path, help=f"Output JSONL path. Default: {INTERPRETATIONS_FILENAME} next to the activation directory.")
+    parser.add_argument("--reasoning", action="store_true", help="Enable model reasoning")
+    parser.add_argument("--max-tokens", type=int, help="Completion token budget. Default: 64 or 32768 with --reasoning.")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed used to sample activation examples. Default: 42.")
+    parser.add_argument("--concurrent", type=int, default=1, help="Number of concurrent requests. Default: 1.")
+    parser.add_argument("--output", type=Path, help=f"Output JSONL path. Default: {INTERPRETATIONS_FILENAME} next to --activations.")
     return parser.parse_args()
 
 
