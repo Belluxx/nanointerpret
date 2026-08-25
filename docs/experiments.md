@@ -77,6 +77,23 @@ To prevent them from dominating SAE normalization / training, a raw L2-norm filt
 
 Gemma 3 270M also has very large residual-stream activations, however they occur over tokens like BOS and punctuation. So they are more complex and potentially meaningful, unlike Qwen's case. I would not recommend L2 filtering for Gemma by default but feel free to test it.
 
+## Finding the best model for interpeting features locally
+
+For interpreting features (interpret_features.py) `gemma-4-26b-a4b-it` was the best model available locally, beating even `openai/gpt-5.6-terra`. Obviously remote API models have virtually infinite parallelization and can be almost instant compared to using Gemma (around 2.2 features/s on an M4 Max mac Studio, so around 20h for 32k features).
+
+| Model | Title similarity (to Sol) | Category agreement (to Sol) | Total time |
+|---|---:|---:|---:|
+| `gemma-4-26b-a4b` (unsloth Q4K_XL) | **0.76** | **71%** | 255 s |
+| `qwen3.6-35b-a3b-mlx` (unsloth 4bit) | 0.73 | 60% | 176 s |
+| `gpt-5.6-terra` (openrouter) | 0.73 | 56% | - |
+| `gpt-5.6-luna` (openrouter) | 0.72 | 54% | - |
+| `gemma-4-e4b` (unsloth Q4K_XL) | 0.70 | 63% | 183 s |
+| `gemma-4-e2b` (unsloth Q4K_XL) | 0.67 | 44% | 89 s |
+
+The models interpreted feature IDs 0-99 from
+`qwen3_1.7b_l14_w16_k16_500m`. The reference ground truth interpretations are from
+`openai/gpt-5.6-sol`.
+
 ## First stable training run
 
 The first stable training run was the following:
