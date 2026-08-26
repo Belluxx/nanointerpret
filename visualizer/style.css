@@ -159,9 +159,9 @@ main {
     gap: 8px;
   }
   .page-title h1 { font-size: clamp(26px, 8vw, 38px); }
-  .github-link {
-    flex-basis: 26px;
-    height: 26px;
+  .page-header .github-link {
+    flex-basis: 22px;
+    height: 22px;
   }
   .page-header .dataset-meta { display: none; }
 }
@@ -171,8 +171,8 @@ main {
   gap: 16px;
 }
 .github-link {
-  flex: 0 0 30px;
-  height: 30px;
+  flex: 0 0 24px;
+  height: 24px;
   color: var(--text);
   background: currentcolor;
   mask: url("icons/github.svg") center / contain no-repeat;
