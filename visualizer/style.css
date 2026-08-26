@@ -69,30 +69,27 @@ main {
 }
 .mode-card {
   display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-rows: auto auto auto 1fr auto;
+  grid-template-rows: auto auto 1fr;
   min-width: 0;
   padding: 0;
   border: 1px solid var(--line);
   color: var(--text);
   background: var(--surface);
   cursor: pointer;
-  text-align: left;
+  text-align: center;
   transition: background 160ms ease, color 160ms ease;
   &:hover, &:focus-visible {
     outline: 0;
     background: var(--text);
     color: var(--background);
     .mode-illustration { color: var(--background); }
-    .mode-card-copy, .mode-card-number { color: color-mix(in srgb, var(--background), transparent 35%); }
-    .mode-card-action { border-color: color-mix(in srgb, var(--background), transparent 72%); }
+    .mode-card-copy { color: color-mix(in srgb, var(--background), transparent 35%); }
   }
 }
 .mode-illustration {
   grid-column: 1 / -1;
   display: block;
   height: 210px;
-  border-bottom: 1px solid var(--line);
   color: var(--text);
   svg { width: 100%; height: 100%; }
   path, circle, rect { vector-effect: non-scaling-stroke; }
@@ -109,11 +106,8 @@ main {
 .panel-shape { fill: none; stroke: currentcolor; opacity: .38; }
 .panel-lines { fill: none; stroke: currentcolor; stroke-width: 1; opacity: .6; }
 .bridge { stroke: var(--accent); }
-.mode-card-number { padding: 22px 0 0 22px; color: var(--muted); font-family: var(--mono); font-size: 10px; }
-.mode-card-title { grid-column: 1 / -1; padding: 25px 22px 0; font-size: 23px; font-weight: 590; letter-spacing: -.035em; }
-.mode-card-copy { grid-column: 1 / -1; min-height: 68px; padding: 9px 22px 20px; color: var(--muted); font-size: 12px; line-height: 1.5; }
-.mode-card-action { grid-column: 1 / -1; padding: 15px 22px; border-top: 1px solid var(--soft-line); font-size: 10px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
-.mode-card-action span { float: right; font-size: 14px; line-height: .7; }
+.mode-card-title { padding: 7px 22px 0; font-size: 23px; font-weight: 590; letter-spacing: -.035em; }
+.mode-card-copy { min-height: 68px; padding: 9px 22px 22px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .change-mode-button {
   min-height: 30px;
   padding: 0 10px;
