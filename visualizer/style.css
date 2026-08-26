@@ -150,8 +150,26 @@ main {
   }
   .mode-cards { grid-template-columns: 1fr; }
   .mode-illustration { height: 180px; }
-  .page-header { flex-wrap: wrap; }
-  .change-mode-button { order: 3; }
+  .page-header {
+    flex-wrap: nowrap;
+    gap: 12px;
+  }
+  .change-mode-button {
+    flex: 0 0 auto;
+    min-height: 28px;
+    padding: 0 8px;
+    font-size: 8px;
+  }
+  .page-title {
+    min-width: 0;
+    gap: 8px;
+  }
+  .page-title h1 { font-size: clamp(26px, 8vw, 38px); }
+  .github-link {
+    flex-basis: 26px;
+    height: 26px;
+  }
+  .page-header .dataset-meta { display: none; }
 }
 .page-title {
   display: flex;
@@ -1305,12 +1323,10 @@ input.progress-range::-moz-range-thumb,
     padding-top: 32px;
   }
   .page-header {
-    display: block;
-    text-align: center;
+    display: flex;
   }
-  .page-title { justify-content: center; }
+  .page-title { justify-content: flex-start; }
   .github-link { transform: translateY(2px); }
-  .dataset-meta { display: none; }
   .generation-results {
     &:not([hidden]) { grid-template-columns: 1fr; }
     article + article {
