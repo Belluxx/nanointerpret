@@ -13,6 +13,7 @@ python3 train.py \
   --validation-tokens 10000000 \
   --validate-every 100000000 \
   --recording-tokens 100000000 \
+  --max-activation-l2 1000 \
   --model-dtype bfloat16
 ```
 
