@@ -9,7 +9,65 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <main>
+    <main id="mode-picker" class="mode-picker">
+      <header class="mode-picker-header">
+        <h1>How do you want to poke at LLMs?</h1>
+      </header>
+
+      <div class="mode-cards">
+        <button class="mode-card" type="button" data-mode="intervene">
+          <span class="mode-illustration" aria-hidden="true">
+            <svg viewBox="0 0 360 210">
+              <path class="signal-line" d="M22 105H94C111 105 116 55 132 55s22 100 39 100 21-73 37-73 23 23 36 23h94" />
+              <circle class="node node-a" cx="132" cy="55" r="8" />
+              <circle class="node" cx="171" cy="155" r="8" />
+              <circle class="node" cx="208" cy="82" r="8" />
+              <path class="force-arrow" d="M132 103V70m-8 8 8-8 8 8" />
+            </svg>
+          </span>
+          <span class="mode-card-number">01</span>
+          <span class="mode-card-title">I want to force activations in the LLM</span>
+          <span class="mode-card-copy">Steer generation by turning a chosen feature up inside the model</span>
+          <span class="mode-card-action">Open intervention playground <span aria-hidden="true">↗</span></span>
+        </button>
+
+        <button class="mode-card" type="button" data-mode="explore">
+          <span class="mode-illustration" aria-hidden="true">
+            <svg viewBox="0 0 360 210">
+              <g class="feature-field">
+                <circle cx="46" cy="50" r="5" /><circle cx="81" cy="50" r="9" /><circle cx="122" cy="50" r="4" /><circle cx="159" cy="50" r="6" /><circle cx="205" cy="50" r="4" /><circle cx="247" cy="50" r="7" /><circle cx="302" cy="50" r="4" />
+                <circle cx="46" cy="100" r="8" /><circle cx="89" cy="100" r="4" /><circle cx="130" cy="100" r="6" /><circle cx="184" cy="100" r="10" /><circle cx="229" cy="100" r="4" /><circle cx="270" cy="100" r="6" /><circle cx="318" cy="100" r="8" />
+                <circle cx="46" cy="150" r="4" /><circle cx="99" cy="150" r="7" /><circle cx="144" cy="150" r="4" /><circle cx="184" cy="150" r="5" /><circle cx="229" cy="150" r="9" /><circle cx="281" cy="150" r="4" /><circle cx="318" cy="150" r="5" />
+              </g>
+              <circle class="lens" cx="184" cy="100" r="31" />
+              <path class="lens-handle" d="m206 122 26 26" />
+            </svg>
+          </span>
+          <span class="mode-card-number">02</span>
+          <span class="mode-card-title">I want to explore the types of activations in the LLM</span>
+          <span class="mode-card-copy">Browse the concepts the model has learned and see what makes each one fire</span>
+          <span class="mode-card-action">Open feature browser <span aria-hidden="true">↗</span></span>
+        </button>
+
+        <button class="mode-card" type="button" data-mode="both">
+          <span class="mode-illustration" aria-hidden="true">
+            <svg viewBox="0 0 360 210">
+              <rect class="panel-shape" x="27" y="34" width="126" height="142" />
+              <rect class="panel-shape" x="207" y="34" width="126" height="142" />
+              <path class="panel-signal" d="M48 105h22l12-20 19 47 13-27h18" />
+              <path class="bridge" d="M165 105h30m-8-7 8 7-8 7" />
+              <path class="panel-lines" d="M228 65h65M228 86h83M228 107h51M228 128h72M228 149h43" />
+            </svg>
+          </span>
+          <span class="mode-card-number">03</span>
+          <span class="mode-card-title">I want to do both</span>
+          <span class="mode-card-copy">Do both intervention and feature exploration</span>
+          <span class="mode-card-action">Open full visualizer <span aria-hidden="true">↗</span></span>
+        </button>
+      </div>
+    </main>
+
+    <main id="visualizer" class="visualizer" hidden>
       <header class="page-header">
         <div class="page-title">
           <h1>nanointerpret</h1>
@@ -24,6 +82,7 @@
         <dl class="dataset-meta" id="dataset-meta" aria-label="Activation metadata">
           <div><dt>Model</dt><dd>Loading...</dd></div>
         </dl>
+        <button id="change-mode-button" class="change-mode-button" type="button">Change mode</button>
       </header>
 
       <section class="playground" aria-labelledby="playground-title">

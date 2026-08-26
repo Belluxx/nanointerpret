@@ -1,4 +1,7 @@
 const playgroundForm = document.querySelector("#intervention-form");
+const modePicker = document.querySelector("#mode-picker");
+const visualizer = document.querySelector("#visualizer");
+const changeModeButton = document.querySelector("#change-mode-button");
 const formFields = playgroundForm.elements;
 const config = window.NANOINTERPRET_CONFIG;
 const isStatic = Boolean(config.dataDirectory);
@@ -53,6 +56,23 @@ const featureFiles = new Map();
 
 let features = [];
 let featuresById = new Map();
+
+function enterVisualizer(mode) {
+  visualizer.dataset.mode = mode;
+  modePicker.hidden = true;
+  visualizer.hidden = false;
+  window.scrollTo(0, 0);
+}
+
+for (const card of modePicker.querySelectorAll("[data-mode]")) {
+  card.addEventListener("click", () => enterVisualizer(card.dataset.mode));
+}
+
+changeModeButton.addEventListener("click", () => {
+  visualizer.hidden = true;
+  modePicker.hidden = false;
+  window.scrollTo(0, 0);
+});
 let amountIsCustom = false;
 let renderedBaselineKey = null;
 let minimumActivationCount = 0;
