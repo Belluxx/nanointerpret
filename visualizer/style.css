@@ -360,16 +360,32 @@ input.progress-range::-moz-range-thumb,
     font-size: 11px;
   }
 }
+.playground-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  anchor-name: --playground-header-actions;
+  .popover-button {
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+  }
+}
+.help-button {
+  width: 32px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+}
 .settings-button {
-  height: 32px;
   padding: 0 10px;
   gap: 8px;
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  anchor-name: --sampling-settings-button;
 }
+.playground:has(.playground-help-dialog:popover-open) .help-button,
 .playground:has(.sampling-settings-dialog:popover-open) .settings-button,
 .toolbar:has(#clear-filters-button:not(:disabled)) .filter-button,
 .toolbar:has(.filter-popover:popover-open) .filter-button {
@@ -383,8 +399,34 @@ input.progress-range::-moz-range-thumb,
   width: 14px;
   height: 14px;
 }
+.playground-help-dialog {
+  ol {
+    display: grid;
+    gap: 7px;
+    margin: 0;
+    padding: 14px 16px 16px 40px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.55;
+  }
+  li::marker {
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 600;
+  }
+  ul {
+    margin: 4px 0 0;
+    padding-left: 18px;
+  }
+  strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+}
+.playground-help-dialog,
 .sampling-settings-dialog {
-  position-anchor: --sampling-settings-button;
+  position-anchor: --playground-header-actions;
   width: min(380px, calc(100% - 32px));
   > header { padding: 14px 16px; }
 }
@@ -430,40 +472,20 @@ input.progress-range::-moz-range-thumb,
     text-transform: uppercase;
     &::-webkit-details-marker { display: none; }
   }
-  ol {
-    display: grid;
-    gap: 7px;
-    margin: 0;
-    padding: 0 13px 13px 38px;
-    color: var(--muted);
-    font-size: 11px;
-    line-height: 1.55;
-  }
-  li::marker {
-    color: var(--accent);
-    font-family: var(--mono);
-    font-size: 9px;
-    font-weight: 600;
-  }
-  ul {
-    margin: 4px 0 0;
-    padding-left: 18px;
-  }
-  strong {
-    color: var(--text);
-    font-weight: 600;
-  }
 }
 .intervention-example-list {
   display: grid;
-  gap: 7px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
   padding: 0 13px 13px;
 }
 .intervention-example {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
   min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
   color: var(--muted);
   font-size: 11px;
   line-height: 1.4;
@@ -473,21 +495,12 @@ input.progress-range::-moz-range-thumb,
   min-width: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
-  &.example-prompt { flex: 1 1 180px; }
-  &.example-feature { flex: 1 1 150px; }
-  &.example-strength { flex: 0 0 auto; }
-  &::before {
-    content: attr(data-label) " ";
-    color: var(--text);
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
 }
+.example-feature { color: var(--text); }
+.example-prompt { margin-top: 6px; }
 .intervention-example-button {
-  flex: 0 0 auto;
   min-height: 26px;
+  margin-top: 12px;
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 0;
@@ -1219,17 +1232,27 @@ input.progress-range::-moz-range-thumb,
     justify-self: stretch;
   }
   .context-header { align-items: flex-start; }
-}
-@media (max-width: 700px) {
-  .intervention-example { gap: 7px; }
-  .example-strength { display: none; }
+  .intervention-example-list {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .intervention-example {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    border: 0;
+    border-top: 1px solid var(--line);
+    background: transparent;
+  }
+  .intervention-example:last-child { border-bottom: 1px solid var(--line); }
+  .example-prompt { display: none; }
+  .intervention-example-button { margin-top: 0; }
 }
 @media (max-width: 560px) {
   .intervention-controls { grid-template-columns: 1fr; }
   .amount-control { grid-template-columns: minmax(0, 1fr) 82px; }
-}
-@media (max-width: 480px) {
-  .example-prompt { display: none; }
 }
 @media (max-width: 380px) {
   .playground-actions {

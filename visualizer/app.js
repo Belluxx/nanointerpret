@@ -450,13 +450,6 @@ function tryInterventionExample(example) {
   updateAmountMultiplierFromCustomValue();
 }
 
-function exampleField(label, value, className) {
-  const cell = element("span", `intervention-example-value ${className}`, value);
-  cell.dataset.label = label;
-  cell.setAttribute("aria-label", `${label}: ${value}`);
-  return cell;
-}
-
 function renderInterventionExamples(examples) {
   if (!examples?.length) return;
 
@@ -464,21 +457,16 @@ function renderInterventionExamples(examples) {
   for (const example of examples) {
     const featureTitle = featuresById.get(example.feature_id)?.title;
     const featureLabel = featureTitle
-      ? `${featureTitle} (#${example.feature_id})`
+      ? featureTitle.charAt(0).toUpperCase() + featureTitle.slice(1)
       : `Feature ${example.feature_id}`;
-    const button = element("button", "intervention-example-button", "Try example");
+    const button = element("button", "intervention-example-button", "Try");
     button.type = "button";
     button.addEventListener("click", () => tryInterventionExample(example));
 
     const item = element("div", "intervention-example");
     item.append(
-      exampleField("Prompt", `“${example.prompt}”`, "example-prompt"),
-      exampleField("Feature", featureLabel, "example-feature"),
-      exampleField(
-        "Strength",
-        formatPercentage(example.target_activation_pct),
-        "example-strength",
-      ),
+      element("span", "intervention-example-value example-feature", featureLabel),
+      element("span", "intervention-example-value example-prompt", `“${example.prompt}”`),
       button,
     );
     fragment.append(item);
