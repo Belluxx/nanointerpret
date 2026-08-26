@@ -13,6 +13,9 @@ python3 train.py \
   --validation-tokens 10000000
 ```
 
+> [!NOTE]
+> If you are memory poor, add these flags: `--model-batch-size 4 --sae-batch-size 1024` (should use 3.5GB of RAM).
+
 2. Record feature activations:
 
 ```sh

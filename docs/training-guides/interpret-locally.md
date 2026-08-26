@@ -1,9 +1,15 @@
-If you don't want to use remote LLMs to interpret the SAE features, do the following:
+If you don't want to use remote LLMs, choose a 4-bit model based on your available RAM ([quality experiment](../experiments.md#finding-the-best-model-for-interpreting-features-locally)):
 
-1. Run Gemma 4 MoE with the llama.cpp server. Install [llama.cpp](https://github.com/ggml-org/llama.cpp) and download the [Gemma GGUF](https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/tree/main) first.
+| Model | RAM | Quality |
+|---|---:|---|
+| [Gemma 4 E2B](https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/tree/main) | ~5GB | Lowest |
+| [Gemma 4 E4B](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/tree/main) | ~7GB | Medium |
+| [Gemma 4 26B-A4B](https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/tree/main) | ~18GB | Best |
+
+1. Install [llama.cpp](https://github.com/ggml-org/llama.cpp), download the chosen GGUF, and run it:
 
 ```sh
-llama-server -m gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf \
+llama-server -m /path/to/model.gguf \
   -ngl 999 -fa on -c 6000 --port 9000 --cache-ram 0 \
   --temp 0.85 --top-k 20 --top-p 0.87 --min-p 0 \
   --repeat-penalty 1 --presence-penalty 0

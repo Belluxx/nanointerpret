@@ -11,7 +11,7 @@ If you want to try it right now, go to [nanointerpret.pages.dev](https://nanoint
 ![example with tree feature clamping](assets/example_trees.svg)
 
 
-## How to run
+## How to train your SAE
 
 Prepare the environment:
 
@@ -23,8 +23,8 @@ pip install -r requirements.txt
 
 Then proceed to a guide:
 
-- [Gemma3 270M Base](docs/training-guides/gemma.md) (~6GB free RAM required)
-- [Qwen3 1.7B Base](docs/training-guides/qwen.md) (~13GB free RAM required)
+- [Gemma3 270M Base](docs/training-guides/gemma.md) (~5GB free RAM required)
+- [Qwen3 1.7B Base](docs/training-guides/qwen.md) (~14GB free RAM required)
 
 ## Details
 
@@ -34,6 +34,7 @@ Future objectives:
 - [ ] Use later layers to avoid heavily syntactic features
 - [ ] Use llama.cpp to run LLM and capture acivations
 - [ ] Test on 3B-7B models
+- [ ] Test 1.7B on later layers compraing feature categories and scores
 - [ ] Test on interactive chat tuned models (the repo uses pretrained base Gemma/Qwen)
 
 > [!NOTE]

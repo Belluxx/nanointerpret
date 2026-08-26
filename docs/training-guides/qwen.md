@@ -17,6 +17,9 @@ python3 train.py \
   --model-dtype bfloat16
 ```
 
+> [!NOTE]
+> If you are memory poor, add these flags: `--model-batch-size 4 --sae-batch-size 1024` (should use 11GB of RAM).
+
 2. Record feature activations:
 
 ```sh
