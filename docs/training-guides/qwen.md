@@ -29,7 +29,7 @@ python3 record_activations.py --sae-dir artifacts/qwen3_1.7b_l14_w16_k16_500m
 3. Interpret and categorize the features with an LLM (want to do it locally? Check [here](interpret-locally.md)):
 
 ```sh
-# Around $6-$16 in API cost for 32K features
+# Around $20 in API cost for 32K features
 
 python3 interpret_features.py \
   --activations artifacts/qwen3_1.7b_l14_w16_k16_500m/activations \
