@@ -6,14 +6,19 @@ Nanointerpret objective is being a minimal but full-fledged interpretability pla
 - Explore the features via a web GUI
 - Forcefully activate features and observe the effect on LLM generations (the fun part)
 
-If you want to try it right now, go to [nanointerpret.pages.dev](https://nanointerpret.pages.dev/)
+If you want to try it right now, go to [nanointerpret.pages.dev](https://nanointerpret.pages.dev/).
+
+If you want to try nanointerpret locally with a pretrained SAE, check [Run the visualizer](#run-the-visualizer) below.
+
+If you want to train your SAE locally, check [Train your SAE](#train-your-sae) below.
 
 ![example with tree feature clamping](assets/example_trees.svg)
 
+## Run the visualizer
 
-## How to train your SAE
+If you don't want to train the model but just explore the features and perform interventions locally:
 
-Prepare the environment:
+1. Prepare the environment:
 
 ```sh
 python3 -m venv .venv
@@ -21,14 +26,33 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Then proceed to a guide:
+2. Download the [pretrained Qwen3 SAE and activations](https://huggingface.co/Belluxx/nanointerpret-qwen3) and start the visualizer:
+
+```sh
+hf download Belluxx/nanointerpret-qwen3 --local-dir artifacts/nanointerpret-qwen3
+python3 visualize.py --activations artifacts/nanointerpret-qwen3/activations
+```
+
+3. Open [http://127.0.0.1:8000](http://127.0.0.1:8000).
+
+## Train your SAE
+
+1. Prepare the environment:
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+2. Then proceed to a guide:
 
 - [Gemma3 270M Base](docs/training-guides/gemma.md) (~5GB free RAM required)
 - [Qwen3 1.7B Base](docs/training-guides/qwen.md) (~14GB free RAM required)
 
 ## Details
 
-The repo takes different ideas from [OpenAI](https://arxiv.org/abs/2406.04093) and [Anthropic](https://transformer-circuits.pub/2024/scaling-monosemanticity/index.html). It also includes some ablation experiments I did to see what works best ([experiments.md](docs/experiments.md))
+The repo takes different ideas from [OpenAI](https://arxiv.org/abs/2406.04093) and [Anthropic](https://transformer-circuits.pub/2024/scaling-monosemanticity/index.html). It also includes various ablation experiments I did to see what works best ([experiments.md](docs/experiments.md))
 
 Future objectives:
 - [ ] Use later layers to avoid heavily syntactic features
