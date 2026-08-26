@@ -60,6 +60,20 @@ main {
     line-height: 0.95;
   }
 }
+.page-title {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+.github-link {
+  flex: 0 0 30px;
+  height: 30px;
+  color: var(--text);
+  background: currentcolor;
+  mask: url("icons/github.svg") center / contain no-repeat;
+  -webkit-mask: url("icons/github.svg") center / contain no-repeat;
+  &:hover { color: var(--accent); }
+}
 .dataset-meta {
   display: flex;
   flex-wrap: wrap;
@@ -1201,6 +1215,8 @@ input.progress-range::-moz-range-thumb,
     display: block;
     text-align: center;
   }
+  .page-title { justify-content: center; }
+  .github-link { transform: translateY(2px); }
   .dataset-meta { display: none; }
   .generation-results {
     &:not([hidden]) { grid-template-columns: 1fr; }
