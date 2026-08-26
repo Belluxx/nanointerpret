@@ -1111,6 +1111,12 @@ async function initialize() {
     renderMetadata(payload.metadata);
     initializePlayground(payload.metadata);
     renderInterventionExamples(payload.intervention_examples);
+    if (payload.intervention_examples?.length) {
+      const randomIndex = Math.floor(
+        Math.random() * payload.intervention_examples.length,
+      );
+      tryInterventionExample(payload.intervention_examples[randomIndex]);
+    }
     updateActivationCountRange();
     renderFeatureList();
   } catch (error) {
