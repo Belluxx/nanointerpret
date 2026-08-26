@@ -1199,11 +1199,11 @@ input.progress-range::-moz-range-thumb,
   }
   .list-heading { padding-right: 16px; }
   .column-labels,
+  .feature-id,
+  .feature-category,
   .feature-stat { display: none; }
   .feature > summary {
-    --feature-id-column: 52px;
     grid-template-columns:
-      var(--feature-id-column)
       minmax(0, 1fr)
       var(--feature-toggle-column);
   }
