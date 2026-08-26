@@ -376,7 +376,10 @@ const compactNumber = new Intl.NumberFormat("en", {
 });
 
 function compactCount(count) {
-  return `~${compactNumber.format(count)}`;
+  return `~${count.toLocaleString("en", {
+    notation: "compact",
+    maximumFractionDigits: 0,
+  })}`;
 }
 
 function formatActivation(value) {
@@ -833,13 +836,14 @@ function renderOverview(feature, payload) {
   const overview = element("section", "feature-overview");
   const tokenSummary = element("div", "token-summary");
   tokenSummary.append(element("h3", "", "Characteristic tokens"));
+  const strengthLabels = { 95: "STRONG", 50: "MEDIUM", 25: "WEAK" };
   for (const group of payload.token_groups) {
     const row = element("div", "token-group");
     const tokenList = element("div", "token-list");
     for (const token of group.tokens) {
       tokenList.append(element("code", "token-name", token));
     }
-    row.append(element("span", "token-percentile", `P${group.percentile}`), tokenList);
+    row.append(element("span", "token-strength", strengthLabels[group.percentile]), tokenList);
     tokenSummary.append(row);
   }
 
@@ -931,8 +935,13 @@ function renderDistribution(feature, payload) {
   resultCount.setAttribute("aria-label", "Reverse context order");
   const orderLabel = element("span");
   const results = element("div", "contexts");
+  const heading = element("div", "range-heading");
+  heading.append(
+    element("h3", "", "Distribution of activation strengths"),
+    element("span", "range-hint", "DRAG KNOBS BELOW TO SELECT"),
+  );
   panel.append(
-    element("h3", "range-heading", "Distribution of activation peaks"),
+    heading,
     plot,
     selector,
     resultCount,
@@ -941,7 +950,7 @@ function renderDistribution(feature, payload) {
 
   let loadTimer;
   let requestId = 0;
-  let descending = true;
+  let descending = false;
 
   function updateSelection(changedInput) {
     const [minimumFraction, maximumFraction] = updateDualRange(
