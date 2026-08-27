@@ -49,7 +49,7 @@ main {
 .mode-picker {
   width: min(1240px, calc(100% - 40px));
   min-height: 100vh;
-  padding-top: clamp(48px, 9vh, 108px);
+  padding-top: clamp(36px, 6vh, 72px);
 }
 .mode-picker-header {
   margin-bottom: 46px;
@@ -89,7 +89,7 @@ main {
 .mode-illustration {
   grid-column: 1 / -1;
   display: block;
-  height: 210px;
+  height: 190px;
   color: var(--text);
   svg { width: 100%; height: 100%; }
   path, circle, rect { vector-effect: non-scaling-stroke; }
@@ -143,7 +143,7 @@ main {
     white-space: normal;
   }
   .mode-cards { grid-template-columns: 1fr; }
-  .mode-illustration { height: 180px; }
+  .mode-illustration { height: 160px; }
   .page-header {
     flex-wrap: nowrap;
     gap: 12px;
