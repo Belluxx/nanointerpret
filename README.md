@@ -1,7 +1,7 @@
 ![nanointerpret](assets/banner.svg)
 
 Nanointerpret objective is being a minimal but full-fledged interpretability playground where you can:
-- Train your own SAE on your own LLM
+- Train your own [SAE](https://www.lesswrong.com/posts/8YnHuN55XJTDwGPMr/a-gentle-introduction-to-sparse-autoencoders) on your own LLM
 - Automatically interpret SAE features with a local or remote LLM
 - Explore the features via a web GUI
 - Forcefully activate features and observe the effect on LLM generations (the fun part)
