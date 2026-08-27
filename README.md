@@ -6,11 +6,13 @@ Nanointerpret objective is being a minimal but full-fledged interpretability pla
 - Explore the features via a web GUI
 - Forcefully activate features and observe the effect on LLM generations (the fun part)
 
-If you want to try it right now, go to [nanointerpret.pages.dev](https://nanointerpret.pages.dev/).
+To try it right now, go to [nanointerpret.pages.dev](https://nanointerpret.pages.dev/).
 
-If you want to try nanointerpret locally with a pretrained SAE, check [Run the visualizer](#run-the-visualizer) below.
+To try it locally with a pretrained SAE, check [Run the visualizer](#run-the-visualizer) below.
 
-If you want to train your SAE locally, check [Train your SAE](#train-your-sae) below.
+To train your SAE locally, check [Train your SAE](#train-your-sae) below.
+
+Want to know more about the decisions that went into making this project? Check [experiments.md](docs/experiments.md).
 
 ![example with tree feature clamping](assets/example_trees.svg)
 
