@@ -203,7 +203,7 @@ def main() -> None:
                     client,
                     args.model,
                     result["completion"],
-                    result["title"],
+                    interpretations[result["feature_id"]]["title"],
                 )
                 return {**result, "score": score}
             except Exception as error:
@@ -243,7 +243,6 @@ def main() -> None:
                 generated = (
                     {
                         "feature_id": feature_id,
-                        **interpretations[feature_id],
                         "completion": completion,
                     }
                     for feature_id, completion in zip(
@@ -273,7 +272,7 @@ def main() -> None:
         score_text = f"{score:.6g}" if score is not None else "ERROR"
         print(
             f"{rank}. Feature {result['feature_id']} | "
-            f"score {score_text} | {result['title']}"
+            f"score {score_text} | {interpretations[result['feature_id']]['title']}"
         )
         print(result["completion"].strip() or "[empty completion]")
         if "judge_error" in result:

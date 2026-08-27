@@ -19,8 +19,16 @@ def main() -> None:
     for sae_dir in args.sae_dirs:
         with (sae_dir / "feature_scores.jsonl").open(encoding="utf-8") as file:
             features = [json.loads(line) for line in file if line.strip()]
+        with (sae_dir / "feature_interpretations.jsonl").open(encoding="utf-8") as file:
+            interpretations = [json.loads(line) for line in file if line.strip()]
+        categories = {
+            int(feature["feature_id"]): feature["category"]
+            for feature in interpretations
+        }
         semantic = [
-            feature for feature in features if feature["category"] == "semantic"
+            feature
+            for feature in features
+            if categories[int(feature["feature_id"])] == "semantic"
         ]
         high_score = [
             feature
