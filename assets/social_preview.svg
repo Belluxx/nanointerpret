@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1280"
+     height="640"
+     viewBox="0 0 1280 640"
+     role="img"
+     aria-labelledby="title description">
+  <title id="title">nanointerpret</title>
+  <desc id="description">nanointerpret wordmark and a sparse feature bottleneck diagram, framed for a GitHub social preview.</desc>
+
+  <style>
+    .foreground { fill: #171717; }
+    .muted { fill: #8b8b86; }
+    .connections { fill: none; stroke: #171717; }
+    .inactive-feature { fill: #ffffff; stroke: #d7d7d1; }
+    .wordmark {
+      font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 98.335px;
+      font-weight: 600;
+      letter-spacing: -5.463px;
+    }
+    .tagline {
+      font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 24.925px;
+      font-weight: 400;
+      letter-spacing: 3.399px;
+    }
+  </style>
+
+  <rect width="1280" height="640" fill="#ffffff" />
+
+  <!-- The reference banner is scaled to the 40-unit side margins and centered. -->
+  <svg x="40" y="191.429" width="1200" height="257.143" viewBox="0 60 1400 300" aria-hidden="true">
+    <g id="wordmark" transform="translate(0 -4.3482167) scale(0.88918323)">
+      <text class="foreground wordmark" x="62.245" y="252.699">nanointerpret</text>
+      <text class="muted tagline" x="67.7" y="306.716">INTERPRETABILITY PLAYGROUND</text>
+    </g>
+
+    <g id="feature-diagram" transform="translate(-245.71888 -101.67578) scale(1.3979)">
+      <g class="connections"
+         transform="translate(885.59 291.64) rotate(-90) scale(0.50247 1)"
+         stroke-width="1.1">
+        <path d="M 20 58 C 102 58, 166 15, 248 15" />
+        <path d="M 20 112 C 112 112, 166 15, 248 15" />
+        <path d="M 20 76 C 108 76, 170 99, 248 99" />
+        <path d="M 20 76 C 110 76, 174 155, 248 155" />
+        <path d="M 20 112 C 100 112, 166 155, 248 155" />
+        <path d="M 20 148 C 108 148, 174 155, 248 155" />
+        <path d="M 20 166 C 106 166, 174 155, 248 155" />
+        <path d="M 20 130 C 110 130, 176 211, 248 211" />
+        <path d="M 20 184 C 108 184, 174 211, 248 211" />
+        <path d="M 20 166 C 106 166, 174 225.664, 248 225.664" />
+      </g>
+
+      <g class="muted" transform="rotate(-90 594.74 -290.85)">
+        <circle cx="12" cy="58" r="3.5" />
+        <circle cx="12" cy="76" r="3.5" />
+        <circle cx="12" cy="94" r="3.5" />
+        <circle cx="12" cy="112" r="3.5" />
+        <circle cx="12" cy="130" r="3.5" />
+        <circle cx="12" cy="148" r="3.5" />
+        <circle cx="12" cy="166" r="3.5" />
+        <circle cx="12" cy="184" r="3.5" />
+      </g>
+
+      <g class="inactive-feature"
+         transform="rotate(-90 650.31 -235.28)"
+         stroke-width="1.25">
+        <circle cx="260" cy="1" r="3.25" />
+        <circle cx="260" cy="29" r="3.25" />
+        <circle cx="260" cy="43" r="3.25" />
+        <circle cx="260" cy="57" r="3.25" />
+        <circle cx="260" cy="71" r="3.25" />
+        <circle cx="260" cy="85" r="3.25" />
+        <circle cx="260" cy="113" r="3.25" />
+        <circle cx="260" cy="127" r="3.25" />
+        <circle cx="260" cy="141" r="3.25" />
+        <circle cx="260" cy="169" r="3.25" />
+        <circle cx="260" cy="183" r="3.25" />
+        <circle cx="260" cy="197" r="3.25" />
+        <circle cx="260" cy="239" r="3.25" />
+      </g>
+
+      <g class="foreground" transform="rotate(-90 650.31 -235.28)">
+        <circle cx="260" cy="15" r="4.5" />
+        <circle cx="260" cy="99" r="4.5" />
+        <circle cx="260" cy="155" r="4.5" />
+        <circle cx="260" cy="211" r="4.5" />
+        <circle cx="260" cy="225.07" r="4.5" />
+      </g>
+    </g>
+  </svg>
+</svg>
