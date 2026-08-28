@@ -75,6 +75,8 @@ Qwen tends to have extremely large residual-stream activations at the first sequ
 
 To prevent them from dominating SAE normalization / training, a raw L2-norm filter was added. Use `--max-activation-l2 auto` to detect the separated outlier cluster, or provide your numeric cutoff. Note that the cutoff is model and layer specific.
 
+![Residual-stream activation L2 distributions for Qwen and Gemma](../assets/plots/activation_l2_distributions.png)
+
 Gemma 3 270M also has very large residual-stream activations, however they occur over tokens like BOS and punctuation. So they are more complex and potentially meaningful, unlike Qwen's case. I would not recommend L2 filtering for Gemma by default but feel free to test it.
 
 ## Finding the best model for interpeting features locally
