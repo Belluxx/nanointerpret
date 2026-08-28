@@ -28,6 +28,9 @@ from .sae import (
 )
 
 DOWNSTREAM_KL_TOKENS = 100_000
+AUTO_L2_SAMPLE_TOKENS = 100_000
+AUTO_L2_MAX_OUTLIER_FRACTION = 0.02
+AUTO_L2_MIN_GAP_RATIO = 2.0
 
 
 def default_aux_k(d_model: int) -> int:
@@ -48,6 +51,48 @@ def filter_raw_l2_activations(
     if max_activation_l2 is None:
         return residual
     return residual[raw_l2_activation_mask(residual, max_activation_l2)]
+
+
+@torch.inference_mode()
+def estimate_auto_activation_l2(train_batches) -> float | None:
+    norms = []
+    sampled_tokens = 0
+    for residual in train_batches(skip_batches=0):
+        take = min(len(residual), AUTO_L2_SAMPLE_TOKENS - sampled_tokens)
+        norms.append(
+            torch.linalg.vector_norm(residual[:take].float(), dim=-1).cpu()
+        )
+        sampled_tokens += take
+        if sampled_tokens >= AUTO_L2_SAMPLE_TOKENS:
+            break
+
+    if sampled_tokens < 2:
+        print("Auto activation L2 cutoff: insufficient activations; disabled")
+        return None
+
+    sorted_norms = torch.sort(torch.cat(norms)).values
+    outlier_count = max(
+        1, math.ceil(len(sorted_norms) * AUTO_L2_MAX_OUTLIER_FRACTION)
+    )
+    upper_tail = sorted_norms[-outlier_count - 1 :]
+    gap_ratios = upper_tail[1:] / upper_tail[:-1].clamp_min(
+        torch.finfo(upper_tail.dtype).tiny
+    )
+    gap_index = int(gap_ratios.argmax())
+    gap_ratio = float(gap_ratios[gap_index])
+    if not math.isfinite(gap_ratio) or gap_ratio < AUTO_L2_MIN_GAP_RATIO:
+        print("Auto activation L2 cutoff: no separated outlier cluster; disabled")
+        return None
+
+    lower_bound = float(upper_tail[gap_index])
+    upper_bound = float(upper_tail[gap_index + 1])
+    cutoff = math.sqrt(lower_bound * upper_bound)
+    retained = 100.0 * float((sorted_norms <= cutoff).float().mean())
+    print(
+        f"Auto activation L2 cutoff: {cutoff:.6g} "
+        f"(gap {lower_bound:.6g}-{upper_bound:.6g}, retains {retained:.2f}%)"
+    )
+    return cutoff
 
 
 @torch.inference_mode()

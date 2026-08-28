@@ -24,6 +24,7 @@ from src.experiment import (
     capture_residual_cache,
     compile_transformer_prefix,
     default_aux_k,
+    estimate_auto_activation_l2,
     estimate_activation_normalization,
     evaluate_downstream_kl,
     find_transformer_layers,
@@ -40,6 +41,15 @@ DATASET_ID = "HuggingFaceFW/fineweb-edu"
 DATASET_CONFIG = "sample-10BT"
 
 
+def activation_l2_cutoff(value: str) -> float | str:
+    if value == "auto":
+        return value
+    try:
+        return float(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a number or 'auto'") from error
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-id", default=MODEL_ID, help=f"Hugging Face causal language model to analyze. Default: {MODEL_ID}.")
@@ -54,7 +64,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recording-tokens", type=int, default=10_000_000, help="Dedicated token split for recording feature activations. Default: 10000000.")
     parser.add_argument("--model-batch-size", type=int, default=32, help="Contexts processed together; lower this if memory is limited.")
     parser.add_argument("--normalization-tokens", type=int, default=1_000_000, help="Training-token sample used to estimate one global activation scale.")
-    parser.add_argument("--max-activation-l2", type=float, default=None, metavar="NORM", help="Exclude residual activations whose raw pre-normalization L2 norm exceeds NORM.")
+    parser.add_argument("--max-activation-l2", type=activation_l2_cutoff, default=None, metavar="NORM|auto", help="Exclude residual activations whose raw pre-normalization L2 norm exceeds NORM. Use 'auto' to detect a separated upper-tail outlier cluster.")
     parser.add_argument("--width-multiplier", type=int, default=16, help="SAE feature count as a multiple of the model residual width. Default: 16.")
     parser.add_argument("--k", type=int, default=16, help="Maximum number of SAE features active for each token. Default: 16.")
     parser.add_argument("--aux-k", type=int, default=None, help="Dead latents used by AuxK. Default: nearest power of two to d_model / 2.")
@@ -198,9 +208,10 @@ def run_training(
     final_path = args.output_dir / "sae_final.pt"
     if args.resume:
         config_path = args.output_dir / "config.json"
-        activation_scale = float(
-            json.loads(config_path.read_text())["activation_scale"]
-        )
+        saved_config = json.loads(config_path.read_text())
+        activation_scale = float(saved_config["activation_scale"])
+        if args.max_activation_l2 == "auto":
+            args.max_activation_l2 = saved_config["max_activation_l2"]
         initial_pre_bias = None
         print(
             f"reusing activation scale {activation_scale:.8g} "
@@ -216,6 +227,8 @@ def run_training(
                 f"{checkpoint_path} already exists; pass --resume or choose another "
                 "--output-dir"
             )
+        if args.max_activation_l2 == "auto":
+            args.max_activation_l2 = estimate_auto_activation_l2(train_batches)
         activation_scale, initial_pre_bias = estimate_activation_normalization(
             train_batches,
             args.train_tokens,
