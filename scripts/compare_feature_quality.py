@@ -36,6 +36,9 @@ class SAEData:
     name: str
     category_counts: np.ndarray
     scores: dict[str | None, np.ndarray]
+    reconstruction_mse: float
+    explained_variance: float
+    downstream_kl: float | None
 
 
 def load_jsonl(path: Path) -> list[dict]:
@@ -45,6 +48,10 @@ def load_jsonl(path: Path) -> list[dict]:
 
 def load_sae(path: Path) -> SAEData:
     interpretations = load_jsonl(path / "feature_interpretations.jsonl")
+    validation_metrics = json.loads(
+        (path / "validation_metrics.json").read_text(encoding="utf-8")
+    )
+    downstream_kl = validation_metrics.get("downstream_kl")
     categories = {
         int(feature["feature_id"]): feature["category"]
         for feature in interpretations
@@ -72,6 +79,9 @@ def load_sae(path: Path) -> SAEData:
             category: np.asarray(scores)
             for category, scores in score_groups.items()
         },
+        reconstruction_mse=float(validation_metrics["mse"]),
+        explained_variance=float(validation_metrics["explained_variance"]),
+        downstream_kl=None if downstream_kl is None else float(downstream_kl),
     )
 
 
@@ -147,6 +157,27 @@ def quality_table(
         for sae in saes
     ]
     return markdown_table(["SAE", *quality_headers(thresholds)], rows)
+
+
+def reconstruction_table(saes: list[SAEData]) -> str:
+    rows = [
+        [
+            sae.name,
+            f"{sae.reconstruction_mse:.2g}",
+            format_percentage(100 * sae.explained_variance),
+            "n/a" if sae.downstream_kl is None else f"{sae.downstream_kl:.2g}",
+        ]
+        for sae in saes
+    ]
+    return markdown_table(
+        [
+            "SAE",
+            "Validation MSE ↓",
+            "Explained variance ↑",
+            "Final KL divergence ↓",
+        ],
+        rows,
+    )
 
 
 def save_figure(figure: Figure, path: Path) -> None:
@@ -227,6 +258,73 @@ def save_category_plot(saes: list[SAEData], path: Path) -> None:
     save_figure(figure, path)
 
 
+def save_reconstruction_plot(saes: list[SAEData], path: Path) -> None:
+    metric_labels = (
+        "Validation MSE ↓",
+        "Explained variance ↑",
+        "Final KL divergence ↓",
+    )
+    positions = np.arange(len(metric_labels))
+    bar_width = 0.8 / len(saes)
+    color_positions = np.linspace(0, 1, len(saes) + 2)[1:-1]
+    colors = colormaps["viridis"](color_positions)
+    with rc_context(STYLE):
+        figure = Figure(
+            figsize=(11, 5.5),
+            constrained_layout=True,
+            facecolor="#F8FAFC",
+        )
+        FigureCanvasAgg(figure)
+        axis = figure.subplots()
+        legend_bars = []
+        maximum = 1.0
+        for index, (sae, color) in enumerate(zip(saes, colors)):
+            values = (
+                sae.reconstruction_mse,
+                sae.explained_variance,
+                sae.downstream_kl,
+            )
+            bars = axis.bar(
+                positions - 0.4 + bar_width / 2 + index * bar_width,
+                [0 if value is None else value for value in values],
+                width=bar_width,
+                color=color,
+                label=sae.name,
+            )
+            value_labels = [
+                "n/a"
+                if value is None
+                else format_percentage(100 * value)
+                if metric_index == 1
+                else f"{value:.2g}"
+                for metric_index, value in enumerate(values)
+            ]
+            axis.bar_label(bars, labels=value_labels, padding=4)
+            legend_bars.append(bars)
+            maximum = max(
+                maximum, *(value for value in values if value is not None)
+            )
+
+        axis.set_title("Final validation quality", loc="left", pad=42)
+        axis.set_ylabel("Metric value")
+        axis.set_ylim(0, 1.12 * maximum)
+        axis.set_xticks(positions, metric_labels)
+        axis.grid(axis="x", visible=False)
+        axis.tick_params(which="both", length=0)
+        axis.spines["top"].set_visible(False)
+        axis.spines["right"].set_visible(False)
+        axis.legend(
+            handles=legend_bars,
+            labels=[sae.name for sae in saes],
+            frameon=False,
+            loc="lower left",
+            bbox_to_anchor=(0, 1.01),
+            ncols=min(3, len(saes)),
+            borderaxespad=0,
+        )
+    save_figure(figure, path)
+
+
 def mean_confidence_interval(scores: np.ndarray) -> tuple[float, float, float]:
     mean = float(scores.mean())
     margin = 1.96 * float(scores.std(ddof=1) / np.sqrt(len(scores)))
@@ -297,7 +395,10 @@ def save_score_plot(saes: list[SAEData], path: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Compare feature categories and intervention quality across SAEs."
+        description=(
+            "Compare reconstruction quality, feature categories, and intervention "
+            "quality across SAEs."
+        )
     )
     parser.add_argument("sae_dirs", type=Path, nargs="+")
     parser.add_argument(
@@ -324,11 +425,20 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     save_category_plot(saes, args.output_dir / "feature_categories.png")
     save_score_plot(saes, args.output_dir / "feature_score_bars.png")
+    save_reconstruction_plot(saes, args.output_dir / "reconstruction_quality.png")
 
     report = [
         "# Feature quality comparison",
         "",
-        "Tables report percentages within each SAE and feature group.",
+        "Feature tables report percentages within each SAE and feature group.",
+        "",
+        "## Reconstruction quality",
+        "",
+        "Metrics are from each SAE's final validation evaluation.",
+        "",
+        reconstruction_table(saes),
+        "",
+        "![Reconstruction quality comparison](reconstruction_quality.png)",
         "",
         "## Feature categories",
         "",
