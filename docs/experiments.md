@@ -1,7 +1,11 @@
 # Experiments
 
-> [!CAUTION]
-> Using `--cache-activations` saves LLM activations to disk for reuse across runs. The default fp16 cache takes up a LOT of space (about 1.3GB every 1M tokens for the 270m Gemma model). `--residual-cache-format int8` takes about half as much space.
+## Lessons learned
+
+- Lowering `K` from `32` to `16` improves interpretability (but costs reconstruction accuracy). Increasing SAE width from `16x` to `32x` sometimes separates fused concepts better, but needs more data and (in Gemma 270M) doesn't fix its poor text understanding due to its tiny size. It also significantly increases duplicate features.
+- A later-layer Gemma run produced more abstract features, but they became incoherent already at medium activation levels. It's important to check the whole activation distribution.
+- Local models are quite good at interpreting features. Gemma 4 26B MoE interpretations were comparable to (or even better than) GPT 5.6 Terra, making local interpretation very practical and much cheaper if you can wait for longer (see [here](experiments.md#finding-the-best-model-for-interpreting-features-locally)).
+- FineWeb-Edu was a poor choice, features seemed to encode the dataset's educational style. For example, an apparently general fire-related feature steered the model toward educational fire-themed completions. This is evident for many features in both Gemma3 270M and Qwen3 1.7B.
 
 Hardware: M4 Max Mac Studio (CPU 16C, GPU 40C, 64GB RAM)
 
