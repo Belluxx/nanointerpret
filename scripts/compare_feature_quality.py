@@ -28,7 +28,12 @@ SCORE_GROUPS = (
     ("semantic", "Semantic"),
 )
 DEFAULT_THRESHOLDS = (0.5, 0.9)
-CATEGORY_LABELS = ("Token-specific", "Lexical", "Semantic", "Uninterpretable")
+CATEGORY_LABELS = (
+    "Token-specific",
+    "Lexical",
+    "Semantic",
+    "No usable interpretation",
+)
 CATEGORY_COLORS = ("#E2E8F0", "#F5C98B", "#059669", "#94A3B8")
 CATEGORY_HATCHES = (None, None, None, "///")
 
@@ -474,6 +479,9 @@ def main() -> None:
         "![Reconstruction quality comparison](reconstruction_quality.png)",
         "",
         "## Feature categories",
+        "",
+        "No usable interpretation includes features with insufficient activation "
+        "evidence or no coherent interpretation.",
         "",
         category_table(saes),
         "",
