@@ -8,7 +8,10 @@ from pathlib import Path
 
 import numpy as np
 from matplotlib import colormaps, rc_context
+from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.colors import to_rgb
+from matplotlib.container import BarContainer
 from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter
 
@@ -28,7 +31,6 @@ DEFAULT_THRESHOLDS = (0.5, 0.9)
 CATEGORY_LABELS = ("Token-specific", "Lexical", "Semantic", "Uninterpretable")
 CATEGORY_COLORS = ("#E2E8F0", "#F5C98B", "#059669", "#94A3B8")
 CATEGORY_HATCHES = (None, None, None, "///")
-CATEGORY_TEXT_COLORS = ("#0F172A", "#0F172A", "#FFFFFF", "#FFFFFF")
 
 
 @dataclass(frozen=True)
@@ -190,6 +192,36 @@ def save_figure(figure: Figure, path: Path) -> None:
     )
 
 
+def add_bar_labels(
+    axis: Axes,
+    bars: BarContainer,
+    labels: list[str],
+    color: str | np.ndarray,
+    minimum_height: float = 0.0,
+) -> None:
+    text_color = (
+        "#0F172A"
+        if np.dot(to_rgb(color), (0.299, 0.587, 0.114)) > 0.55
+        else "#FFFFFF"
+    )
+    for bar, label in zip(bars, labels):
+        fits_inside = bar.get_height() >= minimum_height
+        axis.text(
+            bar.get_x() + bar.get_width() / 2,
+            (
+                bar.get_y() + bar.get_height() / 2
+                if fits_inside
+                else bar.get_y() + bar.get_height() + minimum_height / 4
+            ),
+            label,
+            color=text_color if fits_inside else "#0F172A",
+            fontsize=10,
+            alpha=0.72,
+            ha="center",
+            va="center" if fits_inside else "bottom",
+        )
+
+
 def save_category_plot(saes: list[SAEData], path: Path) -> None:
     names = [sae.name for sae in saes]
     values = np.vstack([percentages(sae.category_counts) for sae in saes])
@@ -203,12 +235,11 @@ def save_category_plot(saes: list[SAEData], path: Path) -> None:
         axis = figure.subplots()
         left = np.zeros(len(saes))
         legend_bars = []
-        for index, (label, color, hatch, text_color) in enumerate(
+        for index, (label, color, hatch) in enumerate(
             zip(
                 CATEGORY_LABELS,
                 CATEGORY_COLORS,
                 CATEGORY_HATCHES,
-                CATEGORY_TEXT_COLORS,
             )
         ):
             segment = values[:, index]
@@ -224,17 +255,12 @@ def save_category_plot(saes: list[SAEData], path: Path) -> None:
                 linewidth=0,
             )
             legend_bars.append(bars)
-            for bar, value in zip(bars, segment):
-                axis.text(
-                    bar.get_x() + bar.get_width() / 2,
-                    bar.get_y() + bar.get_height() / 2,
-                    format_percentage(value),
-                    color=text_color,
-                    fontsize=10,
-                    alpha=0.72,
-                    ha="center",
-                    va="center",
-                )
+            add_bar_labels(
+                axis,
+                bars,
+                [format_percentage(value) for value in segment],
+                color,
+            )
             left += segment
 
         axis.set_title("Feature categories", loc="left", pad=42)
@@ -277,7 +303,19 @@ def save_reconstruction_plot(saes: list[SAEData], path: Path) -> None:
         FigureCanvasAgg(figure)
         axis = figure.subplots()
         legend_bars = []
-        maximum = 1.0
+        maximum = max(
+            1.0,
+            *(
+                value
+                for sae in saes
+                for value in (
+                    sae.reconstruction_mse,
+                    sae.explained_variance,
+                    sae.downstream_kl,
+                )
+                if value is not None
+            ),
+        )
         for index, (sae, color) in enumerate(zip(saes, colors)):
             values = (
                 sae.reconstruction_mse,
@@ -299,11 +337,10 @@ def save_reconstruction_plot(saes: list[SAEData], path: Path) -> None:
                 else f"{value:.2g}"
                 for metric_index, value in enumerate(values)
             ]
-            axis.bar_label(bars, labels=value_labels, padding=4)
-            legend_bars.append(bars)
-            maximum = max(
-                maximum, *(value for value in values if value is not None)
+            add_bar_labels(
+                axis, bars, value_labels, color, minimum_height=0.04 * maximum
             )
+            legend_bars.append(bars)
 
         axis.set_title("Final validation quality", loc="left", pad=42)
         axis.set_ylabel("Metric value")
@@ -325,15 +362,9 @@ def save_reconstruction_plot(saes: list[SAEData], path: Path) -> None:
     save_figure(figure, path)
 
 
-def mean_confidence_interval(scores: np.ndarray) -> tuple[float, float, float]:
-    mean = float(scores.mean())
-    margin = 1.96 * float(scores.std(ddof=1) / np.sqrt(len(scores)))
-    lower = max(0, mean - margin)
-    upper = min(1, mean + margin)
-    return mean, mean - lower, upper - mean
-
-
-def save_score_plot(saes: list[SAEData], path: Path) -> None:
+def save_score_plot(
+    saes: list[SAEData], path: Path, threshold: float
+) -> None:
     positions = np.arange(len(SCORE_GROUPS))
     bar_width = 0.8 / len(saes)
     color_positions = np.linspace(0, 1, len(saes) + 2)[1:-1]
@@ -347,35 +378,35 @@ def save_score_plot(saes: list[SAEData], path: Path) -> None:
         FigureCanvasAgg(figure)
         axis = figure.subplots()
         legend_bars = []
-        upper_limits = []
+        maximum = 0.0
         for index, (sae, color) in enumerate(zip(saes, colors)):
-            statistics = [
-                mean_confidence_interval(sae.scores[category])
+            values = [
+                100 * np.count_nonzero(sae.scores[category] > threshold)
+                / len(sae.scores[category])
                 for category, _ in SCORE_GROUPS
             ]
-            means = [mean for mean, _, _ in statistics]
-            errors = np.asarray(
-                [
-                    [lower for _, lower, _ in statistics],
-                    [upper for _, _, upper in statistics],
-                ]
-            )
-            upper_limits.extend(np.asarray(means) + errors[1])
+            maximum = max(maximum, *values)
             bars = axis.bar(
                 positions - 0.4 + bar_width / 2 + index * bar_width,
-                means,
+                values,
                 width=bar_width,
                 color=color,
                 label=sae.name,
-                yerr=errors,
-                capsize=3,
-                error_kw={"elinewidth": 1.2, "capthick": 1.2},
+            )
+            add_bar_labels(
+                axis,
+                bars,
+                [format_percentage(value) for value in values],
+                color,
             )
             legend_bars.append(bars)
 
-        axis.set_title("Mean feature quality score", loc="left", pad=42)
-        axis.set_ylabel("Mean score")
-        axis.set_ylim(0, min(1, max(upper_limits) * 1.2))
+        axis.set_title(
+            f"Features with quality score > {threshold:g}", loc="left", pad=42
+        )
+        axis.set_ylabel("Successfully scored features")
+        axis.set_ylim(0, 50 if maximum <= 50 else 100)
+        axis.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:g}%"))
         axis.set_xticks(positions, [label for _, label in SCORE_GROUPS])
         axis.grid(axis="x", visible=False)
         axis.tick_params(which="both", length=0)
@@ -424,7 +455,9 @@ def main() -> None:
     saes = [load_sae(path) for path in args.sae_dirs]
     args.output_dir.mkdir(parents=True, exist_ok=True)
     save_category_plot(saes, args.output_dir / "feature_categories.png")
-    save_score_plot(saes, args.output_dir / "feature_score_bars.png")
+    save_score_plot(
+        saes, args.output_dir / "feature_score_bars.png", thresholds[1]
+    )
     save_reconstruction_plot(saes, args.output_dir / "reconstruction_quality.png")
 
     report = [
@@ -448,8 +481,8 @@ def main() -> None:
         "",
         "## Feature score comparison",
         "",
-        "Bars show the mean of successfully scored features; whiskers show 95% "
-        "confidence intervals for the mean.",
+        f"Bars show the percentage of successfully scored features with a score "
+        f"above {thresholds[1]:g}.",
         "",
         "![Feature score comparison](feature_score_bars.png)",
         "",
