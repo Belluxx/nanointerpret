@@ -16,7 +16,7 @@
 - `dead_window`: Number of tokens a feature can go without firing before it becomes dead and eligible for AuxK. The default is 10M tokens.
 - `model_batch_size`: contexts processed by the language model together. The default is `32`.
 - `sae_batch_size`: residual-stream token vectors count. The default is `4096`; this is an optimization batch, not just a data-loading setting. OpenAI used much larger batches for parallelism but the converged loss was not strongly batch-dependent. [1]
-- `max_activation_l2`: Optional raw residual-stream L2 cutoff (`--max-activation-l2`). Use `auto` to automatically detect the threshold. This was necessary only for Qwen models (so far) because they tend to have extremely high activations for the first token.
+- `passthrough_massive_dims`: Residual dimensions with a std over 15x the median one are passed through, so the SAE ignores them (`--no-passthrough-massive-dims` to disable). Needed for both Qwen and Gemma because a few dimensions have extremely large activations ([details](experiments.md#passing-through-massive-activation-dimensions)).
 - `learning_rate`: By default it is automatically calculated with `3e-4 * sqrt(32768 / d_sae)`. It s a good heuristic based on initial experiments and OpenAI research. [1]
 
 ## Methodology
@@ -24,7 +24,7 @@
 - This project combines Anthropic's activation setup [2] with Gao et al.'s Top-K SAE [1].
 - By default, training streams activations into the SAE, without writing a residual cache, and keeps the LLM loaded. `--cache-activations` stores them as fp16 by default. Pass `--residual-cache-format int8` to use about half the space. Caching activations is very useful when doing ablation tests, as you avoid recalculating the same activations for each test.
 - On MPS, LLM layers are compiled for faster activations extraction. Pass `--no-compile-model` to disable it.
-- By default, activations come from the input to the middle transformer layer. A single scale is applied so their average squared L2 norm equals the residual width. [2]
+- By default, activations come from the input to the middle transformer layer. A single scale is applied so their average squared L2 norm equals the SAE input width (residual width minus pass-through dims). [2]
 - The SAE uses Top-K sparsification, tied encoder/decoder initialization, a shared geometric-median bias, unit-norm decoder directions, and AuxK. AuxK helps revive features that have not fired after many tokens. [1]
 - Gradient clipping is disabled by default after [experiments found no benefit](experiments.md#gradient-clipping-is-unnecessary).
 - Periodic evaluation measures mean `KL(base_logits || sae_logits)`. Lower KL is the primary model-preservation metric and logged in `evaluation_metrics.jsonl`.

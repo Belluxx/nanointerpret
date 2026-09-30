@@ -28,94 +28,43 @@ from .sae import (
 )
 
 DOWNSTREAM_KL_TOKENS = 1_000_000
-AUTO_L2_SAMPLE_TOKENS = 100_000
-AUTO_L2_MAX_OUTLIER_FRACTION = 0.02
-AUTO_L2_MIN_GAP_RATIO = 2.0
+# Dimensions whose std exceeds this multiple of the median dimension's std are
+# "massive activations" (attention-sink channels) and bypass the SAE unchanged.
+PASSTHROUGH_STD_RATIO = 15.0
 
 
 def default_aux_k(d_model: int) -> int:
     return 1 << round(math.log2(d_model / 2))
 
 
-def raw_l2_activation_mask(residual: Tensor, max_activation_l2: float | None) -> Tensor:
-    # Return which raw residual vectors are eligible for SAE consumption.
-    if max_activation_l2 is None:
-        return torch.ones(residual.shape[:-1], dtype=torch.bool, device=residual.device)
-    return torch.linalg.vector_norm(residual.float(), dim=-1) <= max_activation_l2
-
-
-def filter_raw_l2_activations(
-    residual: Tensor, max_activation_l2: float | None
+def sae_dim_mask(
+    d_model: int, passthrough_dims: list[int], device: torch.device
 ) -> Tensor:
-    # Drop raw residual vectors above the L2 threshold
-    if max_activation_l2 is None:
+    keep = torch.ones(d_model, dtype=torch.bool, device=device)
+    keep[passthrough_dims] = False
+    return keep
+
+
+def sae_input(residual: Tensor, passthrough_dims: list[int]) -> Tensor:
+    # Drop pass-through dimensions from a (tokens, d_model) residual batch.
+    if not passthrough_dims:
         return residual
-    return residual[raw_l2_activation_mask(residual, max_activation_l2)]
+    return residual[:, sae_dim_mask(residual.shape[-1], passthrough_dims, residual.device)]
 
 
 @torch.inference_mode()
-def estimate_auto_activation_l2(train_batches) -> float | None:
-    norms = []
-    sampled_tokens = 0
-    for residual in train_batches(skip_batches=0):
-        take = min(len(residual), AUTO_L2_SAMPLE_TOKENS - sampled_tokens)
-        norms.append(
-            torch.linalg.vector_norm(residual[:take].float(), dim=-1).cpu()
-        )
-        sampled_tokens += take
-        if sampled_tokens >= AUTO_L2_SAMPLE_TOKENS:
-            break
-
-    if sampled_tokens < 2:
-        print("Auto activation L2 cutoff: insufficient activations; disabled")
-        return None
-
-    sorted_norms = torch.sort(torch.cat(norms)).values
-    outlier_count = max(
-        1, math.ceil(len(sorted_norms) * AUTO_L2_MAX_OUTLIER_FRACTION)
-    )
-    upper_tail = sorted_norms[-outlier_count - 1 :]
-    gap_ratios = upper_tail[1:] / upper_tail[:-1].clamp_min(
-        torch.finfo(upper_tail.dtype).tiny
-    )
-    gap_index = int(gap_ratios.argmax())
-    gap_ratio = float(gap_ratios[gap_index])
-    if not math.isfinite(gap_ratio) or gap_ratio < AUTO_L2_MIN_GAP_RATIO:
-        print("Auto activation L2 cutoff: no separated outlier cluster; disabled")
-        return None
-
-    lower_bound = float(upper_tail[gap_index])
-    upper_bound = float(upper_tail[gap_index + 1])
-    cutoff = math.sqrt(lower_bound * upper_bound)
-    retained = 100.0 * float((sorted_norms <= cutoff).float().mean())
-    print(
-        f"Auto activation L2 cutoff: {cutoff:.6g} "
-        f"(gap {lower_bound:.6g}-{upper_bound:.6g}, retains {retained:.2f}%)"
-    )
-    return cutoff
-
-
-@torch.inference_mode()
-def reconstruct_sae_eligible_activations(
+def reconstruct_residual(
     residual: Tensor,
     sae: TopKSAE,
     activation_scale: float,
-    max_activation_l2: float | None,
+    passthrough_dims: list[int],
 ) -> Tensor:
-    keep = raw_l2_activation_mask(residual, max_activation_l2)
-    if not bool(keep.any()):
-        return residual
-
+    # Replace the SAE-owned dimensions with their reconstruction; keep the rest.
     flat = residual.reshape(-1, residual.shape[-1])
-    flat_keep = keep.reshape(-1)
-    normalized = flat[flat_keep].float() * activation_scale
-    reconstruction = sae(normalized)[0] / activation_scale
-
-    if bool(flat_keep.all()):
-        return reconstruction.to(residual.dtype).reshape_as(residual)
-
+    keep = sae_dim_mask(flat.shape[-1], passthrough_dims, flat.device)
+    reconstruction = sae(flat[:, keep].float() * activation_scale)[0] / activation_scale
     output = flat.clone()
-    output[flat_keep] = reconstruction.to(flat.dtype)
+    output[:, keep] = reconstruction.to(flat.dtype)
     return output.reshape_as(residual)
 
 
@@ -139,7 +88,7 @@ class ExperimentConfig:
     seed: int
     model_dtype: str
     residual_cache_format: str | None
-    max_activation_l2: float | None = None
+    passthrough_dims: list[int]
     normalization_tokens: int = 0
     activation_scale: float = 1.0
     subtract_pre_bias: bool = True
@@ -472,49 +421,58 @@ def optimize_residual_batch(
 
 
 @torch.inference_mode()
-def estimate_activation_normalization(
+def calibrate_activations(
     train_batches,
     train_token_count: int,
-    d_model: int,
     device: torch.device,
     normalization_tokens: int,
     subtract_pre_bias: bool,
-    max_activation_l2: float | None,
-) -> tuple[float, Tensor | None]:
+    detect_passthrough: bool,
+) -> tuple[list[int], float, Tensor | None]:
+    # One pass: pick pass-through dims, then scale the rest so their mean
+    # squared norm equals their width, and seed the pre-bias.
     target_tokens = min(normalization_tokens, train_token_count)
     tokens_seen = 0
-    squared_norm_sum = 0.0
-    pre_bias = None
+    dim_sum = dim_sq_sum = first_batch = None
     progress = tqdm(
         total=target_tokens,
         unit="tok",
-        desc="Calibrate activation scale",
+        desc="Calibrate activations",
         leave=False,
         dynamic_ncols=True,
     )
     for residual in train_batches(skip_batches=0):
-        residual = filter_raw_l2_activations(residual, max_activation_l2)
-        if len(residual) == 0:
-            continue
-        residual = residual.to(device=device, dtype=torch.float32)
-        take = min(len(residual), target_tokens - tokens_seen)
-        calibration_residual = residual[:take]
-        if subtract_pre_bias and pre_bias is None:
-            pre_bias = geometric_median(calibration_residual)
-        squared_norm_sum += calibration_residual.square().sum().item()
-        tokens_seen += take
-        progress.update(take)
+        residual = residual[: target_tokens - tokens_seen]
+        if first_batch is None:
+            first_batch = residual.to(device=device, dtype=torch.float32)
+        # Float64 avoids cancellation on dims with large constant offsets.
+        residual = residual.to(device="cpu", dtype=torch.float64)
+        batch_sum, batch_sq_sum = residual.sum(dim=0), residual.square().sum(dim=0)
+        dim_sum = batch_sum if dim_sum is None else dim_sum + batch_sum
+        dim_sq_sum = batch_sq_sum if dim_sq_sum is None else dim_sq_sum + batch_sq_sum
+        tokens_seen += len(residual)
+        progress.update(len(residual))
         if tokens_seen >= target_tokens:
             break
     progress.close()
-    if tokens_seen == 0:
-        raise ValueError("raw-L2 activation filter rejected every normalization token")
 
-    mean_squared_norm = squared_norm_sum / tokens_seen
-    scale = math.sqrt(d_model / mean_squared_norm)
-    if pre_bias is not None:
-        pre_bias.mul_(scale)
-    return scale, pre_bias
+    dim_std = (dim_sq_sum / tokens_seen - (dim_sum / tokens_seen).square()).sqrt()
+    passthrough_dims = []
+    if detect_passthrough:
+        std_ratio = dim_std / dim_std.median()
+        passthrough_dims = torch.nonzero(std_ratio > PASSTHROUGH_STD_RATIO).flatten().tolist()
+        print(
+            f"Pass-through dims: {passthrough_dims or 'none'}"
+            + "".join(f" | {dim}: {std_ratio[dim]:.0f}x median std" for dim in passthrough_dims)
+        )
+
+    keep = sae_dim_mask(len(dim_std), passthrough_dims, torch.device("cpu"))
+    mean_squared_norm = float(dim_sq_sum[keep].sum()) / tokens_seen
+    scale = math.sqrt(int(keep.sum()) / mean_squared_norm)
+    pre_bias = None
+    if subtract_pre_bias:
+        pre_bias = geometric_median(sae_input(first_batch, passthrough_dims)).mul_(scale)
+    return passthrough_dims, scale, pre_bias
 
 
 @torch.inference_mode()
@@ -527,7 +485,7 @@ def evaluate_downstream_kl(
     device: torch.device,
     context_size: int,
     activation_scale: float,
-    max_activation_l2: float | None,
+    passthrough_dims: list[int],
 ) -> dict:
     validation_subset = validation_tokens[:DOWNSTREAM_KL_TOKENS]
     kl_sum = 0.0
@@ -543,11 +501,8 @@ def evaluate_downstream_kl(
 
     def reconstruct_layer_input(_module, args, kwargs):
         hidden = args[0] if args else kwargs["hidden_states"]
-        reconstruction = reconstruct_sae_eligible_activations(
-            hidden,
-            sae,
-            activation_scale,
-            max_activation_l2,
+        reconstruction = reconstruct_residual(
+            hidden, sae, activation_scale, passthrough_dims
         )
         if args:
             return (reconstruction, *args[1:]), kwargs
@@ -616,7 +571,7 @@ def train_sae(
     log_every: int,
     checkpoint_every: int,
     validate_every: int,
-    downstream_kl_evaluator: Callable[[TopKSAE, float], dict],
+    downstream_kl_evaluator: Callable[[TopKSAE, ExperimentConfig], dict],
 ) -> dict:
     optimizer = torch.optim.Adam(sae.parameters(), lr=config.learning_rate)
     checkpoint_path = output_dir / "checkpoint_latest.pt"
@@ -668,7 +623,7 @@ def train_sae(
             device,
             config,
         )
-        evaluation.update(downstream_kl_evaluator(sae, config.activation_scale))
+        evaluation.update(downstream_kl_evaluator(sae, config))
         if evaluation["downstream_kl"] < best_downstream_kl:
             best_downstream_kl = float(evaluation["downstream_kl"])
             save_checkpoint(
@@ -718,10 +673,8 @@ def train_sae(
     for residual in train_batches(skip_batches=state.processed_batches):
         batch_index = state.processed_batches
         state.processed_batches += 1
-        residual = filter_raw_l2_activations(residual, config.max_activation_l2)
-        if len(residual) == 0:
-            continue
         residual = residual.to(device=device, dtype=torch.float32)
+        residual = sae_input(residual, config.passthrough_dims)
         residual.mul_(config.activation_scale)
         batch_tokens = len(residual)
         torch.manual_seed(config.seed + batch_index)
@@ -814,10 +767,8 @@ def evaluate_sae(
     )
     evaluated_tokens = 0
     for residual in validation_batches(skip_batches=0):
-        residual = filter_raw_l2_activations(residual, config.max_activation_l2)
-        if len(residual) == 0:
-            continue
         residual = residual.to(device=device, dtype=torch.float32)
+        residual = sae_input(residual, config.passthrough_dims)
         residual.mul_(config.activation_scale)
         batch_tokens = len(residual)
         evaluated_tokens += batch_tokens
@@ -827,8 +778,6 @@ def evaluate_sae(
             metrics.update(x, reconstruction, indices, values)
         progress.update(batch_tokens)
     progress.close()
-    if evaluated_tokens == 0:
-        raise ValueError("raw-L2 activation filter rejected every validation token")
 
     fire_counts = metrics.feature_fire_counts
     result = {

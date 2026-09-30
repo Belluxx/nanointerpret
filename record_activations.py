@@ -20,7 +20,7 @@ from src.data import (
 from src.experiment import (
     capture_layer_input,
     find_transformer_layers,
-    raw_l2_activation_mask,
+    sae_input,
 )
 from src.runtime import choose_device, load_causal_lm, load_tokenizer
 from src.sae import FIRING_THRESHOLD, TopKSAE, load_sae
@@ -69,24 +69,15 @@ def encode_activations(
     sae: TopKSAE,
     residuals: Tensor,
     activation_scale: float,
-    max_activation_l2: float | None,
+    passthrough_dims: list[int],
     batch_size: int,
     feature_dtype: np.dtype,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    keep = raw_l2_activation_mask(residuals, max_activation_l2)
-    filtered = residuals[keep]
-    counts = np.zeros(len(residuals), dtype=np.uint32)
-    if len(filtered) == 0:
-        return (
-            counts,
-            np.empty(0, dtype=feature_dtype),
-            np.empty(0, dtype=ACTIVATION_VALUE_DTYPE),
-        )
-
+    residuals = sae_input(residuals, passthrough_dims)
     indices = []
     values = []
-    for start in range(0, len(filtered), batch_size):
-        x = filtered[start : start + batch_size].float()
+    for start in range(0, len(residuals), batch_size):
+        x = residuals[start : start + batch_size].float()
         x.mul_(activation_scale)
         batch_indices, batch_values = sae.encode(x)
         indices.append(batch_indices.cpu())
@@ -94,8 +85,7 @@ def encode_activations(
     indices = torch.cat(indices)
     values = torch.cat(values)
     firing = values > FIRING_THRESHOLD
-    filtered_counts = firing.sum(dim=1).numpy().astype(np.uint32, copy=False)
-    counts[keep.cpu().numpy()] = filtered_counts
+    counts = firing.sum(dim=1).numpy().astype(np.uint32, copy=False)
     feature_ids = indices[firing].numpy().astype(feature_dtype, copy=False)
     active_values = values[firing].numpy().astype(
         ACTIVATION_VALUE_DTYPE, copy=False
@@ -121,7 +111,7 @@ def write_activations(
         "model_id": config["model_id"],
         "context_size": context_size,
         "layer_index": int(config["layer_index"]),
-        "max_activation_l2": config["max_activation_l2"],
+        "passthrough_dims": config["passthrough_dims"],
     }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -175,7 +165,7 @@ def write_activations(
                     sae,
                     residuals,
                     float(config["activation_scale"]),
-                    config["max_activation_l2"],
+                    config["passthrough_dims"],
                     int(config["sae_batch_size"]),
                     feature_dtype,
                 )

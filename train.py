@@ -21,11 +21,10 @@ from src.data import (
 )
 from src.experiment import (
     ExperimentConfig,
+    calibrate_activations,
     capture_residual_cache,
     compile_transformer_prefix,
     default_aux_k,
-    estimate_auto_activation_l2,
-    estimate_activation_normalization,
     evaluate_downstream_kl,
     find_transformer_layers,
     format_metrics_line,
@@ -39,15 +38,6 @@ from src.sae import TopKSAE
 MODEL_ID = "google/gemma-3-270m"
 DATASET_ID = "HuggingFaceFW/fineweb-edu"
 DATASET_CONFIG = "sample-10BT"
-
-
-def activation_l2_cutoff(value: str) -> float | str:
-    if value == "auto":
-        return value
-    try:
-        return float(value)
-    except ValueError as error:
-        raise argparse.ArgumentTypeError("must be a number or 'auto'") from error
 
 
 def parse_args() -> argparse.Namespace:
@@ -64,7 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recording-tokens", type=int, default=10_000_000, help="Dedicated token split for recording feature activations. Default: 10000000.")
     parser.add_argument("--model-batch-size", type=int, default=32, help="Contexts processed together; lower this if memory is limited.")
     parser.add_argument("--normalization-tokens", type=int, default=1_000_000, help="Training-token sample used to estimate one global activation scale.")
-    parser.add_argument("--max-activation-l2", type=activation_l2_cutoff, default=None, metavar="NORM|auto", help="Exclude residual activations whose raw pre-normalization L2 norm exceeds NORM. Use 'auto' to detect a separated upper-tail outlier cluster.")
+    parser.add_argument("--no-passthrough-massive-dims", action="store_false", dest="passthrough_massive_dims", help="Let the SAE model every residual dimension, including massive-activation dims whose std is far above the rest.")
     parser.add_argument("--width-multiplier", type=int, default=16, help="SAE feature count as a multiple of the model residual width. Default: 16.")
     parser.add_argument("--k", type=int, default=16, help="Maximum number of SAE features active for each token. Default: 16.")
     parser.add_argument("--aux-k", type=int, default=None, help="Dead latents used by AuxK. Default: nearest power of two to d_model / 2.")
@@ -210,8 +200,7 @@ def run_training(
         config_path = args.output_dir / "config.json"
         saved_config = json.loads(config_path.read_text())
         activation_scale = float(saved_config["activation_scale"])
-        if args.max_activation_l2 == "auto":
-            args.max_activation_l2 = saved_config["max_activation_l2"]
+        passthrough_dims = saved_config["passthrough_dims"]
         initial_pre_bias = None
         print(
             f"reusing activation scale {activation_scale:.8g} "
@@ -227,16 +216,13 @@ def run_training(
                 f"{checkpoint_path} already exists; pass --resume or choose another "
                 "--output-dir"
             )
-        if args.max_activation_l2 == "auto":
-            args.max_activation_l2 = estimate_auto_activation_l2(train_batches)
-        activation_scale, initial_pre_bias = estimate_activation_normalization(
+        passthrough_dims, activation_scale, initial_pre_bias = calibrate_activations(
             train_batches,
             args.train_tokens,
-            d_model,
             device,
             args.normalization_tokens,
             args.subtract_pre_bias,
-            args.max_activation_l2,
+            args.passthrough_massive_dims,
         )
     config = ExperimentConfig(
         model_id=args.model_id,
@@ -264,10 +250,10 @@ def run_training(
         residual_cache_format=(
             args.residual_cache_format if args.cache_activations else None
         ),
-        max_activation_l2=args.max_activation_l2,
+        passthrough_dims=passthrough_dims,
     )
     sae = TopKSAE(
-        d_model,
+        d_model - len(passthrough_dims),
         d_sae,
         args.k,
         device,
@@ -328,7 +314,7 @@ def main() -> None:
             seed=args.seed,
         )
 
-        def downstream_kl_evaluator(sae: TopKSAE, activation_scale: float) -> dict:
+        def downstream_kl_evaluator(sae: TopKSAE, config: ExperimentConfig) -> dict:
             return evaluate_downstream_kl(
                 sae,
                 model,
@@ -337,8 +323,8 @@ def main() -> None:
                 tokenizer.pad_token_id,
                 device,
                 args.context_size,
-                activation_scale,
-                args.max_activation_l2,
+                config.activation_scale,
+                config.passthrough_dims,
             )
 
         run_training(
@@ -389,7 +375,7 @@ def main() -> None:
         kl_validation_path, mode="r", dtype=np.uint32
     )
 
-    def downstream_kl_evaluator(sae: TopKSAE, activation_scale: float) -> dict:
+    def downstream_kl_evaluator(sae: TopKSAE, config: ExperimentConfig) -> dict:
         model = load_causal_lm(args.model_id, model_dtype, device)
         try:
             _, layers = find_transformer_layers(model)
@@ -401,8 +387,8 @@ def main() -> None:
                 kl_tokenizer.pad_token_id,
                 device,
                 args.context_size,
-                activation_scale,
-                args.max_activation_l2,
+                config.activation_scale,
+                config.passthrough_dims,
             )
         finally:
             del model

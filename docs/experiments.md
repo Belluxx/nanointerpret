@@ -72,12 +72,12 @@ python3 train.py --cache-activations --train-tokens 300000000 --checkpoint-every
 | ✓ (1) | 0.002335 | 99.442% | 0.127% | 65k tokens/s |
 | ✗ | **0.002327** | **99.444%** | **0.107%** | **91k tokens/s (+40%)** |
 
-## Fixing Qwen first-token activation outliers
+## Passing through massive-activation dimensions
 
-Qwen tends to have extremely large residual-stream activations at the first sequence token ([paper](https://arxiv.org/pdf/2605.11887), bottom of page 2).
+Both Qwen and Gemma have a few residual-stream dimensions with extremely large activations. In Qwen they spike at the first token of every context ([paper](https://arxiv.org/pdf/2605.11887), bottom of page 2), in Gemma at BOS and some punctuation.
 
-To prevent them from dominating SAE normalization / training, a raw L2-norm filter was added. Use `--max-activation-l2 auto` to detect the separated outlier cluster, or provide your numeric cutoff. Note that the cutoff is model and layer specific.
+They carry very little information (basically how much a token acts as an attention sink), but they dominate SAE normalization / training and inflate the metrics. In Gemma 3 270M a single dimension holds 96% of the variance, so explained variance looks great even when the SAE is not.
 
-![Residual-stream activation L2 distributions for Qwen and Gemma](../assets/plots/activation_l2_distributions.png)
+To fix this, dimensions whose std is more than 15x the median dimension std are passed through: the SAE ignores them and they keep their original value when the reconstruction is fed back into the model. It adapts to each model automatically and it's on by default, use `--no-passthrough-massive-dims` to disable it.
 
-Gemma 3 270M also has very large residual-stream activations, however they occur over tokens like BOS and punctuation. So they are more complex and potentially meaningful, unlike Qwen's case. I would not recommend L2 filtering for Gemma by default but feel free to test it.
+![Massive-activation dimensions and token norms for Gemma and Qwen](../assets/plots/massive_activation_dims.png)
