@@ -4,7 +4,6 @@
 
 - Lowering `K` from `32` to `16` improves interpretability (but costs reconstruction accuracy). Increasing SAE width from `16x` to `32x` sometimes separates fused concepts better, but needs more data and (in Gemma 270M) doesn't fix its poor text understanding due to its tiny size. It also significantly increases duplicate features.
 - A later-layer Gemma run produced more abstract features, but they became incoherent already at medium activation levels. It's important to check the whole activation distribution.
-- Local models are quite good at interpreting features. Gemma 4 26B MoE interpretations were comparable to (or even better than) GPT 5.6 Terra, making local interpretation very practical and much cheaper if you can wait for longer (see [here](experiments.md#finding-the-best-model-for-interpreting-features-locally)).
 - FineWeb-Edu was a poor choice, features seemed to encode the dataset's educational style. For example, an apparently general fire-related feature steered the model toward educational fire-themed completions. This is evident for many features in both Gemma3 270M and Qwen3 1.7B.
 
 Hardware: M4 Max Mac Studio (CPU 16C, GPU 40C, 64GB RAM)
@@ -82,20 +81,3 @@ To prevent them from dominating SAE normalization / training, a raw L2-norm filt
 ![Residual-stream activation L2 distributions for Qwen and Gemma](../assets/plots/activation_l2_distributions.png)
 
 Gemma 3 270M also has very large residual-stream activations, however they occur over tokens like BOS and punctuation. So they are more complex and potentially meaningful, unlike Qwen's case. I would not recommend L2 filtering for Gemma by default but feel free to test it.
-
-## Finding the best model for interpeting features locally
-
-For interpreting features (interpret_features.py) `gemma-4-26b-a4b-it` was the best model available locally, beating even `openai/gpt-5.6-terra`. Obviously remote API models have virtually infinite parallelization and can be almost instant compared to using Gemma (around 2.2 features/s on an M4 Max mac Studio, so around 20h for 32k features).
-
-| Model | Title similarity (to Sol) | Category agreement (to Sol) | Total time |
-|---|---:|---:|---:|
-| `gemma-4-26b-a4b` (unsloth Q4K_XL) | **0.76** | **71%** | 255 s |
-| `qwen3.6-35b-a3b-mlx` (unsloth 4bit) | 0.73 | 60% | 176 s |
-| `gpt-5.6-terra` (openrouter) | 0.73 | 56% | - |
-| `gpt-5.6-luna` (openrouter) | 0.72 | 54% | - |
-| `gemma-4-e4b` (unsloth Q4K_XL) | 0.70 | 63% | 183 s |
-| `gemma-4-e2b` (unsloth Q4K_XL) | 0.67 | 44% | 89 s |
-
-The models interpreted feature IDs 0-99 from
-`qwen3_1.7b_l14_w16_k16_500m`. The reference ground truth interpretations are from
-`openai/gpt-5.6-sol`.

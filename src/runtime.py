@@ -9,8 +9,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 ATTENTION_IMPLEMENTATION = "sdpa"
 
 
-def load_tokenizer(model_id: str, tokenizer=None):
-    tokenizer = tokenizer or AutoTokenizer.from_pretrained(model_id)
+def load_tokenizer(model_id: str):
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     return tokenizer

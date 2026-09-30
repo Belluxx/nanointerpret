@@ -19,10 +19,6 @@ RESIDUAL_INT8_GROUP_SIZE = 128
 ACTIVATION_VALUE_DTYPE = np.float16
 TRANSPOSE_TOKENS = 1_000_000
 TOKEN_CACHE_BATCH_CHARS = 32 << 20
-INSUFFICIENT_TITLE = "Insufficient activation data"
-UNCLEAR_TITLE = "No coherent interpretation"
-FEATURE_CATEGORIES = ("token-specific", "lexical", "semantic")
-INTERPRETATIONS_FILENAME = "feature_interpretations.jsonl"
 
 
 @dataclass(frozen=True)
@@ -48,78 +44,6 @@ class ResidualCacheSpec:
     activation_layer: int | None
     model_dtype: str
     cache_format: str
-
-
-@dataclass(frozen=True)
-class FeatureActivations:
-    metadata: dict
-    token_ids: np.ndarray
-    feature_ptr: np.ndarray
-    token_positions: np.ndarray
-    values: np.ndarray
-    feature_max: np.ndarray
-
-
-def load_activations(path: Path) -> FeatureActivations:
-    metadata = json.loads((path / "metadata.json").read_text())
-
-    def load(name: str) -> np.ndarray:
-        return np.load(path / f"{name}.npy", mmap_mode="r")
-
-    return FeatureActivations(
-        metadata=metadata,
-        token_ids=load("token_ids"),
-        feature_ptr=load("feature_ptr"),
-        token_positions=load("token_positions"),
-        values=load("values"),
-        feature_max=load("feature_max"),
-    )
-
-
-def validate_interpretation(
-    title: object,
-    category: object,
-) -> tuple[str, str | None]:
-    if not isinstance(title, str) or not title.strip():
-        raise TypeError("feature title must be a non-empty string")
-
-    title = title.strip()
-    if title in (INSUFFICIENT_TITLE, UNCLEAR_TITLE):
-        if category is not None:
-            raise ValueError("an uninterpretable feature must have a null category")
-    elif not isinstance(category, str) or category not in FEATURE_CATEGORIES:
-        raise ValueError(
-            f"feature category must be one of {', '.join(FEATURE_CATEGORIES)}"
-        )
-    return title, category
-
-
-def load_interpretations(
-    path: Path | None,
-) -> dict[int, dict[str, str | None]]:
-    if path is None:
-        return {}
-
-    interpretations = {}
-    with path.open(encoding="utf-8") as input_file:
-        for line_number, line in enumerate(input_file, start=1):
-            if not line.strip():
-                continue
-            try:
-                record = json.loads(line)
-                feature_id = int(record["feature_id"])
-                title, category = validate_interpretation(
-                    record["title"], record["category"]
-                )
-            except (KeyError, TypeError, ValueError) as error:
-                raise ValueError(
-                    f"invalid feature interpretation on line {line_number} of {path}"
-                ) from error
-            interpretations[feature_id] = {
-                "title": title,
-                "category": category,
-            }
-    return interpretations
 
 
 def save_activations(
