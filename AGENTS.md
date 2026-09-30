@@ -15,10 +15,6 @@ Minimal training and feature interpretability analysis of LLMs with sparse autoe
 - `src/runtime.py`: PyTorch device selection.
 - `src/sae.py`: Top-K SAE and running metrics.
 
-## Running scripts
-Run MPS-enabled scripts with the project interpreter outside the sandbox via approved host execution, e.g. `.venv/bin/python train.py --device mps`.
-Always run GPU-heavy commands/scripts synchronously, do not run them in the background
 ## Code style
-- VERY IMPORTANT: Avoid over-engineering, choose simplicity over complexity and avoid trying to cover every single edge case. Be precise where it matters, and keep the rest simple.
 - Completely ignore backward-compatibility, do not account for it.
 - When removing a component, functionality, abstraction, etc... ensure to cleanup leftovers
