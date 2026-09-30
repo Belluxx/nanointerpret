@@ -16,13 +16,15 @@ from src.data import (
     save_activations,
     token_cache_is_valid,
     token_cache_paths,
+    whole_contexts,
 )
-from src.experiment import (
+from src.experiment import sae_input
+from src.runtime import (
     capture_layer_input,
+    choose_device,
     find_transformer_layers,
-    sae_input,
+    load_causal_lm,
 )
-from src.runtime import choose_device, load_causal_lm, load_tokenizer
 from src.sae import FIRING_THRESHOLD, TopKSAE, load_sae
 
 
@@ -33,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Record SAE feature activations on the dedicated recording set.")
     parser.add_argument("--sae-dir", type=Path, required=True, help="Training output directory containing config.json and sae_final.pt.")
     parser.add_argument("--cache-dir", type=Path, default=CACHE_DIR, help="Token-cache directory populated during training. Default: artifacts/token_cache.")
-    parser.add_argument("--tokens", type=int, default=None, help="Exact number of recording tokens to process. Default: the full recording split.")
+    parser.add_argument("--tokens", type=int, default=None, help="Recording tokens to process, rounded down to whole contexts. Default: the full recording split.")
     parser.add_argument("--model-batch-size", type=int, default=None, help="Contexts processed together. Default: the training configuration.")
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
     parser.add_argument("--output", type=Path, default=None, help="Output directory. Default: <sae-dir>/activations.")
@@ -71,7 +73,6 @@ def encode_activations(
 @torch.inference_mode()
 def write_activations(
     output_path: Path,
-    pad_token_id: int,
     model,
     layer,
     sae: TopKSAE,
@@ -123,19 +124,10 @@ def write_activations(
             dynamic_ncols=True,
         ) as progress:
             batches = iter_context_batches(
-                recording_tokens,
-                context_size,
-                model_batch_size,
-                pad_token_id,
-                shuffle=False,
-                seed=0,
+                recording_tokens, context_size, model_batch_size, shuffle=False, seed=0
             )
-            for input_ids, attention_mask in batches:
-                device_input_ids = input_ids.to(device, non_blocking=True)
-                device_attention_mask = attention_mask.to(device, non_blocking=True)
-                residuals = capture_layer_input(
-                    model, layer, device_input_ids, device_attention_mask
-                )[device_attention_mask.bool()]
+            for input_ids in batches:
+                residuals = capture_layer_input(model, layer, input_ids.to(device)).flatten(0, 1)
                 counts, feature_ids, active_values = encode_activations(
                     sae,
                     residuals,
@@ -224,6 +216,7 @@ def main() -> None:
             f"--tokens requests {token_count:,} tokens, but the recording cache "
             f"contains {available_tokens:,}"
         )
+    token_count = whole_contexts(token_count, int(config["context_size"]))
     recording_tokens = np.memmap(
         recording_path, mode="r", dtype=np.uint32, shape=(available_tokens,)
     )[:token_count]
@@ -232,13 +225,12 @@ def main() -> None:
         raise FileExistsError(f"activation output already exists: {output_path}")
 
     device = choose_device(args.device)
-    tokenizer = load_tokenizer(config["model_id"])
     model = load_causal_lm(
         config["model_id"],
         getattr(torch, config["model_dtype"]),
         device,
     )
-    _, layers = find_transformer_layers(model)
+    layers = find_transformer_layers(model)
     layer_index = int(config["layer_index"])
     sae = load_sae(args.sae_dir, config, device)
     model_batch_size = args.model_batch_size or int(config["model_batch_size"])
@@ -248,7 +240,6 @@ def main() -> None:
     )
     write_activations(
         output_path,
-        tokenizer.pad_token_id,
         model,
         layers[layer_index],
         sae,

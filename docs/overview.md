@@ -22,7 +22,7 @@
 ## Methodology
 
 - This project combines Anthropic's activation setup [2] with Gao et al.'s Top-K SAE [1].
-- By default, training streams activations into the SAE, without writing a residual cache, and keeps the LLM loaded. `--cache-activations` stores them as fp16 by default. Pass `--residual-cache-format int8` to use about half the space. Caching activations is very useful when doing ablation tests, as you avoid recalculating the same activations for each test.
+- By default, training streams activations into the SAE, without writing a residual cache, and keeps the LLM loaded. `--cache-activations` stores them as fp16 instead (2 bytes per value, so about 140GB for 100M Gemma 270M tokens). Caching activations is very useful when doing ablation tests, as you avoid recalculating the same activations for each test.
 - On MPS, LLM layers are compiled for faster activations extraction. Pass `--no-compile-model` to disable it.
 - By default, activations come from the input to the middle transformer layer. A single scale is applied so their average squared L2 norm equals the SAE input width (residual width minus pass-through dims). [2]
 - The SAE uses Top-K sparsification, tied encoder/decoder initialization, a shared geometric-median bias, unit-norm decoder directions, and AuxK. AuxK helps revive features that have not fired after many tokens. [1]

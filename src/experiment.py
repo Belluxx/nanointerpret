@@ -17,9 +17,10 @@ from tqdm.auto import tqdm
 from .data import (
     RESIDUAL_FP16_SCALE,
     create_residual_cache,
-    encode_int8_residuals,
     iter_context_batches,
+    whole_contexts,
 )
+from .runtime import capture_layer_input
 from .sae import (
     FIRING_THRESHOLD,
     RunningMetrics,
@@ -87,7 +88,7 @@ class ExperimentConfig:
     sae_batch_size: int
     seed: int
     model_dtype: str
-    residual_cache_format: str | None
+    cache_activations: bool
     passthrough_dims: list[int]
     normalization_tokens: int
     activation_scale: float
@@ -101,58 +102,6 @@ class TrainingState:
     processed_tokens: int
     processed_batches: int
     last_fired: Tensor
-
-
-def find_transformer_layers(model: nn.Module) -> tuple[str, nn.ModuleList]:
-    candidates: list[tuple[str, nn.ModuleList]] = []
-    for name, module in model.named_modules():
-        if (
-            isinstance(module, nn.ModuleList)
-            and name.split(".")[-1] == "layers"
-            and len(module) > 1
-        ):
-            candidates.append((name, module))
-    if not candidates:
-        raise RuntimeError("could not locate the transformer's ModuleList named 'layers'")
-    return max(candidates, key=lambda item: len(item[1]))
-
-
-def compile_transformer_prefix(layers: nn.ModuleList, layer_index: int) -> None:
-    # Keep the capture layer eager so its forward pre-hook remains visible.
-    for index in range(layer_index):
-        layers[index] = torch.compile(layers[index], dynamic=False)
-
-
-class _ActivationCaptured(Exception):
-    pass
-
-
-@torch.no_grad()
-def capture_layer_input(
-    model: nn.Module,
-    layer: nn.Module,
-    input_ids: Tensor,
-    attention_mask: Tensor | None,
-) -> Tensor:
-    activation = None
-
-    def capture(_module, args, kwargs):
-        nonlocal activation
-        hidden = args[0] if args else kwargs["hidden_states"]
-        activation = hidden.detach()
-        raise _ActivationCaptured
-
-    handle = layer.register_forward_pre_hook(capture, with_kwargs=True)
-    try:
-        try:
-            model(input_ids=input_ids, attention_mask=attention_mask, use_cache=False)
-        except _ActivationCaptured:
-            pass
-    finally:
-        handle.remove()
-    if activation is None:
-        raise RuntimeError("the residual-stream hook did not run")
-    return activation
 
 
 def save_checkpoint(
@@ -223,27 +172,16 @@ def load_evaluation(path: Path, training_tokens: int) -> dict | None:
     return None
 
 
-def capture_residual_batch(
-    model: nn.Module,
-    layer: nn.Module,
-    input_ids: Tensor,
-    attention_mask: Tensor,
-    device: torch.device,
+def capture_residuals(
+    model: nn.Module, layer: nn.Module, input_ids: Tensor, device: torch.device
 ) -> Tensor:
-    input_ids = input_ids.to(device, non_blocking=True)
-    if bool(attention_mask.all()):
-        return capture_layer_input(model, layer, input_ids, None).flatten(0, 1)
-
-    attention_mask = attention_mask.to(device, non_blocking=True)
-    valid_mask = attention_mask.bool()
-    return capture_layer_input(model, layer, input_ids, attention_mask)[valid_mask]
+    return capture_layer_input(model, layer, input_ids.to(device)).flatten(0, 1)
 
 
 def iter_captured_residual_batches(
     model: nn.Module,
     layer: nn.Module,
     tokens: np.memmap,
-    pad_token_id: int,
     device: torch.device,
     context_size: int,
     model_batch_size: int,
@@ -255,13 +193,12 @@ def iter_captured_residual_batches(
         tokens,
         context_size,
         model_batch_size,
-        pad_token_id,
         shuffle=shuffle,
         seed=seed,
         skip_contexts=skip_batches * model_batch_size,
     )
-    for input_ids, attention_mask in batches:
-        yield capture_residual_batch(model, layer, input_ids, attention_mask, device)
+    for input_ids in batches:
+        yield capture_residuals(model, layer, input_ids, device)
 
 
 @torch.inference_mode()
@@ -270,7 +207,6 @@ def capture_residual_cache(
     layer: nn.Module,
     train_tokens: np.memmap,
     validation_tokens: np.memmap,
-    pad_token_id: int,
     device: torch.device,
     context_size: int,
     model_batch_size: int,
@@ -279,47 +215,28 @@ def capture_residual_cache(
 ) -> None:
     train_path, validation_path, metadata_path = cache_paths
     train_path.parent.mkdir(parents=True, exist_ok=True)
-    d_model = int(metadata["d_model"])
-    cache_format = metadata["cache_format"]
     float16_max = torch.finfo(torch.float16).max
-    total_tokens = len(train_tokens) + len(validation_tokens)
-    progress = tqdm(
-        total=total_tokens,
-        unit="tok",
-        desc="Residual cache",
-        dynamic_ncols=True,
+    total_tokens = sum(
+        whole_contexts(len(tokens), context_size)
+        for tokens in (train_tokens, validation_tokens)
     )
+    progress = tqdm(total=total_tokens, unit="tok", desc="Residual cache", dynamic_ncols=True)
 
     def capture_split(tokens: np.memmap, path: Path) -> None:
         temporary = path.with_suffix(path.suffix + ".tmp")
         output = create_residual_cache(
-            temporary, len(tokens), d_model, cache_format
+            temporary, whole_contexts(len(tokens), context_size), metadata["d_model"]
         )
         written = 0
-        batches = iter_context_batches(
-            tokens,
-            context_size,
-            model_batch_size,
-            pad_token_id,
-            shuffle=False,
-            seed=0,
-        )
-        for input_ids, attention_mask in batches:
-            residual = capture_residual_batch(
-                model, layer, input_ids, attention_mask, device
-            ).float()
-            batch_tokens = len(residual)
-            output_slice = slice(written, written + batch_tokens)
-            if cache_format == "fp16":
-                stored = residual.mul(RESIDUAL_FP16_SCALE)
-                stored.clamp_(-float16_max, float16_max)
-                output[output_slice] = stored.cpu().numpy()
-            else:
-                codes, scales = encode_int8_residuals(residual)
-                output["codes"][output_slice] = codes.cpu().numpy()
-                output["scales"][output_slice] = scales.cpu().numpy()
-            written += batch_tokens
-            progress.update(batch_tokens)
+        for input_ids in iter_context_batches(
+            tokens, context_size, model_batch_size, shuffle=False, seed=0
+        ):
+            # Scale down so outlier activations fit in fp16.
+            stored = capture_residuals(model, layer, input_ids, device).float()
+            stored.mul_(RESIDUAL_FP16_SCALE).clamp_(-float16_max, float16_max)
+            output[written : written + len(stored)] = stored.cpu().numpy()
+            written += len(stored)
+            progress.update(len(stored))
         output.flush()
         del output
         os.replace(temporary, path)
@@ -473,18 +390,15 @@ def evaluate_downstream_kl(
     model: nn.Module,
     layer: nn.Module,
     validation_tokens: np.memmap,
-    pad_token_id: int,
     device: torch.device,
     context_size: int,
     activation_scale: float,
     passthrough_dims: list[int],
 ) -> dict:
     validation_subset = validation_tokens[:DOWNSTREAM_KL_TOKENS]
-    kl_sum = 0.0
-    prediction_count = 0
     context_kl_means = []
     progress = tqdm(
-        total=len(validation_subset),
+        total=whole_contexts(len(validation_subset), context_size),
         unit="tok",
         desc="Downstream KL",
         leave=False,
@@ -500,21 +414,14 @@ def evaluate_downstream_kl(
             return (reconstruction, *args[1:]), kwargs
         return args, {**kwargs, "hidden_states": reconstruction}
 
-    for input_ids, attention_mask in iter_context_batches(
+    for input_ids in iter_context_batches(
         validation_subset,
         context_size,
         1,  # Keep full-vocabulary logits memory-bounded.
-        pad_token_id,
         shuffle=False,
         seed=0,
     ):
-        input_ids = input_ids.to(device, non_blocking=True)
-        attention_mask = attention_mask.to(device, non_blocking=True)
-        model_kwargs = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "use_cache": False,
-        }
+        model_kwargs = {"input_ids": input_ids.to(device), "use_cache": False}
         base_logits = model(**model_kwargs).logits[:, :-1].float()
         base_log_z = torch.logsumexp(base_logits, dim=-1)
 
@@ -533,15 +440,12 @@ def evaluate_downstream_kl(
         token_kl = sae_logits.mul_(base_logits).sum(dim=-1)
         token_kl.add_(sae_log_z).sub_(base_log_z)
 
-        valid = attention_mask[:, 1:].bool()
-        valid_token_kl = token_kl[valid]
-        kl_sum += valid_token_kl.sum().item()
-        prediction_count += len(valid_token_kl)
-        context_kl_means.append(valid_token_kl.mean().item())
-        progress.update(int(attention_mask.sum().item()))
+        context_kl_means.append(token_kl.mean().item())
+        progress.update(input_ids.numel())
 
     progress.close()
-    mean_kl = kl_sum / prediction_count
+    # Every context has the same number of predictions, so this is the token mean.
+    mean_kl = float(np.mean(context_kl_means))
     standard_error = float(
         np.std(context_kl_means, ddof=1) / math.sqrt(len(context_kl_means))
     )
@@ -598,33 +502,13 @@ def train_sae(
     )
     latest_evaluation = None
     evaluation_seconds = 0.0
-    best_downstream_kl = math.inf
-    if resume:
-        for line in evaluation_metrics_path.read_text().splitlines():
-            if line.strip():
-                best_downstream_kl = min(
-                    best_downstream_kl, float(json.loads(line)["downstream_kl"])
-                )
+    train_tokens = whole_contexts(config.train_tokens, config.context_size)
 
     def evaluate() -> dict:
-        nonlocal evaluation_seconds, best_downstream_kl
+        nonlocal evaluation_seconds
         evaluation_start = time.monotonic()
-        evaluation = evaluate_sae(
-            sae,
-            validation_batches,
-            device,
-            config,
-        )
+        evaluation = evaluate_sae(sae, validation_batches, device, config)
         evaluation.update(downstream_kl_evaluator(sae, config))
-        if evaluation["downstream_kl"] < best_downstream_kl:
-            best_downstream_kl = float(evaluation["downstream_kl"])
-            save_checkpoint(
-                output_dir / "checkpoint_best_kl.pt",
-                sae,
-                optimizer,
-                state,
-                config,
-            )
         evaluation_seconds += time.monotonic() - evaluation_start
         evaluation_record = {
             **evaluation,
@@ -648,7 +532,7 @@ def train_sae(
         (state.processed_tokens // validate_every) + 1
     ) * validate_every
     progress = tqdm(
-        total=config.train_tokens,
+        total=train_tokens,
         initial=state.processed_tokens,
         unit="tok",
         desc="Train",
@@ -691,7 +575,7 @@ def train_sae(
 
         if (
             state.processed_tokens >= next_log
-            or state.processed_tokens == config.train_tokens
+            or state.processed_tokens == train_tokens
         ):
             if state.processed_tokens >= config.dead_window:
                 dead_features = (
@@ -751,7 +635,7 @@ def evaluate_sae(
 ) -> dict:
     metrics = RunningMetrics(sae.d_model, sae.d_sae, device)
     progress = tqdm(
-        total=config.validation_tokens,
+        total=whole_contexts(config.validation_tokens, config.context_size),
         unit="tok",
         desc="Validate",
         leave=False,

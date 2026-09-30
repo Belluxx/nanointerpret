@@ -9,10 +9,10 @@ Minimal training and feature interpretability analysis of LLMs with sparse autoe
 - `docs/experiments.md`: experiment results and reproduction commands.
 - `docs/overview.md`: brief notes on activation layer, width multiplier, and K.
 - `src/data.py`: token/residual-cache validation and batching.
-- `src/experiment.py`: residual-cache capture, normalization, training, evaluation, metrics, and checkpoints.
+- `src/experiment.py`: residual-cache capture, calibration, training, evaluation, metrics, and checkpoints.
 - `src/misc.py`: generic helper functions/utils.
 - `src/plot.py`: training and feature-density plots.
-- `src/runtime.py`: PyTorch device selection.
+- `src/runtime.py`: device selection, model loading, and layer-input capture.
 - `src/sae.py`: Top-K SAE and running metrics.
 
 ## Code style
