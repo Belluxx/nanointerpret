@@ -18,3 +18,4 @@ Minimal training and feature interpretability analysis of LLMs with sparse autoe
 ## Code style
 - Completely ignore backward-compatibility, do not account for it.
 - When removing a component, functionality, abstraction, etc... ensure to cleanup leftovers
+- Only add comments when the code is not interpretable by itself
