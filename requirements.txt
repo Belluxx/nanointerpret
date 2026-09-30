@@ -3,6 +3,7 @@ transformers>=4.56
 huggingface_hub>=0.28
 datasets>=2.20
 gigatoken==0.10.0
+awkward>=2.6
 numpy>=1.26
 tqdm>=4.66
 matplotlib>=3.8

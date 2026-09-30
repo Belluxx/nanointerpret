@@ -19,5 +19,5 @@ python3 train.py \
 2. Record feature activations:
 
 ```sh
-python3 record_activations.py --sae-dir artifacts/gemma_3_270m_l9_w16_k16_500m
+python3 record_activations.py --sae-dir artifacts/gemma-3-270m_l9_w16_k16_500m
 ```

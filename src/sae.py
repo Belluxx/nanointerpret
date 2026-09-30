@@ -1,11 +1,6 @@
-from __future__ import annotations
-
-from pathlib import Path
-
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
-
 
 FIRING_THRESHOLD = 1e-3
 
@@ -16,164 +11,126 @@ class TopKSAE(nn.Module):
         d_model: int,
         d_sae: int,
         k: int,
-        device: torch.device,
         *,
-        subtract_pre_bias: bool = True,
+        passthrough_dims: list[int],
+        activation_scale: float,
+        subtract_pre_bias: bool,
     ):
         super().__init__()
-        decoder = F.normalize(torch.randn(d_sae, d_model, device=device), dim=1)
+        keep = torch.ones(d_model, dtype=torch.bool)
+        keep[passthrough_dims] = False
+        self.register_buffer("keep", keep, persistent=False)
+        d_in = int(keep.sum())
+        decoder = F.normalize(torch.randn(d_sae, d_in), dim=1)
         self.encoder_weight = nn.Parameter(decoder.T.contiguous())
-        self.encoder_bias = nn.Parameter(torch.zeros(d_sae, device=device))
+        self.encoder_bias = nn.Parameter(torch.zeros(d_sae))
         self.decoder_weight = nn.Parameter(decoder)
-        self.decoder_bias = nn.Parameter(torch.zeros(d_model, device=device))
-        self.k = k
-        self.d_model = d_model
+        self.decoder_bias = nn.Parameter(torch.zeros(d_in))
+        self.d_in = d_in
         self.d_sae = d_sae
+        self.k = k
+        self.activation_scale = activation_scale
         self.subtract_pre_bias = subtract_pre_bias
 
-    def decode(
-        self, indices: Tensor, values: Tensor, *, include_bias: bool = True
-    ) -> Tensor:
-        reconstruction = F.embedding_bag(
-            indices,
-            self.decoder_weight,
-            mode="sum",
-            per_sample_weights=values,
-        )
-        if include_bias:
-            reconstruction = reconstruction + self.decoder_bias
-        return reconstruction
+    def normalize(self, residual: Tensor) -> Tensor:
+        # (tokens, d_model) residuals -> scaled SAE inputs without the pass-through dims.
+        return residual[:, self.keep].float() * self.activation_scale
 
     def encode(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         if self.subtract_pre_bias:
             x = x - self.decoder_bias
         pre_activations = x @ self.encoder_weight + self.encoder_bias
-        values, indices = torch.topk(
-            F.relu(pre_activations), self.k, dim=-1, sorted=False
-        )
+        values, indices = torch.topk(F.relu(pre_activations), self.k, dim=-1, sorted=False)
         return indices, values, pre_activations
+
+    def decode(self, indices: Tensor, values: Tensor) -> Tensor:
+        return F.embedding_bag(indices, self.decoder_weight, mode="sum", per_sample_weights=values)
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         indices, values, pre_activations = self.encode(x)
-        return self.decode(indices, values), indices, values, pre_activations
+        return self.decode(indices, values) + self.decoder_bias, indices, values, pre_activations
+
+    @torch.no_grad()
+    def reconstruct(self, residual: Tensor) -> Tensor:
+        # Swap the SAE-owned dims of raw (..., d_model) residuals for their reconstruction.
+        flat = residual.reshape(-1, residual.shape[-1])
+        output = flat.clone()
+        output[:, self.keep] = (self(self.normalize(flat))[0] / self.activation_scale).to(flat.dtype)
+        return output.reshape_as(residual)
+
+    @torch.no_grad()
+    def init_pre_bias(self, residual: Tensor) -> None:
+        self.decoder_bias.copy_(geometric_median(self.normalize(residual)))
 
     @torch.no_grad()
     def constrain_decoder_gradient(self) -> None:
         gradient = self.decoder_weight.grad
-        parallel = (gradient * self.decoder_weight).sum(dim=1, keepdim=True)
-        gradient.sub_(parallel * self.decoder_weight)
+        gradient.sub_((gradient * self.decoder_weight).sum(dim=1, keepdim=True) * self.decoder_weight)
 
     @torch.no_grad()
     def normalize_decoder(self) -> None:
-        norms = self.decoder_weight.norm(dim=1, keepdim=True).clamp_min_(1e-12)
-        self.decoder_weight.div_(norms)
+        self.decoder_weight.div_(self.decoder_weight.norm(dim=1, keepdim=True).clamp_min_(1e-12))
 
 
-def load_sae(sae_dir: Path, config: dict, device: torch.device) -> TopKSAE:
-    checkpoint_path = sae_dir / "sae_final.pt"
-    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-    d_sae, d_model = checkpoint["sae"]["decoder_weight"].shape
-    sae = TopKSAE(
-        d_model,
-        d_sae,
-        int(config["k"]),
-        device,
-        subtract_pre_bias=bool(config["subtract_pre_bias"]),
-    )
-    sae.load_state_dict(checkpoint["sae"])
-    return sae.eval().requires_grad_(False)
+def geometric_median(points: Tensor, max_iterations: int = 100, tolerance: float = 1e-5) -> Tensor:
+    estimate = points.mean(dim=0)
+    for _ in range(max_iterations):
+        weights = torch.linalg.vector_norm(points - estimate, dim=1).clamp_min(1e-7).reciprocal()
+        updated = (points * weights.unsqueeze(1)).sum(dim=0) / weights.sum()
+        if torch.linalg.vector_norm(updated - estimate) <= tolerance:
+            return updated
+        estimate = updated
+    return estimate
 
 
-def normalized_auxk_loss(
-    sae: TopKSAE,
-    pre_activations: Tensor,
-    residual_error: Tensor,
-    dead_indices: Tensor,
-    aux_k: int,
-) -> Tensor:
-    dead_pre_activations = pre_activations.index_select(1, dead_indices)
-    values, indices = torch.topk(
-        dead_pre_activations, min(aux_k, len(dead_indices)), dim=-1, sorted=False
-    )
+def auxk_loss(sae: TopKSAE, pre_activations: Tensor, error: Tensor, dead: Tensor, aux_k: int) -> Tensor:
+    dead_pre_activations = pre_activations[:, dead]
+    values, indices = torch.topk(dead_pre_activations, min(aux_k, len(dead)), dim=-1, sorted=False)
     values = F.relu(values)
-    # MPS dense matmul is much faster than embedding_bag at AuxK's large k.
     if pre_activations.device.type == "mps":
-        auxiliary_activations = torch.zeros_like(dead_pre_activations).scatter_(
-            1, indices, values
-        )
-        auxiliary_reconstruction = (
-            auxiliary_activations
-            @ sae.decoder_weight.index_select(0, dead_indices)
-        )
-        if sae.subtract_pre_bias:
-            auxiliary_reconstruction = auxiliary_reconstruction + sae.decoder_bias
+        # MPS dense matmul is much faster than embedding_bag at AuxK's large k.
+        activations = torch.zeros_like(dead_pre_activations).scatter_(1, indices, values)
+        reconstruction = activations @ sae.decoder_weight[dead]
     else:
-        auxiliary_reconstruction = sae.decode(
-            dead_indices[indices],
-            values,
-            include_bias=sae.subtract_pre_bias,
-        )
-    target = residual_error.detach()
+        reconstruction = sae.decode(dead[indices], values)
+    target = error.detach()
     if sae.subtract_pre_bias:
+        # As in OpenAI's recipe: the shift cancels in the loss but routes AuxK's gradient into the pre-bias.
+        reconstruction = reconstruction + sae.decoder_bias
         target = target + sae.decoder_bias.detach()
-    numerator = F.mse_loss(auxiliary_reconstruction, target)
-    target_mean = target.mean(dim=0, keepdim=True)
-    denominator = F.mse_loss(target_mean.expand_as(target), target)
-    return torch.nan_to_num(numerator / denominator, nan=0.0, posinf=0.0, neginf=0.0)
+    variance = F.mse_loss(target.mean(dim=0, keepdim=True).expand_as(target), target)
+    return torch.nan_to_num(F.mse_loss(reconstruction, target) / variance, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 class RunningMetrics:
-    def __init__(self, d_model: int, d_sae: int, device: torch.device):
-        self.device = device
-        self.d_model = d_model
-        self.d_sae = d_sae
-        self.reset()
-
-    def reset(self) -> None:
+    def __init__(self, sae: TopKSAE):
+        device = sae.decoder_bias.device
         self.count = 0
-        self.x_sum = torch.zeros(self.d_model, device=self.device)
-        self.x_sq_sum = torch.zeros(self.d_model, device=self.device)
-        self.error_sq_sum = torch.zeros(self.d_model, device=self.device)
-        self.feature_fire_counts = torch.zeros(self.d_sae, device=self.device)
-        self.auxk_loss_sum = torch.zeros((), device=self.device)
-        self.auxk_token_count = 0
+        self.x_sum = torch.zeros(sae.d_in, device=device)
+        self.x_sq_sum = torch.zeros((), device=device)
+        self.error_sq_sum = torch.zeros((), device=device)
+        self.fire_counts = torch.zeros(sae.d_sae, device=device)
+        self.auxk_sum = torch.zeros((), device=device)
+        self.auxk_count = 0
 
     @torch.no_grad()
     def update(
-        self,
-        x: Tensor,
-        reconstruction: Tensor,
-        indices: Tensor,
-        values: Tensor,
-        auxk_loss: Tensor | None = None,
+        self, x: Tensor, reconstruction: Tensor, indices: Tensor, values: Tensor, auxk: Tensor | None = None
     ) -> None:
-        error = x - reconstruction
-        self.count += x.shape[0]
-        firing = values > FIRING_THRESHOLD
+        self.count += len(x)
         self.x_sum += x.sum(dim=0)
-        self.x_sq_sum += x.square().sum(dim=0)
-        self.error_sq_sum += error.square().sum(dim=0)
-        positive_indices = indices[firing]
-        self.feature_fire_counts.scatter_add_(
-            0, positive_indices, torch.ones_like(positive_indices, dtype=torch.float32)
-        )
-        if auxk_loss is not None:
-            self.auxk_loss_sum += auxk_loss.detach() * x.shape[0]
-            self.auxk_token_count += x.shape[0]
+        self.x_sq_sum += x.square().sum()
+        self.error_sq_sum += (x - reconstruction).square().sum()
+        fired = indices[values > FIRING_THRESHOLD]
+        self.fire_counts.scatter_add_(0, fired, torch.ones_like(fired, dtype=torch.float32))
+        if auxk is not None:
+            self.auxk_sum += auxk.detach() * len(x)
+            self.auxk_count += len(x)
 
-    @torch.no_grad()
     def compute(self) -> dict[str, float | None]:
-        n = float(self.count)
-        sse = self.error_sq_sum.sum()
-        x_variance = (self.x_sq_sum - self.x_sum.square() / n).sum().clamp_min(1e-12)
-        mse = float((sse / (n * self.d_model)).item())
-        result = {
-            "mse": mse,
-            "explained_variance": float((1.0 - sse / x_variance).item()),
-            "auxk_loss": None,
+        variance = self.x_sq_sum - self.x_sum.square().sum() / self.count
+        return {
+            "mse": (self.error_sq_sum / (self.count * len(self.x_sum))).item(),
+            "explained_variance": (1 - self.error_sq_sum / variance).item(),
+            "auxk_loss": (self.auxk_sum / self.auxk_count).item() if self.auxk_count else None,
         }
-        if self.auxk_token_count:
-            result["auxk_loss"] = float(
-                (self.auxk_loss_sum / self.auxk_token_count).item()
-            )
-        return result

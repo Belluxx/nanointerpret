@@ -22,5 +22,5 @@ python3 train.py \
 2. Record feature activations:
 
 ```sh
-python3 record_activations.py --sae-dir artifacts/qwen3_1.7b_l14_w16_k16_500m
+python3 record_activations.py --sae-dir artifacts/qwen3-1.7b-base_l14_w16_k16_500m
 ```

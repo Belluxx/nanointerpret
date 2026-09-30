@@ -1,85 +1,60 @@
-from __future__ import annotations
-
-import sys
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 
 import torch
 from torch import Tensor, nn
 from transformers import AutoModelForCausalLM
 
 
-ATTENTION_IMPLEMENTATION = "sdpa"
+def choose_device(name: str) -> torch.device:
+    if name == "auto":
+        name = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
+    return torch.device(name)
 
 
-def choose_device(requested: str) -> torch.device:
-    if requested == "auto":
-        if torch.backends.mps.is_available():
-            requested = "mps"
-        elif torch.cuda.is_available():
-            requested = "cuda"
-        else:
-            requested = "cpu"
-            print("warning: neither MPS nor CUDA is available; using CPU", file=sys.stderr)
-
-    if requested == "mps" and not torch.backends.mps.is_available():
-        raise RuntimeError("MPS is unavailable")
-    if requested == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError("CUDA is unavailable")
-    return torch.device(requested)
-
-
-def load_causal_lm(
-    model_id: str,
-    dtype: torch.dtype,
-    device: torch.device,
-):
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        dtype=dtype,
-        attn_implementation=ATTENTION_IMPLEMENTATION,
-    ).to(device)
-    return model.eval().requires_grad_(False)
+def load_causal_lm(model_id: str, dtype: str, device: torch.device) -> nn.Module:
+    model = AutoModelForCausalLM.from_pretrained(model_id, dtype=dtype, attn_implementation="sdpa")
+    return model.to(device).eval().requires_grad_(False)
 
 
 def find_transformer_layers(model: nn.Module) -> nn.ModuleList:
     candidates = [
         module
         for name, module in model.named_modules()
-        if isinstance(module, nn.ModuleList)
-        and name.split(".")[-1] == "layers"
-        and len(module) > 1
+        if isinstance(module, nn.ModuleList) and name.split(".")[-1] == "layers" and len(module) > 1
     ]
     if not candidates:
         raise RuntimeError("could not locate the transformer's ModuleList named 'layers'")
     return max(candidates, key=len)
 
 
-def compile_transformer_prefix(layers: nn.ModuleList, layer_index: int) -> None:
-    # Keep the capture layer eager so its forward pre-hook remains visible.
-    for index in range(layer_index):
-        layers[index] = torch.compile(layers[index], dynamic=False)
+@contextmanager
+def patch_layer_input(layer: nn.Module, patch: Callable[[Tensor], Tensor]) -> Iterator[None]:
+    def hook(_module, args, kwargs):
+        if args:
+            return (patch(args[0]), *args[1:]), kwargs
+        return args, {**kwargs, "hidden_states": patch(kwargs["hidden_states"])}
+
+    handle = layer.register_forward_pre_hook(hook, with_kwargs=True)
+    try:
+        yield
+    finally:
+        handle.remove()
 
 
-class _ActivationCaptured(Exception):
+class _Captured(Exception):
     pass
 
 
 @torch.no_grad()
 def capture_layer_input(model: nn.Module, layer: nn.Module, input_ids: Tensor) -> Tensor:
     # Run the model only up to `layer` and return its input hidden states.
-    activation = None
+    def stop(hidden: Tensor) -> Tensor:
+        raise _Captured(hidden)
 
-    def capture(_module, args, kwargs):
-        nonlocal activation
-        activation = (args[0] if args else kwargs["hidden_states"]).detach()
-        raise _ActivationCaptured
-
-    handle = layer.register_forward_pre_hook(capture, with_kwargs=True)
-    try:
-        model(input_ids=input_ids, use_cache=False)
-    except _ActivationCaptured:
-        pass
-    finally:
-        handle.remove()
-    if activation is None:
-        raise RuntimeError("the residual-stream hook did not run")
-    return activation
+    with patch_layer_input(layer, stop):
+        try:
+            model(input_ids=input_ids, use_cache=False)
+        except _Captured as captured:
+            return captured.args[0]
+    raise RuntimeError("the residual-stream hook did not run")

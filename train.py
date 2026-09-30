@@ -1,8 +1,9 @@
-from __future__ import annotations
+"""Train a Top-K SAE on a language model's residual stream."""
 
 import argparse
 import json
 import math
+from collections.abc import Iterator
 from dataclasses import asdict
 from functools import partial
 from pathlib import Path
@@ -10,33 +11,10 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from transformers import AutoTokenizer
-
-from src.data import (
-    ResidualCacheSpec,
-    TokenCacheSpec,
-    build_token_cache,
-    iter_residual_batches,
-    load_residual_cache_metadata,
-    residual_cache_paths,
-)
-from src.experiment import (
-    ExperimentConfig,
-    calibrate_activations,
-    capture_residual_cache,
-    default_aux_k,
-    evaluate_downstream_kl,
-    iter_captured_residual_batches,
-    train_sae,
-)
-from src.misc import experiment_output_dir
-from src.runtime import (
-    choose_device,
-    compile_transformer_prefix,
-    find_transformer_layers,
-    load_causal_lm,
-)
-from src.sae import TopKSAE
+from src.data import as_contexts, cache_name, context_batches, read_residual_cache, residual_cache, token_cache
+from src.experiment import Config, build_sae, calibrate, downstream_kl, evaluate_sae, train_sae
+from src.plot import save_plots
+from src.runtime import capture_layer_input, choose_device, find_transformer_layers, load_causal_lm
 
 MODEL_ID = "google/gemma-3-270m"
 DATASET_ID = "HuggingFaceFW/fineweb-edu"
@@ -72,249 +50,150 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--validate-every", type=int, default=50_000_000, help="Validate after this many training tokens.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
-    parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"), help="Directory for reusable tokenized dataset splits. Default: artifacts/token_cache.")
+    parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"), help="Directory for reusable tokenized datasets. Default: artifacts/token_cache.")
     parser.add_argument("--residual-cache-dir", type=Path, default=Path("artifacts/residual_cache"), help="Directory for fp16 residual activations saved by cached modes. Default: artifacts/residual_cache.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--cache-activations", action="store_true", help="Cache residual activations before training instead of streaming them.")
     mode.add_argument("--cache-only", action="store_true", help="Capture the residual cache, then exit before SAE training.")
-    parser.add_argument("--output-dir", type=Path, default=None, help="Training output directory. Default: generated automatically under artifacts/.",)
-    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--output-dir", type=Path, default=None, help="Training output directory. Default: generated automatically under artifacts/.")
+    parser.add_argument("--resume", action="store_true", help="Continue from the output directory's checkpoint, with the original arguments.")
     return parser.parse_args()
 
 
-def run_training(
-    args: argparse.Namespace,
-    device: torch.device,
-    d_model: int,
-    layer_index: int,
-    train_batches,
-    validation_batches,
-    downstream_kl_evaluator,
-) -> None:
-    d_sae = args.width_multiplier * d_model
-    aux_k = default_aux_k(d_model) if args.aux_k is None else args.aux_k
-
-    if args.learning_rate is None:
-        args.learning_rate = 3e-4 * math.sqrt(32768 / d_sae)
-
-    if args.output_dir is None:
-        args.output_dir = experiment_output_dir(
-            args.model_id,
-            layer_index,
-            args.width_multiplier,
-            args.k,
-            args.train_tokens,
-        )
-    mode = "cached" if args.cache_activations else "streaming"
-    print(
-        f"Device: {device} | Mode: {mode} | "
-        f"Model batch: {args.model_batch_size} | SAE batch: {args.sae_batch_size} | "
-        f"Layer: {layer_index} | Model width: {d_model} | "
-        f"SAE width: {d_sae:,} | k: {args.k} | "
-        f"AuxK: {'off' if args.aux_k_coef == 0 else aux_k}"
-    )
-    print(f"Output: {args.output_dir}")
-
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-
-    checkpoint_path = args.output_dir / "checkpoint_latest.pt"
-    final_path = args.output_dir / "sae_final.pt"
-    if args.resume:
-        config_path = args.output_dir / "config.json"
-        saved_config = json.loads(config_path.read_text())
-        activation_scale = float(saved_config["activation_scale"])
-        passthrough_dims = saved_config["passthrough_dims"]
-        initial_pre_bias = None
-        print(
-            f"reusing activation scale {activation_scale:.8g} "
-            f"from {config_path}"
-        )
-    else:
-        if final_path.exists():
-            raise FileExistsError(
-                f"{final_path} already exists; choose another --output-dir"
-            )
-        if checkpoint_path.exists():
-            raise FileExistsError(
-                f"{checkpoint_path} already exists; pass --resume or choose another "
-                "--output-dir"
-            )
-        passthrough_dims, activation_scale, initial_pre_bias = calibrate_activations(
-            train_batches,
-            args.train_tokens,
-            device,
-            args.normalization_tokens,
-            args.subtract_pre_bias,
-            args.passthrough_massive_dims,
-        )
-    config = ExperimentConfig(
-        model_id=args.model_id,
-        dataset_id=args.dataset_id,
-        dataset_config=args.dataset_config,
-        train_tokens=args.train_tokens,
-        validation_tokens=args.validation_tokens,
-        recording_tokens=args.recording_tokens,
-        context_size=args.context_size,
-        layer_index=layer_index,
-        width_multiplier=args.width_multiplier,
-        k=args.k,
-        aux_k=aux_k,
-        aux_k_coef=args.aux_k_coef,
-        dead_window=args.dead_window,
-        learning_rate=args.learning_rate,
-        gradient_clip=args.gradient_clip,
-        model_batch_size=args.model_batch_size,
-        sae_batch_size=args.sae_batch_size,
-        normalization_tokens=args.normalization_tokens,
-        activation_scale=activation_scale,
-        subtract_pre_bias=args.subtract_pre_bias,
-        seed=args.seed,
-        model_dtype=args.model_dtype,
-        cache_activations=args.cache_activations,
-        passthrough_dims=passthrough_dims,
-    )
-    sae = TopKSAE(
-        d_model - len(passthrough_dims),
-        d_sae,
-        args.k,
-        device,
-        subtract_pre_bias=args.subtract_pre_bias,
-    )
-    if initial_pre_bias is not None:
-        with torch.no_grad():
-            sae.decoder_bias.copy_(initial_pre_bias)
-    evaluation = train_sae(
-        sae,
-        train_batches,
-        validation_batches,
-        device,
-        config,
-        args.output_dir,
-        args.resume,
-        args.log_every,
-        args.checkpoint_every,
-        args.validate_every,
-        downstream_kl_evaluator,
-    )
-    from src.plot import save_feature_density_plot, save_training_plot
-
-    save_training_plot(
-        args.output_dir / "train_metrics.jsonl",
-        args.output_dir / "evaluation_metrics.jsonl",
-        args.output_dir / "training_metrics.png",
-    )
-    save_feature_density_plot(
-        args.output_dir / "evaluation_metrics.jsonl",
-        args.output_dir / "validation_feature_density.png",
-    )
-
-    (args.output_dir / "validation_metrics.json").write_text(
-        json.dumps(evaluation, indent=2, sort_keys=True) + "\n"
-    )
+def compact_count(count: int) -> str:
+    for divisor, suffix in ((1_000_000_000, "b"), (1_000_000, "m"), (1_000, "k")):
+        if count % divisor == 0:
+            return f"{count // divisor}{suffix}"
+    return str(count)
 
 
 def main() -> None:
     args = parse_args()
     torch.manual_seed(args.seed)
     device = choose_device(args.device)
-    model_dtype = getattr(torch, args.model_dtype)
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_id)
-    token_spec = TokenCacheSpec(
-        cache_dir=args.cache_dir,
-        model_id=args.model_id,
-        dataset_id=args.dataset_id,
-        dataset_config=args.dataset_config,
-        train_tokens=args.train_tokens,
-        validation_tokens=args.validation_tokens,
-        recording_tokens=args.recording_tokens,
-    )
-    train_path, validation_path = build_token_cache(tokenizer, token_spec)
-    train_tokens = np.memmap(train_path, mode="r", dtype=np.uint32)
-    validation_tokens = np.memmap(validation_path, mode="r", dtype=np.uint32)
-
-    model = load_causal_lm(args.model_id, model_dtype, device)
+    model = load_causal_lm(args.model_id, args.model_dtype, device)
     layers = find_transformer_layers(model)
     layer_index = len(layers) // 2 if args.activation_layer is None else args.activation_layer
     layer = layers[layer_index]
-    d_model = int(model.config.hidden_size)
+    d_model = model.config.hidden_size
+    d_sae = args.width_multiplier * d_model
+    aux_k = args.aux_k or 1 << round(math.log2(d_model / 2))
+    output_dir = args.output_dir or Path("artifacts") / (
+        f"{args.model_id.split('/')[-1].lower()}_l{layer_index}_w{args.width_multiplier}_k{args.k}_"
+        f"{compact_count(args.train_tokens)}"
+    )
+    if not args.resume and any(output_dir.glob("*.pt")):
+        raise FileExistsError(f"{output_dir} already holds a run; pass --resume or choose another --output-dir")
     if args.compile_model and device.type == "mps":
-        compile_transformer_prefix(layers, layer_index)
         print(f"Compiling {layer_index} transformer layers for MPS")
+        # The capture layer stays eager so its forward pre-hook remains visible.
+        for index in range(layer_index):
+            layers[index] = torch.compile(layers[index], dynamic=False)
 
+    splits = {
+        "train": (0, args.train_tokens),
+        "validation": (args.train_tokens, args.train_tokens + args.validation_tokens),
+    }
+    tokens = token_cache(
+        args.cache_dir, args.model_id, args.dataset_id, args.dataset_config,
+        args.train_tokens + args.validation_tokens + args.recording_tokens,
+    )
+    contexts = {split: as_contexts(tokens[start:stop], args.context_size) for split, (start, stop) in splits.items()}
+
+    def capture(split: str, ids: np.ndarray) -> torch.Tensor:
+        return capture_layer_input(model, layer, torch.from_numpy(contexts[split][ids].astype(np.int64)).to(device))
+
+    caches = {}
     if args.cache_activations or args.cache_only:
-        spec = ResidualCacheSpec(
-            cache_dir=args.residual_cache_dir,
-            model_id=args.model_id,
-            dataset_id=args.dataset_id,
-            dataset_config=args.dataset_config,
-            train_tokens=args.train_tokens,
-            validation_tokens=args.validation_tokens,
-            context_size=args.context_size,
-            layer_index=layer_index,
-            model_dtype=args.model_dtype,
-        )
-        cache_paths = residual_cache_paths(spec)
-        if load_residual_cache_metadata(spec) is None:
-            if any(path.exists() for path in cache_paths):
-                raise RuntimeError("Corrupted residual cache, delete it and rerun to rebuild")
-            metadata = asdict(spec)
-            metadata.pop("cache_dir")
-            metadata["d_model"] = d_model
-            capture_residual_cache(
-                model,
-                layer,
-                train_tokens,
-                validation_tokens,
-                device,
-                args.context_size,
-                args.model_batch_size,
-                cache_paths,
-                metadata,
+        for split, (start, stop) in splits.items():
+            name = cache_name(
+                args.model_id, args.dataset_id, args.dataset_config, f"tokens{start}-{stop}",
+                f"ctx{args.context_size}", f"layer{layer_index}", args.model_dtype,
+            )
+            caches[split] = residual_cache(
+                args.residual_cache_dir / f"{name}.npy", contexts[split], partial(capture, split), args.model_batch_size, d_model
             )
         if args.cache_only:
             print(f"Residual cache: {args.residual_cache_dir}")
             return
-        batches = partial(
-            iter_residual_batches,
-            batch_size=args.context_size * args.model_batch_size,
-            seed=args.seed,
-        )
-        train_data = np.load(cache_paths[0], mmap_mode="r")
-        validation_data = np.load(cache_paths[1], mmap_mode="r")
-    else:
-        batches = partial(
-            iter_captured_residual_batches,
-            model,
-            layer,
-            device=device,
-            context_size=args.context_size,
-            model_batch_size=args.model_batch_size,
-            seed=args.seed,
-        )
-        train_data, validation_data = train_tokens, validation_tokens
 
-    def downstream_kl_evaluator(sae: TopKSAE, config: ExperimentConfig) -> dict:
-        return evaluate_downstream_kl(
-            sae,
-            model,
-            layer,
-            validation_tokens,
-            device,
-            args.context_size,
-            config.activation_scale,
-            config.passthrough_dims,
-        )
+    def batches(split: str, shuffle: bool = False, skip: int = 0) -> Iterator[torch.Tensor]:
+        for ids in context_batches(len(contexts[split]), args.model_batch_size, shuffle=shuffle, seed=args.seed, skip=skip):
+            if caches:
+                yield read_residual_cache(caches[split], ids, device)
+            else:
+                yield capture(split, ids).flatten(0, 1)
 
-    run_training(
-        args,
-        device,
-        d_model,
-        layer_index,
-        partial(batches, train_data, shuffle=True),
-        partial(batches, validation_data, shuffle=False),
-        downstream_kl_evaluator,
+    print(
+        f"Device: {device} | Mode: {'cached' if caches else 'streaming'} | "
+        f"Model batch: {args.model_batch_size} | SAE batch: {args.sae_batch_size} | "
+        f"Layer: {layer_index} | Model width: {d_model} | SAE width: {d_sae:,} | k: {args.k} | "
+        f"AuxK: {'off' if args.aux_k_coef == 0 else aux_k}"
     )
+    print(f"Output: {output_dir}")
+
+    config_path = output_dir / "config.json"
+    if args.resume:
+        saved = json.loads(config_path.read_text())
+        passthrough_dims, activation_scale = saved["passthrough_dims"], saved["activation_scale"]
+    else:
+        passthrough_dims, activation_scale = calibrate(
+            batches("train", shuffle=True), args.normalization_tokens, args.passthrough_massive_dims
+        )
+    config = Config(
+        model_id=args.model_id,
+        model_dtype=args.model_dtype,
+        layer_index=layer_index,
+        d_model=d_model,
+        dataset_id=args.dataset_id,
+        dataset_config=args.dataset_config,
+        context_size=args.context_size,
+        train_tokens=args.train_tokens,
+        validation_tokens=args.validation_tokens,
+        recording_tokens=args.recording_tokens,
+        width_multiplier=args.width_multiplier,
+        k=args.k,
+        aux_k=aux_k,
+        aux_k_coef=args.aux_k_coef,
+        subtract_pre_bias=args.subtract_pre_bias,
+        learning_rate=args.learning_rate or 3e-4 * math.sqrt(32768 / d_sae),
+        gradient_clip=args.gradient_clip,
+        dead_window=args.dead_window,
+        model_batch_size=args.model_batch_size,
+        sae_batch_size=args.sae_batch_size,
+        normalization_tokens=args.normalization_tokens,
+        passthrough_dims=passthrough_dims,
+        activation_scale=activation_scale,
+        seed=args.seed,
+    )
+    if args.resume and asdict(config) != saved:
+        raise ValueError("--resume needs the arguments of the original run")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(asdict(config), indent=2) + "\n")
+
+    sae = build_sae(config).to(device)
+    if config.subtract_pre_bias and not args.resume:
+        sae.init_pre_bias(next(batches("train", shuffle=True)))
+
+    def evaluate() -> dict:
+        return {
+            **evaluate_sae(sae, batches("validation"), contexts["validation"].size, config.sae_batch_size),
+            **downstream_kl(sae, model, layer, contexts["validation"]),
+        }
+
+    train_sae(
+        sae,
+        config,
+        lambda skip: batches("train", shuffle=True, skip=skip),
+        evaluate,
+        output_dir,
+        args.resume,
+        args.log_every,
+        args.checkpoint_every,
+        args.validate_every,
+    )
+    save_plots(output_dir)
 
 
 if __name__ == "__main__":
