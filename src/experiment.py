@@ -89,11 +89,11 @@ class ExperimentConfig:
     model_dtype: str
     residual_cache_format: str | None
     passthrough_dims: list[int]
-    normalization_tokens: int = 0
-    activation_scale: float = 1.0
-    subtract_pre_bias: bool = True
-    aux_k_coef: float = 1 / 32
-    dead_window: int = 10_000_000
+    normalization_tokens: int
+    activation_scale: float
+    subtract_pre_bias: bool
+    aux_k_coef: float
+    dead_window: int
 
 
 @dataclass
@@ -228,12 +228,10 @@ def capture_residual_batch(
     layer: nn.Module,
     input_ids: Tensor,
     attention_mask: Tensor,
-    batch_tokens: int,
     device: torch.device,
 ) -> Tensor:
-    full_batch = batch_tokens == input_ids.numel()
     input_ids = input_ids.to(device, non_blocking=True)
-    if full_batch:
+    if bool(attention_mask.all()):
         return capture_layer_input(model, layer, input_ids, None).flatten(0, 1)
 
     attention_mask = attention_mask.to(device, non_blocking=True)
@@ -263,10 +261,7 @@ def iter_captured_residual_batches(
         skip_contexts=skip_batches * model_batch_size,
     )
     for input_ids, attention_mask in batches:
-        batch_tokens = int(attention_mask.sum())
-        yield capture_residual_batch(
-            model, layer, input_ids, attention_mask, batch_tokens, device
-        )
+        yield capture_residual_batch(model, layer, input_ids, attention_mask, device)
 
 
 @torch.inference_mode()
@@ -310,11 +305,10 @@ def capture_residual_cache(
             seed=0,
         )
         for input_ids, attention_mask in batches:
-            batch_tokens = int(attention_mask.sum())
             residual = capture_residual_batch(
-                model, layer, input_ids, attention_mask, batch_tokens, device
-            )
-            residual = residual.float()
+                model, layer, input_ids, attention_mask, device
+            ).float()
+            batch_tokens = len(residual)
             output_slice = slice(written, written + batch_tokens)
             if cache_format == "fp16":
                 stored = residual.mul(RESIDUAL_FP16_SCALE)
@@ -380,9 +374,7 @@ def optimize_residual_batch(
 ) -> None:
     for start in range(0, len(residual), sae_batch_size):
         x = residual[start : start + sae_batch_size]
-        reconstruction, indices, values, pre_activations = (
-            sae.forward_with_pre_activations(x)
-        )
+        reconstruction, indices, values, pre_activations = sae(x)
         token_position = processed_tokens + start + len(x)
         fired = indices[values > FIRING_THRESHOLD].unique()
         last_fired[fired] = token_position
@@ -774,7 +766,7 @@ def evaluate_sae(
         evaluated_tokens += batch_tokens
         for start in range(0, len(residual), config.sae_batch_size):
             x = residual[start : start + config.sae_batch_size]
-            reconstruction, indices, values = sae(x)
+            reconstruction, indices, values, _ = sae(x)
             metrics.update(x, reconstruction, indices, values)
         progress.update(batch_tokens)
     progress.close()

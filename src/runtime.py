@@ -29,6 +29,13 @@ def load_causal_lm(
     return model.eval().requires_grad_(False)
 
 
+def empty_device_cache(device: torch.device) -> None:
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+    elif device.type == "mps":
+        torch.mps.empty_cache()
+
+
 def choose_device(requested: str) -> torch.device:
     if requested == "auto":
         if torch.backends.mps.is_available():

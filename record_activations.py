@@ -40,31 +40,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_config(sae_dir: Path) -> dict:
-    config_path = sae_dir / "config.json"
-    if not config_path.exists():
-        raise FileNotFoundError(f"SAE configuration not found: {config_path}")
-    return json.loads(config_path.read_text())
-
-
-def recording_cache(config: dict, cache_dir: Path) -> tuple[Path, int] | None:
-    spec = TokenCacheSpec(
-        cache_dir=cache_dir,
-        model_id=config["model_id"],
-        dataset_id=config["dataset_id"],
-        dataset_config=config["dataset_config"],
-        train_tokens=int(config["train_tokens"]),
-        validation_tokens=int(config["validation_tokens"]),
-        recording_tokens=int(config["recording_tokens"]),
-    )
-    _, _, recording_path, _ = token_cache_paths(spec)
-    if spec.recording_tokens <= 0 or not token_cache_is_valid(
-        spec, recording_only=True
-    ):
-        return None
-    return recording_path, spec.recording_tokens
-
-
 def encode_activations(
     sae: TopKSAE,
     residuals: Tensor,
@@ -79,7 +54,7 @@ def encode_activations(
     for start in range(0, len(residuals), batch_size):
         x = residuals[start : start + batch_size].float()
         x.mul_(activation_scale)
-        batch_indices, batch_values = sae.encode(x)
+        batch_indices, batch_values, _ = sae.encode(x)
         indices.append(batch_indices.cpu())
         values.append(batch_values.cpu())
     indices = torch.cat(indices)
@@ -229,13 +204,20 @@ def write_activations(
 
 def main() -> None:
     args = parse_args()
-    config = load_config(args.sae_dir)
-    cache = recording_cache(config, args.cache_dir)
-    if cache is None:
-        print("No local recording set is available; exiting.")
-        return
-
-    recording_path, available_tokens = cache
+    config = json.loads((args.sae_dir / "config.json").read_text())
+    spec = TokenCacheSpec(
+        cache_dir=args.cache_dir,
+        model_id=config["model_id"],
+        dataset_id=config["dataset_id"],
+        dataset_config=config["dataset_config"],
+        train_tokens=config["train_tokens"],
+        validation_tokens=config["validation_tokens"],
+        recording_tokens=config["recording_tokens"],
+    )
+    if spec.recording_tokens <= 0 or not token_cache_is_valid(spec, recording_only=True):
+        raise FileNotFoundError(f"no recording split for this SAE in {args.cache_dir}")
+    _, _, recording_path, _ = token_cache_paths(spec)
+    available_tokens = spec.recording_tokens
     token_count = available_tokens if args.tokens is None else args.tokens
     if token_count > available_tokens:
         raise ValueError(
@@ -256,13 +238,8 @@ def main() -> None:
         getattr(torch, config["model_dtype"]),
         device,
     )
-    _layer_path, layers = find_transformer_layers(model)
+    _, layers = find_transformer_layers(model)
     layer_index = int(config["layer_index"])
-    if not 0 <= layer_index < len(layers):
-        raise ValueError(
-            f"configured activation layer {layer_index} is not present in the model"
-        )
-
     sae = load_sae(args.sae_dir, config, device)
     model_batch_size = args.model_batch_size or int(config["model_batch_size"])
     print(

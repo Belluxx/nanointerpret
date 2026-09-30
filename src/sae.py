@@ -44,9 +44,7 @@ class TopKSAE(nn.Module):
             reconstruction = reconstruction + self.decoder_bias
         return reconstruction
 
-    def encode_with_pre_activations(
-        self, x: Tensor
-    ) -> tuple[Tensor, Tensor, Tensor]:
+    def encode(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         if self.subtract_pre_bias:
             x = x - self.decoder_bias
         pre_activations = x @ self.encoder_weight + self.encoder_bias
@@ -55,22 +53,9 @@ class TopKSAE(nn.Module):
         )
         return indices, values, pre_activations
 
-    def encode(self, x: Tensor) -> tuple[Tensor, Tensor]:
-        indices, values, _pre_activations = self.encode_with_pre_activations(x)
-        return indices, values
-
-    def forward_with_pre_activations(
-        self, x: Tensor
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-        indices, values, pre_activations = self.encode_with_pre_activations(x)
-        reconstruction = self.decode(indices, values)
-        return reconstruction, indices, values, pre_activations
-
-    def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-        reconstruction, indices, values, _pre_activations = (
-            self.forward_with_pre_activations(x)
-        )
-        return reconstruction, indices, values
+    def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        indices, values, pre_activations = self.encode(x)
+        return self.decode(indices, values), indices, values, pre_activations
 
     @torch.no_grad()
     def constrain_decoder_gradient(self) -> None:

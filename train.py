@@ -27,12 +27,11 @@ from src.experiment import (
     default_aux_k,
     evaluate_downstream_kl,
     find_transformer_layers,
-    format_metrics_line,
     iter_captured_residual_batches,
     train_sae,
 )
 from src.misc import experiment_output_dir
-from src.runtime import choose_device, load_causal_lm, load_tokenizer
+from src.runtime import choose_device, empty_device_cache, load_causal_lm, load_tokenizer
 from src.sae import TopKSAE
 
 MODEL_ID = "google/gemma-3-270m"
@@ -190,8 +189,6 @@ def run_training(
     )
     print(f"Output: {args.output_dir}")
 
-    if args.normalization_tokens <= 0:
-        raise ValueError("--normalization-tokens must be positive")
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     checkpoint_path = args.output_dir / "checkpoint_latest.pt"
@@ -290,7 +287,6 @@ def run_training(
     (args.output_dir / "validation_metrics.json").write_text(
         json.dumps(evaluation, indent=2, sort_keys=True) + "\n"
     )
-    print(format_metrics_line(evaluation))
 
 
 def main() -> None:
@@ -356,10 +352,7 @@ def main() -> None:
         if any(path.exists() for path in cache_paths):
             raise RuntimeError("Corrupted residual cache, delete it and rerun to rebuild")
         build_residual_cache(args, device, model_dtype, spec, cache_paths)
-        if device.type == "cuda":
-            torch.cuda.empty_cache()
-        elif device.type == "mps":
-            torch.mps.empty_cache()
+        empty_device_cache(device)
         metadata = load_residual_cache_metadata(spec)
         if metadata is None:
             raise RuntimeError("the residual cache failed validation after capture")
@@ -392,10 +385,7 @@ def main() -> None:
             )
         finally:
             del model
-            if device.type == "cuda":
-                torch.cuda.empty_cache()
-            elif device.type == "mps":
-                torch.mps.empty_cache()
+            empty_device_cache(device)
 
     train_data = np.load(train_path, mmap_mode="r")
     validation_data = np.load(validation_path, mmap_mode="r")
