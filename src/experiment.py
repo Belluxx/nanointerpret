@@ -120,8 +120,10 @@ def evaluate_sae(sae: TopKSAE, batches: Iterable[Tensor], token_count: int, sae_
 
 def feature_density_histogram(fire_counts: Tensor, token_count: int) -> dict:
     density = fire_counts[fire_counts > 0].cpu().double().numpy() / token_count
-    min_exponent = -math.ceil(math.log10(token_count))
-    bin_counts, bin_edges = np.histogram(np.log10(density), bins=np.linspace(min_exponent, 0.0, -min_exponent * 10 + 1))
+    # Below 10 fires, densities are a comb of integer counts, so they share one bin.
+    lowest = -math.log10(token_count)
+    edges = np.concatenate([[lowest], np.linspace(lowest + 1, 0.0, round(-(lowest + 1) * 10) + 1)])
+    bin_counts, bin_edges = np.histogram(np.log10(density), bins=edges)
     return {
         "total_features": fire_counts.numel(),
         "feature_density_log10_bin_edges": bin_edges.tolist(),
