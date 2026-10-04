@@ -16,14 +16,13 @@ from src.experiment import Config, build_sae, calibrate, downstream_kl, evaluate
 from src.plot import save_plots
 from src.runtime import capture_layer_input, choose_device, find_transformer_layers, load_causal_lm
 
-MODEL_ID = "google/gemma-3-270m"
-DATASET_ID = "HuggingFaceFW/fineweb-edu"
+DATASET_ID = "HuggingFaceFW/fineweb"
 DATASET_CONFIG = "sample-10BT"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model-id", default=MODEL_ID, help=f"Hugging Face causal language model to analyze. Default: {MODEL_ID}.")
+    parser.add_argument("--model-id", required=True, help="Hugging Face causal language model to analyze.")
     parser.add_argument("--model-dtype", choices=("float32", "float16", "bfloat16"), default="bfloat16", help="Language-model inference dtype used while capturing residuals. Default: bfloat16.")
     parser.add_argument("--activation-layer", type=int, default=None, help="Layer whose input is captured. Default: len(transformer.layers) // 2.")
     parser.add_argument("--no-compile-model", action="store_false", dest="compile_model", help="Disable compilation of transformer layers before the capture point on MPS.")
@@ -37,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--normalization-tokens", type=int, default=1_000_000, help="Training-token sample used to estimate one global activation scale.")
     parser.add_argument("--no-passthrough-massive-dims", action="store_false", dest="passthrough_massive_dims", help="Let the SAE model every residual dimension, including massive-activation dims whose std is far above the rest.")
     parser.add_argument("--width-multiplier", type=int, default=16, help="SAE feature count as a multiple of the model residual width. Default: 16.")
-    parser.add_argument("--k", type=int, default=16, help="Maximum number of SAE features active for each token. Default: 16.")
+    parser.add_argument("--k", type=int, default=32, help="Maximum number of SAE features active for each token. Default: 32.")
     parser.add_argument("--aux-k", type=int, default=None, help="Dead latents used by AuxK. Default: nearest power of two to d_model / 2.")
     parser.add_argument("--aux-k-coef", type=float, default=1 / 32, help="Weight of the AuxK reconstruction loss; set to 0 to disable AuxK. Default: 1/32.")
     parser.add_argument("--no-subtract-pre-bias", action="store_false", dest="subtract_pre_bias", help="Do not subtract the learned decoder bias from activations before encoding.")

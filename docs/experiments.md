@@ -38,10 +38,10 @@ Pre-bias subtraction and AuxK were both useful for training SAEs.
 <summary>Commands</summary>
 
 ```sh
-python3 train.py --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_aux_sub
-python3 train.py --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_sub --aux-k-coef 0
-python3 train.py --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_aux --no-subtract-pre-bias
-python3 train.py --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_plain --no-subtract-pre-bias --aux-k-coef 0
+python3 train.py --model-id unsloth/gemma-3-270m --dataset-id HuggingFaceFW/fineweb-edu --k 16 --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_aux_sub
+python3 train.py --model-id unsloth/gemma-3-270m --dataset-id HuggingFaceFW/fineweb-edu --k 16 --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_sub --aux-k-coef 0
+python3 train.py --model-id unsloth/gemma-3-270m --dataset-id HuggingFaceFW/fineweb-edu --k 16 --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_aux --no-subtract-pre-bias
+python3 train.py --model-id unsloth/gemma-3-270m --dataset-id HuggingFaceFW/fineweb-edu --k 16 --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_plain --no-subtract-pre-bias --aux-k-coef 0
 ```
 
 </details>
@@ -61,8 +61,8 @@ Disabling gradient clipping slightly improved validation metrics and increased t
 <summary>Commands</summary>
 
 ```sh
-python3 train.py --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_aux_sub
-python3 train.py --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_aux_sub_clip --gradient-clip 1
+python3 train.py --model-id unsloth/gemma-3-270m --dataset-id HuggingFaceFW/fineweb-edu --k 16 --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_aux_sub
+python3 train.py --model-id unsloth/gemma-3-270m --dataset-id HuggingFaceFW/fineweb-edu --k 16 --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_aux_sub_clip --gradient-clip 1
 ```
 
 </details>
