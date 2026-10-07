@@ -33,7 +33,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--validation-tokens", type=int, default=10_000_000, help="Dedicated token split used to evaluate the SAE. Default: 10000000.")
     parser.add_argument("--recording-tokens", type=int, default=10_000_000, help="Dedicated token split for recording feature activations. Default: 10000000.")
     parser.add_argument("--model-batch-size", type=int, default=32, help="Contexts processed together; lower this if memory is limited.")
-    parser.add_argument("--normalization-tokens", type=int, default=1_000_000, help="Training-token sample used to estimate one global activation scale.")
+    parser.add_argument("--normalization-tokens", type=int, default=1_000_000, help="Training-token sample used to calibrate sink tokens, pass-through dims, and the activation scale.")
+    parser.add_argument("--no-exclude-sinks", action="store_false", dest="exclude_sinks", help="Let the SAE model attention-sink tokens, whose residual norm is far above the median token's.")
     parser.add_argument("--no-passthrough-massive-dims", action="store_false", dest="passthrough_massive_dims", help="Let the SAE model every residual dimension, including massive-activation dims whose std is far above the rest.")
     parser.add_argument("--width-multiplier", type=int, default=16, help="SAE feature count as a multiple of the model residual width. Default: 16.")
     parser.add_argument("--k", type=int, default=32, help="Maximum number of SAE features active for each token. Default: 32.")
@@ -135,10 +136,11 @@ def main() -> None:
     config_path = output_dir / "config.json"
     if args.resume:
         saved = json.loads(config_path.read_text())
+        sink_norm_threshold = saved["sink_norm_threshold"]
         passthrough_dims, activation_scale = saved["passthrough_dims"], saved["activation_scale"]
     else:
-        passthrough_dims, activation_scale = calibrate(
-            batches("train", shuffle=True), args.normalization_tokens, args.passthrough_massive_dims
+        sink_norm_threshold, passthrough_dims, activation_scale = calibrate(
+            batches("train", shuffle=True), args.normalization_tokens, args.exclude_sinks, args.passthrough_massive_dims
         )
     config = Config(
         model_id=args.model_id,
@@ -162,6 +164,7 @@ def main() -> None:
         model_batch_size=args.model_batch_size,
         sae_batch_size=args.sae_batch_size,
         normalization_tokens=args.normalization_tokens,
+        sink_norm_threshold=sink_norm_threshold,
         passthrough_dims=passthrough_dims,
         activation_scale=activation_scale,
         seed=args.seed,

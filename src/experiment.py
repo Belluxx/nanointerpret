@@ -16,6 +16,9 @@ from .runtime import patch_layer_input
 from .sae import FIRING_THRESHOLD, RunningMetrics, TopKSAE, auxk_loss
 
 DOWNSTREAM_KL_TOKENS = 1_000_000
+# Tokens whose residual norm exceeds this multiple of the median token norm are attention
+# sinks and bypass the SAE unchanged.
+SINK_NORM_RATIO = 30.0
 # Dimensions whose std exceeds this multiple of the median dimension's std are
 # "massive activations" (attention-sink channels) and bypass the SAE unchanged.
 PASSTHROUGH_STD_RATIO = 15.0
@@ -44,6 +47,7 @@ class Config:
     model_batch_size: int
     sae_batch_size: int
     normalization_tokens: int
+    sink_norm_threshold: float | None
     passthrough_dims: list[int]
     activation_scale: float
     seed: int
@@ -54,6 +58,7 @@ def build_sae(config: Config) -> TopKSAE:
         config.d_model,
         config.width_multiplier * config.d_model,
         config.k,
+        sink_norm_threshold=config.sink_norm_threshold,
         passthrough_dims=config.passthrough_dims,
         activation_scale=config.activation_scale,
         subtract_pre_bias=config.subtract_pre_bias,
@@ -68,25 +73,41 @@ def load_sae(sae_dir: Path, device: torch.device) -> tuple[TopKSAE, Config]:
 
 
 @torch.inference_mode()
-def calibrate(batches: Iterable[Tensor], token_count: int, detect_passthrough: bool) -> tuple[list[int], float]:
-    # Pick the pass-through dims, then the scale giving the rest a mean squared norm equal to their width.
-    seen = 0
+def calibrate(
+    batches: Iterable[Tensor], token_count: int, exclude_sinks: bool, detect_passthrough: bool
+) -> tuple[float | None, list[int], float]:
+    # Pick the sink-token norm threshold and the pass-through dims, then the scale giving the
+    # remaining dims of non-sink tokens a mean squared norm equal to their width.
+    seen = kept = 0
+    sink_norm_threshold = None
     dim_sum = dim_sq_sum = 0
     with tqdm(total=token_count, unit="tok", desc="Calibrate", leave=False, dynamic_ncols=True) as progress:
         for residual in batches:
             # Float64 avoids cancellation on dims with large constant offsets. MPS silently
             # zeroes a direct float64 transfer, so move to the CPU first.
             residual = residual[: token_count - seen].cpu().double()
-            dim_sum = dim_sum + residual.sum(dim=0)
-            dim_sq_sum = dim_sq_sum + residual.square().sum(dim=0)
             seen += len(residual)
             progress.update(len(residual))
+            norms = torch.linalg.vector_norm(residual, dim=1)
+            if exclude_sinks and sink_norm_threshold is None:
+                # Sinks are rare, so the first batch already gives a stable median.
+                sink_norm_threshold = SINK_NORM_RATIO * norms.median().item()
+            if sink_norm_threshold is not None:
+                residual = residual[norms <= sink_norm_threshold]
+            kept += len(residual)
+            dim_sum = dim_sum + residual.sum(dim=0)
+            dim_sq_sum = dim_sq_sum + residual.square().sum(dim=0)
             if seen >= token_count:
                 break
 
+    if exclude_sinks:
+        print(
+            f"Sink tokens: {seen - kept:,} of {seen:,} ({(seen - kept) / seen:.2%}) | "
+            f"norm over {sink_norm_threshold:.4g} ({SINK_NORM_RATIO:.0f}x median)"
+        )
     passthrough_dims = []
     if detect_passthrough:
-        dim_std = (dim_sq_sum / seen - (dim_sum / seen).square()).sqrt()
+        dim_std = (dim_sq_sum / kept - (dim_sum / kept).square()).sqrt()
         std_ratio = dim_std / dim_std.median()
         passthrough_dims = torch.nonzero(std_ratio > PASSTHROUGH_STD_RATIO).flatten().tolist()
         print(
@@ -95,7 +116,7 @@ def calibrate(batches: Iterable[Tensor], token_count: int, detect_passthrough: b
         )
     keep = torch.ones(len(dim_sum), dtype=torch.bool)
     keep[passthrough_dims] = False
-    return passthrough_dims, math.sqrt(keep.sum().item() * seen / dim_sq_sum[keep].sum().item())
+    return sink_norm_threshold, passthrough_dims, math.sqrt(keep.sum().item() * kept / dim_sq_sum[keep].sum().item())
 
 
 @torch.inference_mode()
@@ -103,7 +124,7 @@ def evaluate_sae(sae: TopKSAE, batches: Iterable[Tensor], token_count: int, sae_
     metrics = RunningMetrics(sae)
     with tqdm(total=token_count, unit="tok", desc="Validate", leave=False, disable=None) as progress:
         for residual in batches:
-            for x in sae.normalize(residual).split(sae_batch_size):
+            for x in sae.inputs(residual).split(sae_batch_size):
                 reconstruction, indices, values, _ = sae(x)
                 metrics.update(x, reconstruction, indices, values)
             progress.update(len(residual))
@@ -222,14 +243,14 @@ def train_sae(
     status = tqdm(desc="Metrics", bar_format="{desc}", dynamic_ncols=True, disable=progress.disable)
     start_time, start_tokens, evaluation_seconds = time.monotonic(), tokens, 0.0
     for residual in train_batches(tokens // config.context_size):
-        x = sae.normalize(residual)
+        x = sae.inputs(residual)
         # Mix tokens across contexts before splitting into SAE batches, reproducibly across resumes.
         x = x[torch.randperm(len(x), generator=torch.Generator().manual_seed(config.seed + tokens)).to(device)]
         position = tokens
         for x_batch in x.split(config.sae_batch_size):
             position += len(x_batch)
             train_step(sae, optimizer, x_batch, last_fired, position, config, metrics)
-        previous, tokens = tokens, position
+        previous, tokens = tokens, tokens + len(residual)
         progress.update(tokens - previous)
         done = tokens == total_tokens
 

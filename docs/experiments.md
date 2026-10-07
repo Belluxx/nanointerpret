@@ -80,4 +80,31 @@ They carry very little information (basically how much a token acts as an attent
 
 To fix this, dimensions whose std is more than 15x the median dimension std are passed through: the SAE ignores them and they keep their original value when the reconstruction is fed back into the model. It adapts to each model automatically and it's on by default, use `--no-passthrough-massive-dims` to disable it.
 
+In Qwen these dimensions only spike on attention-sink tokens, which are now [excluded](#excluding-attention-sink-tokens) before the std is measured, so no dimension is passed through there. Gemma still needs it.
+
 ![Massive-activation dimensions and token norms for Gemma and Qwen](../assets/plots/massive_activation_dims.png)
+
+## Excluding attention-sink tokens
+
+In Qwen, massive activations belong to a few tokens rather than to dimensions. Sink tokens have a residual norm 65-92x the median token's and every other token stays under 1.7x, with nothing in between (131k training tokens, layer 14). They are the first token of every context (Qwen has no BOS, so it's an arbitrary mid-document token) and rarely a token at position 1-2. Gemma has no such gap: its BOS and punctuation tokens reach at most 16.5x, and its massive dimensions stay massive over the remaining tokens.
+
+Sinks waste SAE capacity. The previous Qwen 1.7B layer 14 SAE (k=32, 100M tokens) dedicated 39 features almost only to position 0 (over 90% of their firings), taking 93.6% of the position-0 firings, and their recorded examples are arbitrary tokens.
+
+Tokens whose residual norm exceeds 30x the median one (between Gemma's maximum and Qwen's sinks) are now left out of calibration, training, validation, and recording, and keep their original residual in the downstream KL. Calibration then finds no massive dimensions in Qwen, so the SAE models all of them.
+
+<details>
+<summary>Commands</summary>
+
+```sh
+python3 train.py --model-id unsloth/Qwen3-1.7B-Base --activation-layer 14 --dataset-id HuggingFaceFW/fineweb --train-tokens 1048576 --validation-tokens 131072 --recording-tokens 262144
+python3 train.py --model-id unsloth/gemma-3-270m --activation-layer 9 --dataset-id HuggingFaceFW/fineweb --train-tokens 2000000 --validation-tokens 262144 --recording-tokens 1048576
+```
+
+</details>
+
+| Model | Sink tokens (1M calibration tokens) | Pass-through dims |
+|---|---:|---|
+| Qwen3 1.7B, layer 14 | 0.39% | none (previously 1401, 1793, 1999) |
+| Gemma 3 270M, layer 9 | 0% | 163, 400 (unchanged) |
+
+It's on by default, use `--no-exclude-sinks` to disable it.

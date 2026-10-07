@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
@@ -12,6 +14,7 @@ class TopKSAE(nn.Module):
         d_sae: int,
         k: int,
         *,
+        sink_norm_threshold: float | None,
         passthrough_dims: list[int],
         activation_scale: float,
         subtract_pre_bias: bool,
@@ -29,12 +32,21 @@ class TopKSAE(nn.Module):
         self.d_in = d_in
         self.d_sae = d_sae
         self.k = k
+        self.sink_norm_threshold = math.inf if sink_norm_threshold is None else sink_norm_threshold
         self.activation_scale = activation_scale
         self.subtract_pre_bias = subtract_pre_bias
+
+    def is_sink(self, residual: Tensor) -> Tensor:
+        # Attention-sink tokens bypass the SAE unchanged.
+        return torch.linalg.vector_norm(residual, dim=-1, dtype=torch.float32) > self.sink_norm_threshold
 
     def normalize(self, residual: Tensor) -> Tensor:
         # (tokens, d_model) residuals -> scaled SAE inputs without the pass-through dims.
         return residual[:, self.keep].float() * self.activation_scale
+
+    def inputs(self, residual: Tensor) -> Tensor:
+        # (tokens, d_model) residuals -> SAE inputs of the non-sink tokens.
+        return self.normalize(residual[~self.is_sink(residual)])
 
     def encode(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         if self.subtract_pre_bias:
@@ -52,15 +64,18 @@ class TopKSAE(nn.Module):
 
     @torch.no_grad()
     def reconstruct(self, residual: Tensor) -> Tensor:
-        # Swap the SAE-owned dims of raw (..., d_model) residuals for their reconstruction.
+        # Swap the SAE-owned dims of raw (..., d_model) non-sink residuals for their reconstruction.
         flat = residual.reshape(-1, residual.shape[-1])
+        kept = ~self.is_sink(flat)
+        reconstruction = flat[kept]
+        reconstruction[:, self.keep] = (self(self.normalize(reconstruction))[0] / self.activation_scale).to(flat.dtype)
         output = flat.clone()
-        output[:, self.keep] = (self(self.normalize(flat))[0] / self.activation_scale).to(flat.dtype)
+        output[kept] = reconstruction
         return output.reshape_as(residual)
 
     @torch.no_grad()
     def init_pre_bias(self, residual: Tensor) -> None:
-        self.decoder_bias.copy_(geometric_median(self.normalize(residual)))
+        self.decoder_bias.copy_(geometric_median(self.inputs(residual)))
 
     @torch.no_grad()
     def constrain_decoder_gradient(self) -> None:
