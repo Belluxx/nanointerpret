@@ -1,110 +1,62 @@
 # Experiments
 
-## Lessons learned
-
-- Lowering `K` from `32` to `16` improves interpretability (but costs reconstruction accuracy). Increasing SAE width from `16x` to `32x` sometimes separates fused concepts better, but needs more data and (in Gemma 270M) doesn't fix its poor text understanding due to its tiny size. It also significantly increases duplicate features.
-- A later-layer Gemma run produced more abstract features, but they became incoherent already at medium activation levels. It's important to check the whole activation distribution.
-- FineWeb-Edu was a poor choice, features seemed to encode the dataset's educational style. For example, an apparently general fire-related feature steered the model toward educational fire-themed completions. This is evident for many features in both Gemma3 270M and Qwen3 1.7B.
-
 Hardware: M4 Max Mac Studio (CPU 16C, GPU 40C, 64GB RAM)
 
-## MPS streaming performance
-On Apple Silicon compiling each LLM layer improves its throughput by ~100% for Gemma3 270M, ~50% for Qwen3 0.6B, ~8% for Qwen3 1.7B.
+## Lessons learned
+
+- Compare runs on downstream KL: MSE and explained variance change meaning with pass-through dims and sink exclusion.
+- Lowering `K` from 32 to 16 improves interpretability at some reconstruction cost. Widening the SAE from 16x to 32x sometimes separates fused concepts, but needs more data, adds many duplicate features, and doesn't fix Gemma 270M's poor text understanding.
+- A later-layer Gemma run gave more abstract features that turned incoherent already at medium activations: check the whole activation distribution, not just the top.
+- FineWeb-Edu was a poor dataset: features picked up its educational style (a fire feature steered completions toward educational fire content), in both Gemma 3 270M and Qwen3 1.7B.
+
+## Ablations
+
+Runs train on 100M FineWeb tokens and validate on 10M held-out ones, with downstream KL on 1M of them (95% CIs are about ±0.005 for Gemma and ±0.002 for Qwen). Each row adds its flags to the base command.
 
 <details>
-<summary>Command</summary>
+<summary>Base commands</summary>
 
 ```sh
-python train.py --model-id unsloth/Qwen3-0.6B-Base --activation-layer 14 --train-tokens 1000000 --validation-tokens 100000 --normalization-tokens 100000 --dead-window 100000 --model-batch-size 32 --sae-batch-size 4096 --width-multiplier 16 --k 16
-python train.py --model-id unsloth/Qwen3-0.6B-Base --activation-layer 14 --train-tokens 1000000 --validation-tokens 100000 --normalization-tokens 100000 --dead-window 100000 --model-batch-size 32 --sae-batch-size 4096 --width-multiplier 16 --k 16 --no-compile-model
-python train.py --model-id unsloth/Qwen3-1.7B-Base --activation-layer 14 --train-tokens 1000000 --validation-tokens 100000 --normalization-tokens 100000 --dead-window 100000 --model-batch-size 32 --sae-batch-size 4096 --width-multiplier 16 --k 16
-python train.py --model-id unsloth/Qwen3-1.7B-Base --activation-layer 14 --train-tokens 1000000 --validation-tokens 100000 --normalization-tokens 100000 --dead-window 100000 --model-batch-size 32 --sae-batch-size 4096 --width-multiplier 16 --k 16 --no-compile-model
+python3 train.py --model-id unsloth/gemma-3-270m --activation-layer 9 --k 16 --train-tokens 100000000 --validation-tokens 10000000 --recording-tokens 0 --validate-every 100000000 --cache-activations
+python3 train.py --model-id unsloth/Qwen3-1.7B-Base --activation-layer 14 --train-tokens 100000000 --validation-tokens 10000000 --recording-tokens 0 --validate-every 100000000
 ```
 
 </details>
 
-| Model | Prefix compilation | Activation capture | SAE training | Streamed training |
-|---|:---:|---:|---:|---:|
-| Qwen3-0.6B, layer 14 | ✗ | 18.35k tok/s | 35.47k tok/s | 12.12k tok/s |
-| Qwen3-0.6B, layer 14 | ✓ | **28.54k tok/s** | 35.22k tok/s | **15.89k tok/s (+31%)** |
-| Qwen3-1.7B, layer 14 | ✗ | 7.89k tok/s | 17.41k tok/s | 5.41k tok/s |
-| Qwen3-1.7B, layer 14 | ✓ | **9.70k tok/s** | 17.39k tok/s | **6.18k tok/s (+14%)** |
+Gemma 3 270M, layer 9, `k=16`:
 
-## Pre-bias subtraction and AuxK
+| Run | Flags | Dead features | Downstream KL | Throughput |
+|---|---|---:|---:|---:|
+| Default | | 0.5% | 0.561 | 122k tok/s |
+| No AuxK | `--aux-k-coef 0` | 9.5% | 0.573 | 126k tok/s |
+| No pre-bias subtraction | `--no-subtract-pre-bias` | 6.0% | 0.599 | 130k tok/s |
+| Neither | `--aux-k-coef 0 --no-subtract-pre-bias` | 79.8% | 0.899 | 142k tok/s |
+| Gradient clipping | `--gradient-clip 1` | 0.5% | 0.557 | 79k tok/s |
+| No pass-through dims | `--no-passthrough-massive-dims` | 2.0% | 0.683 | 120k tok/s |
 
-Pre-bias subtraction and AuxK were both useful for training SAEs.
+- Pre-bias subtraction and AuxK both matter, and dropping both is far worse than dropping either.
+- Gradient clipping makes no difference within the KL's confidence interval but slows training by 35%, so it's off by default.
+- Passing [massive dimensions](#massive-activations) through lowers KL by 18%.
 
-<details>
-<summary>Commands</summary>
+Qwen3 1.7B, layer 14, `k=32`:
 
-```sh
-python3 train.py --model-id unsloth/gemma-3-270m --dataset-id HuggingFaceFW/fineweb-edu --k 16 --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_aux_sub
-python3 train.py --model-id unsloth/gemma-3-270m --dataset-id HuggingFaceFW/fineweb-edu --k 16 --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_sub --aux-k-coef 0
-python3 train.py --model-id unsloth/gemma-3-270m --dataset-id HuggingFaceFW/fineweb-edu --k 16 --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_aux --no-subtract-pre-bias
-python3 train.py --model-id unsloth/gemma-3-270m --dataset-id HuggingFaceFW/fineweb-edu --k 16 --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_plain --no-subtract-pre-bias --aux-k-coef 0
-```
+| Run | Flags | Pass-through dims | Dead features | Downstream KL |
+|---|---|---|---:|---:|
+| Default | | none | 9.7% | 0.148 |
+| No sink exclusion | `--no-exclude-sinks` | 1401, 1793, 1999 | 12.3% | 0.148 |
 
-</details>
+- Excluding [sink tokens](#massive-activations) leaves KL unchanged but lowers dead features, and frees the 36 features that otherwise fire almost only at position 0.
 
-| Pre-bias subtraction | AuxK | Validation MSE | Explained variance | Dead features |
-|:---:|:---:|---:|---:|---:|
-| ✓ | ✓ | **0.002327** | **99.444%** | **0.107%** |
-| ✓ | ✗ | 0.002485 | 99.407% | 23.779% |
-| ✗ | ✓ | 0.002549 | 99.391% | 21.270% |
-| ✗ | ✗ | 0.004399 | 98.949% | 94.570% |
+## Massive activations
 
-## Gradient clipping is unnecessary
+A few residual dimensions carry extremely large activations that mark attention sinks. They hold little information but dominate SAE normalization and inflate explained variance (in Gemma 3 270M one dimension holds 96% of the variance). Two automatic fixes, both on by default, keep them out of the SAE; the bypassed values are fed back to the model unchanged.
 
-Disabling gradient clipping slightly improved validation metrics and increased training throughput by ~40%.
-
-<details>
-<summary>Commands</summary>
-
-```sh
-python3 train.py --model-id unsloth/gemma-3-270m --dataset-id HuggingFaceFW/fineweb-edu --k 16 --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_aux_sub
-python3 train.py --model-id unsloth/gemma-3-270m --dataset-id HuggingFaceFW/fineweb-edu --k 16 --cache-activations --train-tokens 300000000 --checkpoint-every 150000000 --output-dir artifacts/300M_aux_sub_clip --gradient-clip 1
-```
-
-</details>
-
-| Gradient clipping | Validation MSE | Explained variance | Dead features | Training throughput |
-|:---:|---:|---:|---:|---:|
-| ✓ (1) | 0.002335 | 99.442% | 0.127% | 65k tokens/s |
-| ✗ | **0.002327** | **99.444%** | **0.107%** | **91k tokens/s (+40%)** |
-
-## Passing through massive-activation dimensions
-
-Both Qwen and Gemma have a few residual-stream dimensions with extremely large activations. In Qwen they spike at the first token of every context ([paper](https://arxiv.org/pdf/2605.11887), bottom of page 2), in Gemma at BOS and some punctuation.
-
-They carry very little information (basically how much a token acts as an attention sink), but they dominate SAE normalization / training and inflate the metrics. In Gemma 3 270M a single dimension holds 96% of the variance, so explained variance looks great even when the SAE is not.
-
-To fix this, dimensions whose std is more than 15x the median dimension std are passed through: the SAE ignores them and they keep their original value when the reconstruction is fed back into the model. It adapts to each model automatically and it's on by default, use `--no-passthrough-massive-dims` to disable it.
-
-In Qwen these dimensions only spike on attention-sink tokens, which are now [excluded](#excluding-attention-sink-tokens) before the std is measured, so no dimension is passed through there. Gemma still needs it.
+- **Sink tokens** (`--no-exclude-sinks` to disable): tokens whose residual norm exceeds 30x the median token's. In Qwen, 0.39% of tokens: the first token of every context ([paper](https://arxiv.org/pdf/2605.11887), bottom of page 2; Qwen has no BOS) and rarely one at position 1-2. Their norm is 65-92x the median, while every other token stays under 1.7x. Gemma has none: its BOS and punctuation sinks reach at most 16.5x.
+- **Pass-through dims** (`--no-passthrough-massive-dims` to disable): dimensions whose std over non-sink tokens exceeds 15x the median dimension's. Gemma gets 163 and 400. Qwen gets none, as its massive dimensions only spike on sink tokens.
 
 ![Massive-activation dimensions and token norms for Gemma and Qwen](../assets/plots/massive_activation_dims.png)
 
-## Excluding attention-sink tokens
+## Performance
 
-In Qwen, massive activations belong to a few tokens rather than to dimensions. Sink tokens have a residual norm 65-92x the median token's and every other token stays under 1.7x, with nothing in between (131k training tokens, layer 14). They are the first token of every context (Qwen has no BOS, so it's an arbitrary mid-document token) and rarely a token at position 1-2. Gemma has no such gap: its BOS and punctuation tokens reach at most 16.5x, and its massive dimensions stay massive over the remaining tokens.
-
-Sinks waste SAE capacity. The previous Qwen 1.7B layer 14 SAE (k=32, 100M tokens) dedicated 39 features almost only to position 0 (over 90% of their firings), taking 93.6% of the position-0 firings, and their recorded examples are arbitrary tokens.
-
-Tokens whose residual norm exceeds 30x the median one (between Gemma's maximum and Qwen's sinks) are now left out of calibration, training, validation, and recording, and keep their original residual in the downstream KL. Calibration then finds no massive dimensions in Qwen, so the SAE models all of them.
-
-<details>
-<summary>Commands</summary>
-
-```sh
-python3 train.py --model-id unsloth/Qwen3-1.7B-Base --activation-layer 14 --dataset-id HuggingFaceFW/fineweb --train-tokens 1048576 --validation-tokens 131072 --recording-tokens 262144
-python3 train.py --model-id unsloth/gemma-3-270m --activation-layer 9 --dataset-id HuggingFaceFW/fineweb --train-tokens 2000000 --validation-tokens 262144 --recording-tokens 1048576
-```
-
-</details>
-
-| Model | Sink tokens (1M calibration tokens) | Pass-through dims |
-|---|---:|---|
-| Qwen3 1.7B, layer 14 | 0.39% | none (previously 1401, 1793, 1999) |
-| Gemma 3 270M, layer 9 | 0% | 163, 400 (unchanged) |
-
-It's on by default, use `--no-exclude-sinks` to disable it.
+- On MPS, compiling the layers before the capture point speeds up activation capture by ~2x for Gemma 3 270M, ~1.5x for Qwen3 0.6B, and ~1.2x for Qwen3 1.7B.
+- With the defaults, Gemma 3 270M trains at ~122k tok/s on cached residuals and Qwen3 1.7B at ~6.3k tok/s streamed; both are GPU-bound.
