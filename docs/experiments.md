@@ -54,9 +54,9 @@ A few residual dimensions carry extremely large activations that mark attention 
 - **Sink tokens** (`--no-exclude-sinks` to disable): tokens whose residual norm exceeds 30x the median token's. In Qwen, 0.39% of tokens: the first token of every context ([paper](https://arxiv.org/pdf/2605.11887), bottom of page 2; Qwen has no BOS) and rarely one at position 1-2. Their norm is 65-97x the median, while every other token stays under 4x. Gemma has none: its BOS and punctuation sinks stay under 17x.
 - **Pass-through dims** (`--no-passthrough-massive-dims` to disable): dimensions whose std over non-sink tokens exceeds 15x the median dimension's. Gemma gets 163 and 400. Qwen gets none, as its massive dimensions only spike on sink tokens.
 
-![Massive-activation dimensions and token norms for Gemma and Qwen](../assets/plots/massive_activation_dims.png)
-
 ![Token norms by context position for Gemma and Qwen, and the Qwen SAE features that capture sink tokens without exclusion](../assets/plots/attention_sink_tokens.png)
+
+![Residual dimensions ranked by std as calibration measures them, for Gemma and for Qwen with and without sink tokens](../assets/plots/massive_activation_dims.png)
 
 ## Performance
 
