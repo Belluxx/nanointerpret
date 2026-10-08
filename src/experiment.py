@@ -153,13 +153,12 @@ def feature_density_histogram(fire_counts: Tensor, token_count: int) -> dict:
 
 
 @torch.inference_mode()
-def downstream_kl(sae: TopKSAE, model: nn.Module, layer: nn.Module, contexts: np.ndarray) -> dict:
+def downstream_kl(sae: TopKSAE, model: nn.Module, layer: nn.Module, contexts: np.ndarray, batch_size: int) -> dict:
     # Mean KL(base || SAE) over next-token predictions, with a 95% CI over contexts.
     contexts = contexts[: DOWNSTREAM_KL_TOKENS // contexts.shape[1]]
     context_kls = []
-    # One context at a time keeps the full-vocabulary logits memory-bounded.
-    for context in tqdm(contexts, unit="ctx", desc="Downstream KL", leave=False, disable=None):
-        input_ids = torch.from_numpy(context[None].astype(np.int64)).to(model.device)
+    for start in tqdm(range(0, len(contexts), batch_size), unit="batch", desc="Downstream KL", leave=False, disable=None):
+        input_ids = torch.from_numpy(contexts[start : start + batch_size].astype(np.int64)).to(model.device)
         base_logits = model(input_ids=input_ids, use_cache=False).logits[:, :-1].float()
         with patch_layer_input(layer, sae.reconstruct):
             sae_logits = model(input_ids=input_ids, use_cache=False).logits[:, :-1].float()
@@ -170,9 +169,10 @@ def downstream_kl(sae: TopKSAE, model: nn.Module, layer: nn.Module, contexts: np
         sae_logits.neg_().add_(base_logits)
         base_logits.sub_(base_log_z.unsqueeze(-1)).exp_()
         token_kl = sae_logits.mul_(base_logits).sum(dim=-1).add_(sae_log_z).sub_(base_log_z)
-        context_kls.append(token_kl.mean().item())
+        context_kls.append(token_kl.mean(dim=1))
 
     # Every context has the same number of predictions, so this is the token mean.
+    context_kls = torch.cat(context_kls).cpu().double().numpy()
     mean_kl = float(np.mean(context_kls))
     margin = 1.96 * float(np.std(context_kls, ddof=1)) / math.sqrt(len(context_kls))
     return {"downstream_kl": mean_kl, "downstream_kl_ci": [max(0.0, mean_kl - margin), mean_kl + margin]}

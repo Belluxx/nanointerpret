@@ -13,7 +13,7 @@ from tqdm.auto import tqdm
 
 from src.data import as_contexts, context_batches, token_cache
 from src.experiment import load_sae
-from src.runtime import capture_layer_input, choose_device, find_transformer_layers, load_causal_lm
+from src.runtime import capture_layer_input, choose_device, compile_layers_before, find_transformer_layers, load_causal_lm
 from src.sae import FIRING_THRESHOLD, TopKSAE
 
 VALUE_DTYPE = np.float16
@@ -26,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"), help="Token-cache directory populated during training. Default: artifacts/token_cache.")
     parser.add_argument("--tokens", type=int, default=None, help="Recording tokens to process, rounded down to whole contexts. Default: the full recording split.")
     parser.add_argument("--model-batch-size", type=int, default=None, help="Contexts processed together. Default: the training configuration.")
+    parser.add_argument("--no-compile-model", action="store_false", dest="compile_model", help="Disable compilation of transformer layers before the capture point on MPS.")
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
     parser.add_argument("--output", type=Path, default=None, help="Output directory. Default: <sae-dir>/activations.")
     return parser.parse_args()
@@ -138,7 +139,10 @@ def main() -> None:
         raise ValueError("no recording tokens; train with --recording-tokens of at least one context")
 
     model = load_causal_lm(config.model_id, config.model_dtype, device)
-    layer = find_transformer_layers(model)[config.layer_index]
+    layers = find_transformer_layers(model)
+    if args.compile_model and device.type == "mps":
+        compile_layers_before(layers, config.layer_index)
+    layer = layers[config.layer_index]
     print(f"Device: {device} | Recording: {contexts.size:,} tokens | Layer: {config.layer_index} | Output: {output}")
 
     temporary = output.with_name(output.name + ".tmp")

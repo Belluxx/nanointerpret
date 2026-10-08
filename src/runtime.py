@@ -28,6 +28,13 @@ def find_transformer_layers(model: nn.Module) -> nn.ModuleList:
     return max(candidates, key=len)
 
 
+def compile_layers_before(layers: nn.ModuleList, layer_index: int) -> None:
+    print(f"Compiling {layer_index} transformer layers for MPS")
+    # The capture layer stays eager so its forward pre-hook remains visible.
+    for index in range(layer_index):
+        layers[index] = torch.compile(layers[index], dynamic=False)
+
+
 @contextmanager
 def patch_layer_input(layer: nn.Module, patch: Callable[[Tensor], Tensor]) -> Iterator[None]:
     def hook(_module, args, kwargs):

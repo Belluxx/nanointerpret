@@ -49,9 +49,10 @@ class TopKSAE(nn.Module):
         return self.normalize(residual[~self.is_sink(residual)])
 
     def encode(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-        if self.subtract_pre_bias:
-            x = x - self.decoder_bias
         pre_activations = x @ self.encoder_weight + self.encoder_bias
+        if self.subtract_pre_bias:
+            # Equal to encoding x - decoder_bias, but its gradient skips a batch-sized matmul.
+            pre_activations = pre_activations - self.decoder_bias @ self.encoder_weight
         values, indices = torch.topk(F.relu(pre_activations), self.k, dim=-1, sorted=False)
         return indices, values, pre_activations
 

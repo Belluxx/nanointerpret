@@ -1,5 +1,7 @@
 import os
+from collections import deque
 from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +12,8 @@ from tqdm.auto import tqdm
 # Residuals are cached as fp16, scaled down so outlier activations fit.
 RESIDUAL_FP16_SCALE = 1 / 256
 TOKENIZE_BATCH_CHARS = 32 << 20
+# Residual-cache batches read in the background ahead of the one in use.
+READ_AHEAD = 4
 
 
 def cache_name(*parts: object) -> str:
@@ -104,5 +108,16 @@ def residual_cache(
     return np.load(path, mmap_mode="r")
 
 
-def read_residual_cache(cache: np.ndarray, ids: np.ndarray, device: torch.device) -> Tensor:
-    return torch.from_numpy(cache[ids]).to(device).flatten(0, 1).float() / RESIDUAL_FP16_SCALE
+def read_residual_cache(cache: np.ndarray, batches: Iterable[np.ndarray], device: torch.device) -> Iterator[Tensor]:
+    # Upcoming batches are read in background threads, so disk reads overlap GPU work.
+    def to_device(residual: np.ndarray) -> Tensor:
+        return torch.from_numpy(residual).to(device).flatten(0, 1).float() / RESIDUAL_FP16_SCALE
+
+    with ThreadPoolExecutor(READ_AHEAD) as pool:
+        pending = deque()
+        for ids in batches:
+            pending.append(pool.submit(cache.__getitem__, ids))
+            if len(pending) > READ_AHEAD:
+                yield to_device(pending.popleft().result())
+        while pending:
+            yield to_device(pending.popleft().result())

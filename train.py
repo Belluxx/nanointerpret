@@ -14,7 +14,7 @@ import torch
 from src.data import as_contexts, cache_name, context_batches, read_residual_cache, residual_cache, token_cache
 from src.experiment import Config, build_sae, calibrate, downstream_kl, evaluate_sae, train_sae
 from src.plot import save_plots
-from src.runtime import capture_layer_input, choose_device, find_transformer_layers, load_causal_lm
+from src.runtime import capture_layer_input, choose_device, compile_layers_before, find_transformer_layers, load_causal_lm
 
 DATASET_ID = "HuggingFaceFW/fineweb"
 DATASET_CONFIG = "sample-10BT"
@@ -86,10 +86,7 @@ def main() -> None:
     if not args.resume and any(output_dir.glob("*.pt")):
         raise FileExistsError(f"{output_dir} already holds a run; pass --resume or choose another --output-dir")
     if args.compile_model and device.type == "mps":
-        print(f"Compiling {layer_index} transformer layers for MPS")
-        # The capture layer stays eager so its forward pre-hook remains visible.
-        for index in range(layer_index):
-            layers[index] = torch.compile(layers[index], dynamic=False)
+        compile_layers_before(layers, layer_index)
 
     splits = {
         "train": (0, args.train_tokens),
@@ -119,11 +116,10 @@ def main() -> None:
             return
 
     def batches(split: str, shuffle: bool = False, skip: int = 0) -> Iterator[torch.Tensor]:
-        for ids in context_batches(len(contexts[split]), args.model_batch_size, shuffle=shuffle, seed=args.seed, skip=skip):
-            if caches:
-                yield read_residual_cache(caches[split], ids, device)
-            else:
-                yield capture(split, ids).flatten(0, 1)
+        ids = context_batches(len(contexts[split]), args.model_batch_size, shuffle=shuffle, seed=args.seed, skip=skip)
+        if caches:
+            return read_residual_cache(caches[split], ids, device)
+        return (capture(split, batch_ids).flatten(0, 1) for batch_ids in ids)
 
     print(
         f"Device: {device} | Mode: {'cached' if caches else 'streaming'} | "
@@ -179,9 +175,10 @@ def main() -> None:
         sae.init_pre_bias(next(batches("train", shuffle=True)))
 
     def evaluate() -> dict:
+        # Full-vocabulary logits dwarf residuals, so the KL runs on an eighth of the model batch.
         return {
             **evaluate_sae(sae, batches("validation"), contexts["validation"].size, config.sae_batch_size),
-            **downstream_kl(sae, model, layer, contexts["validation"]),
+            **downstream_kl(sae, model, layer, contexts["validation"], max(1, config.model_batch_size // 8)),
         }
 
     train_sae(
