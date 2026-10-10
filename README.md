@@ -23,15 +23,6 @@ pip install -r requirements.txt
 - [Gemma3 270M Base](docs/training-guides/gemma.md) (~5GB free RAM required)
 - [Qwen3 1.7B Base](docs/training-guides/qwen.md) (~14GB free RAM required)
 
-## Details
+## Todos
 
-The repo takes different ideas from [OpenAI](https://arxiv.org/abs/2406.04093) and [Anthropic](https://transformer-circuits.pub/2024/scaling-monosemanticity/index.html). It also includes various ablation experiments I did to see what works best ([experiments.md](docs/experiments.md))
-
-Future objectives:
-- [ ] Use later layers to avoid heavily syntactic features
-- [ ] Use llama.cpp to run LLM and capture acivations
-- [ ] Test on 3B-7B models
-- [ ] Test on interactive chat tuned models (the repo uses pretrained base Gemma/Qwen)
-
-> [!NOTE]
-> This should not be taken as a reference implementation. I made this project just to get started with an hands-on approach and share the results publicly.
+- [ ] Dead features: `--dead-window 1000000`, linear decay over last 20%
