@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <style>
+    .branches { fill: none; stroke: #222221; stroke-width: 1.4; }
+    .input { fill: #8C8C87; }
+    .feature { fill: #222221; }
+
+    @media (prefers-color-scheme: dark) {
+      .branches { stroke: #E9E9E6; }
+      .input { fill: #85857F; }
+      .feature { fill: #E9E9E6; }
+    }
+  </style>
+  <path class="branches" d="M12 19.5C12 12.5 6 12 6 5M12 19.5C12 12.5 18 12 18 5"/>
+  <circle class="input" cx="12" cy="19.5" r="2.3"/>
+  <circle class="feature" cx="6" cy="5" r="2.5"/>
+  <circle class="feature" cx="18" cy="5" r="2.5"/>
+</svg>

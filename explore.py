@@ -46,8 +46,6 @@ class ExplorerHandler(SimpleHTTPRequestHandler):
         if path == "/api/features":
             low, high = (float(query["low"]), float(query["high"])) if "low" in query else (None, None)
             return self.index.browse(query["sort"], int(query["offset"]), int(query["limit"]), low, high)
-        if path == "/api/random":
-            return {"id": self.index.random()}
         if path.startswith("/api/feature/"):
             return self.index.feature(int(path.removeprefix("/api/feature/")))
         if path == "/api/token":

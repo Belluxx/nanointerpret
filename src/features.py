@@ -92,9 +92,6 @@ class FeatureIndex:
             features = features[(log_density >= low - 1e-9) & (log_density < high - 1e-9)]
         return [self.row(feature) for feature in features[offset : offset + limit]]
 
-    def random(self) -> int:
-        return int(np.random.choice(np.flatnonzero(self.counts)))
-
     @lru_cache(maxsize=64)
     def feature(self, feature: int) -> dict:
         if not 0 <= feature < len(self.counts):

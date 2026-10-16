@@ -4,28 +4,35 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Feature Explorer</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='1' width='14' height='14' fill='%231A1A1A'/%3E%3Crect x='4' y='9' width='2' height='4' fill='%23fff'/%3E%3Crect x='7' y='4' width='2' height='9' fill='%23fff'/%3E%3Crect x='10' y='7' width='2' height='6' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="#/">nanointerpret<span>/explorer</span></a>
-    <form id="search"><input id="query" type="search" placeholder="Feature # or token" aria-label="Feature number or token" autocomplete="off" spellcheck="false"></form>
-    <button class="button" id="random" type="button" title="Random feature (R)">Random</button>
+    <a class="brand" href="#/">
+      <img class="logo" src="/logo.svg" alt="">
+      nanointerpret<span>explorer</span>
+    </a>
+    <form id="search" role="search">
+      <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="m10.25 10.25 3.25 3.25"/></svg>
+      <input id="query" type="search" placeholder="Search a feature # or token" aria-label="Feature number or token" autocomplete="off" spellcheck="false">
+      <kbd>/</kbd>
+    </form>
   </header>
-  <div class="layout">
-    <aside class="sidebar">
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <span>Features<span id="count"></span></span>
       <select id="sort" aria-label="Sort">
         <option value="density">Density ↓</option>
         <option value="rarity">Density ↑</option>
         <option value="max">Max activation ↓</option>
         <option value="id">Feature #</option>
       </select>
-      <button class="range" id="range" type="button" title="Clear the density filter" hidden></button>
-      <div class="list" id="list"></div>
-    </aside>
-    <main class="main" id="main"></main>
-  </div>
+    </div>
+    <button class="range" id="range" type="button" title="Clear the density filter" hidden></button>
+    <nav class="list" id="list"></nav>
+  </aside>
+  <main class="main" id="main"></main>
   <div class="tooltip" id="tooltip" hidden></div>
   <script type="module" src="/app.js"></script>
 </body>

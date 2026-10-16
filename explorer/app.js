@@ -28,6 +28,9 @@ function create(namespace, tag, props, children) {
 
 const el = (tag, props = {}, ...children) => create(null, tag, props, children);
 const svg = (tag, props = {}, ...children) => create('http://www.w3.org/2000/svg', tag, props, children);
+const icon = (path) => svg('svg', { class: 'icon', viewBox: '0 0 16 16', 'aria-hidden': 'true' }, svg('path', { d: path }));
+const kbd = (key) => el('kbd', {}, key);
+const track = (fraction) => el('span', { class: 'track' }, el('span', { style: { width: `${100 * fraction}%` } }));
 
 async function api(path) {
   const response = await fetch(path);
@@ -57,12 +60,12 @@ function tokenLabel(text, className = 'token') {
 function exampleToken(example, index, peak, multiline) {
   const text = example.tokens[index];
   const act = example.acts[index];
-  const alpha = act > 0 ? 8 + 82 * Math.min(act / peak, 1) : 0;
+  const alpha = act > 0 ? 6 + 72 * Math.min(act / peak, 1) : 0;
   const content = example.special.includes(index)
     ? el('span', { class: 'special' }, text.replace(/^<\|?|\|?>$/g, ''))
     : text.split('\n').flatMap((line, lineIndex) => (lineIndex ? [el('span', { class: 'nl' }, multiline ? '⏎\n' : '⏎'), line] : [line]));
   return el('span', {
-    class: `t${index === example.center ? ' peak' : ''}${alpha >= 60 ? ' on' : ''}`,
+    class: `t${index === example.center ? ' peak' : ''}${alpha >= 55 ? ' on' : ''}`,
     style: alpha ? { background: `color-mix(in srgb, var(--ink) ${alpha.toFixed(1)}%, transparent)` } : null,
     dataset: { tip: `${act > 0 ? act.toFixed(2) : 'not firing'}\n${quoted(text)}` },
   }, content);
@@ -98,18 +101,22 @@ document.addEventListener('pointerover', (event) => {
 document.addEventListener('pointermove', (event) => tooltip.hidden || moveTip(event.clientX, event.clientY));
 document.documentElement.addEventListener('pointerleave', () => { tooltip.hidden = true; });
 
-/* Activation frequency chart, redrawn at the container's pixel width so text keeps its CSS size. */
+/* Feature density: the overview histogram and a sparkline of it. */
+
+// Percent of features per decade, so the wider lowest bin stays comparable (as in the training plot).
+const perDecade = ({ feature_density_log10_bin_edges: edges, feature_density_bin_counts: counts, total_features: total }) =>
+  counts.map((count, index) => (100 * count) / total / (edges[index + 1] - edges[index]));
 
 function densityChart(histogram) {
   const box = el('div', { class: 'chart' });
-  new ResizeObserver(() => box.replaceChildren(drawDensity(histogram, box.clientWidth, 240))).observe(box);
+  new ResizeObserver(() => box.replaceChildren(drawDensity(histogram, box.clientWidth, 280))).observe(box);
   return box;
 }
 
-function drawDensity({ feature_density_log10_bin_edges: edges, feature_density_bin_counts: counts, total_features: total }, width, height) {
+function drawDensity(histogram, width, height) {
+  const { feature_density_log10_bin_edges: edges, feature_density_bin_counts: counts } = histogram;
   const margin = { left: 30, right: 4, top: 6, bottom: 24 };
-  // Percent of features per decade, so the wider lowest bin stays comparable (as in the training plot).
-  const values = counts.map((count, index) => (100 * count) / total / (edges[index + 1] - edges[index]));
+  const values = perDecade(histogram);
   const rough = Math.max(...values) / 5;
   const power = 10 ** Math.floor(Math.log10(rough));
   const step = [1, 2, 5, 10].map((factor) => factor * power).find((candidate) => candidate >= rough);
@@ -121,8 +128,9 @@ function drawDensity({ feature_density_log10_bin_edges: edges, feature_density_b
   counts.forEach((count, index) => {
     const range = index ? `${percent(10 ** edges[index])}–${percent(10 ** edges[index + 1])}` : '1–9 fires';
     root.append(svg('rect', {
+      class: list.range?.low === edges[index] ? 'selected' : null,
       x: x(edges[index]), width: x(edges[index + 1]) - x(edges[index]), y: margin.top, height: y(0) - margin.top,
-      dataset: { tip: `${integer.format(count)} features\ndensity ${range}\nclick to list them` },
+      dataset: { low: edges[index], tip: `${integer.format(count)} features\ndensity ${range}\nclick to list them` },
       onclick: () => filterDensity(edges[index], edges[index + 1], range),
     }));
   });
@@ -141,67 +149,99 @@ function drawDensity({ feature_density_log10_bin_edges: edges, feature_density_b
   return root;
 }
 
+function densitySpark(density) {
+  const { feature_density_log10_bin_edges: edges, feature_density_bin_counts: counts, total_features: total } = overview.density_histogram;
+  const [width, height] = [120, 30];
+  const values = perDecade(overview.density_histogram);
+  const x = (logDensity) => (1 - logDensity / edges[0]) * width;
+  const y = (value) => height * (1 - value / Math.max(...values));
+  const steps = values.map((value, index) => `V${y(value)}H${x(edges[index + 1])}`).join('');
+  // The feature's whole bin counts as denser, so the rank is at the histogram's resolution.
+  const denser = counts.reduce((sum, count, index) => sum + (edges[index + 1] > Math.log10(density) ? count : 0), 0);
+  const marker = x(Math.log10(density));
+  return svg('svg', { class: 'spark', width, height, dataset: { tip: `top ${percent(denser / total)} by density\nof all ${integer.format(total)} features` } },
+    svg('path', { d: `M0,${height}${steps}V${height}Z` }),
+    svg('line', { class: 'axis', x1: 0, x2: width, y1: height, y2: height }),
+    svg('line', { x1: marker, x2: marker, y1: 6, y2: height }),
+    svg('rect', { x: marker - 2.5, y: 3.5, width: 5, height: 5 }));
+}
+
 /* Views */
 
-function card(title, ...body) {
-  return el('section', { class: 'card' }, el('h2', {}, title), body);
+function card(title, meta, ...body) {
+  return el('section', { class: 'card' }, el('h2', {}, title, meta && el('span', { class: 'meta' }, meta)), body);
 }
 
 function barList(rows, value, format, tip) {
   const largest = Math.max(...rows.map(value));
   return el('div', { class: 'bars' }, rows.map((row) => el('a', { href: tokenHref(row.token), dataset: { tip: tip(row) } },
     tokenLabel(row.token),
-    el('span', { class: 'track' }, el('span', { style: { width: `${(100 * value(row)) / largest}%` } })),
+    track(value(row) / largest),
     el('span', { class: 'num' }, format(row)))));
 }
 
-function pageHead(title, subtitle, ...extra) {
-  return el('div', { class: 'page-head' }, el('div', {}, title, el('p', {}, subtitle)), extra);
+function pageHead(eyebrow, title, ...extra) {
+  return el('div', { class: 'page-head' }, el('div', {}, el('p', { class: 'eyebrow' }, eyebrow), title), extra);
+}
+
+function stats(items) {
+  return el('dl', { class: 'stats' }, items.map(([label, ...value]) => el('div', {}, el('dt', {}, label), el('dd', {}, value))));
+}
+
+// Four rising bars, with the one for this quarter of the max activation filled in.
+function quartile(low) {
+  return el('span', { class: 'quartile' }, [0, 0.25, 0.5, 0.75].map((edge) => el('span', { class: edge === low ? 'on' : null })));
 }
 
 function overviewView() {
-  const facts = [overview.model_id, `layer ${overview.layer_index}`, `${integer.format(overview.d_sae)} features`, `k ${overview.k}`,
-    `${integer.format(overview.tokens)} tokens recorded`];
   return el('div', {},
-    pageHead(el('h1', { class: 'text' }, overview.run), facts.join(' · ')),
-    card('Activation frequency, % of features per decade', densityChart(overview.density_histogram)));
+    pageHead('Run', el('h1', { class: 'text' }, overview.run)),
+    stats([['Model', overview.model_id], ['Layer', overview.layer_index], ['Features', integer.format(overview.d_sae)], ['k', overview.k],
+      ['Tokens recorded', integer.format(overview.tokens)]]),
+    card('Activation frequency', '% of features per decade of density · click a bin to list it', densityChart(overview.density_histogram)),
+    el('p', { class: 'hint' },
+      el('span', {}, kbd('/'), 'Search'),
+      el('span', {}, kbd('←'), kbd('→'), 'Step through features')));
 }
 
 function featureView(data) {
-  const sections = [['Top activations', null, data.top], ...data.ranges.map((range) => [
-    `${range.low * 100}–${range.high * 100}% of max`, `${percent(range.share)} of fires`, range.examples])];
+  const sections = [['Top activations', 'one per context', data.top], ...data.ranges.map((range) => [
+    [quartile(range.low), `${range.low * 100}–${range.high * 100}% of max`], `${percent(range.share)} of fires`, range.examples])];
   return el('div', {},
-    pageHead(
-      el('h1', {}, el('span', { class: 'hash' }, '#'), data.id),
-      data.fires ? `${percent(data.density)} of tokens · ${integer.format(data.fires)} fires · max ${data.max.toFixed(2)}` : 'Never fires in the recorded tokens',
-      el('nav', {},
-        el('a', { class: 'button', href: featureHref(data.id - 1), title: 'Previous feature (←)' }, '←'),
-        el('a', { class: 'button', href: featureHref(data.id + 1), title: 'Next feature (→)' }, '→'))),
+    pageHead('Feature', el('h1', {}, el('span', { class: 'hash' }, '#'), data.id),
+      el('nav', { class: 'stepper' },
+        el('a', { class: 'button', href: featureHref(data.id - 1), title: 'Previous feature (←)' }, icon('M10 3.5 5.5 8l4.5 4.5')),
+        el('a', { class: 'button', href: featureHref(data.id + 1), title: 'Next feature (→)' }, icon('M6 3.5 10.5 8 6 12.5')))),
+    data.fires
+      ? stats([['Density', percent(data.density), densitySpark(data.density)], ['Fires', integer.format(data.fires)],
+        ['Max activation', data.max.toFixed(2)], ['Peaks on', tokenLabel(data.peak_token)]])
+      : el('p', { class: 'lede' }, 'Never fires in the recorded tokens'),
     el('div', { class: 'columns' },
-      data.fires > 0 && el('section', { class: 'card' }, sections.map(([title, meta, examples]) => [
-        el('h2', {}, title, meta && el('span', {}, meta)), examples.map((example) => exampleRow(example, data.max))])),
-      el('div', { class: 'side' },
-        data.fires > 0 && card('Fires on', barList(data.fires_on, (row) => row.share, (row) => percent(row.share),
+      data.fires > 0 && el('div', { class: 'stack' },
+        sections.map(([title, meta, examples]) => card(title, meta, examples.map((example) => exampleRow(example, data.max))))),
+      el('div', { class: 'stack side' },
+        data.fires > 0 && card('Fires on', 'share of fires', barList(data.fires_on, (row) => row.share, (row) => percent(row.share),
           (row) => `${percent(row.share)} of this feature's fires\n${quoted(row.token)}: fires on ${percent(row.precision)} of its occurrences`)),
-        card('Promotes', barList(data.promotes, (row) => row.logit, (row) => `+${row.logit.toFixed(2)}`,
+        card('Promotes', 'logit effect', barList(data.promotes, (row) => row.logit, (row) => `+${row.logit.toFixed(2)}`,
           (row) => `+${row.logit.toFixed(2)} logit\n${quoted(row.token)}, centered over the vocabulary`)))));
 }
 
 function tokenView(text, { matches, pieces, features }) {
+  const head = pageHead('Token', el('h1', { class: 'text' }, quoted(text)));
   if (!matches.length) {
-    return pageHead(el('h1', { class: 'text' }, quoted(text)), ['No single token matches. Its pieces:',
-      pieces.map((piece) => el('a', { href: tokenHref(piece) }, tokenLabel(piece)))]);
+    return el('div', {}, head, el('p', { class: 'lede' }, 'No single token matches. Its pieces:',
+      pieces.map((piece) => el('a', { href: tokenHref(piece) }, tokenLabel(piece)))));
   }
   const occurrences = matches.reduce((sum, match) => sum + match.occurrences, 0);
-  return el('div', {},
-    pageHead(el('h1', { class: 'text' }, quoted(text)), [matches.map((match) => tokenLabel(match.token)), `${integer.format(occurrences)} occurrences`]),
+  return el('div', {}, head,
+    stats([['Matches', matches.map((match) => tokenLabel(match.token))], ['Occurrences', integer.format(occurrences)]]),
     el('section', { class: 'card scroll' }, el('table', {},
       el('thead', {}, el('tr', {}, ['Feature', 'Peaks on', 'Mean act.', 'Of its fires'].map((label) => el('th', {}, label)))),
       el('tbody', {}, features.map((row) => el('tr', { onclick: () => { location.hash = featureHref(row.id); } },
         el('td', {}, el('a', { href: featureHref(row.id) }, `#${row.id}`)),
         el('td', {}, tokenLabel(row.peak_token)),
         el('td', {}, row.mean.toFixed(2)),
-        el('td', {}, percent(row.share))))))));
+        el('td', {}, track(row.share), percent(row.share))))))));
 }
 
 async function show(path, build) {
@@ -217,6 +257,7 @@ async function show(path, build) {
   main.classList.remove('loading');
   tooltip.hidden = true;
   main.replaceChildren(view);
+  main.scrollTop = 0;
   scrollTo(0, 0);
 }
 
@@ -245,8 +286,9 @@ new IntersectionObserver(([entry]) => entry.isIntersecting && loadMore(), { root
 
 function filterDensity(low, high, label) {
   list.range = low == null ? null : { low, high };
-  rangeButton.textContent = `Density ${label} ×`;
+  rangeButton.textContent = `Density ${label}`;
   rangeButton.hidden = !list.range;
+  for (const bin of document.querySelectorAll('.chart rect')) bin.classList.toggle('selected', Number(bin.dataset.low) === low);
   resetList();
 }
 
@@ -272,10 +314,6 @@ async function loadMore() {
 
 /* Controls */
 
-async function goRandom() {
-  location.hash = featureHref((await api('/api/random')).id);
-}
-
 document.getElementById('search').addEventListener('submit', (event) => {
   event.preventDefault();
   const text = query.value.trim();
@@ -287,7 +325,6 @@ document.addEventListener('keydown', (event) => {
   if (event.metaKey || event.ctrlKey || event.altKey || event.target.closest('input, select')) return;
   const actions = {
     '/': () => query.focus(),
-    r: goRandom,
     ArrowLeft: () => current != null && (location.hash = featureHref(current - 1)),
     ArrowRight: () => current != null && (location.hash = featureHref(current + 1)),
   };
@@ -296,11 +333,11 @@ document.addEventListener('keydown', (event) => {
   actions[event.key]();
 });
 
-document.getElementById('random').addEventListener('click', goRandom);
 sort.addEventListener('change', resetList);
 rangeButton.addEventListener('click', () => filterDensity(null));
 window.addEventListener('hashchange', route);
 
 overview = await api('/api/overview');
+document.getElementById('count').textContent = integer.format(overview.d_sae);
 resetList();
 route();
