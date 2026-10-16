@@ -75,6 +75,13 @@ class FeatureIndex:
         self.interpretations = {record["feature"]: record for record in map(json.loads, lines)}
         self.named = np.zeros(len(self.counts), dtype=bool)
         self.named[list(self.interpretations)] = True
+        tests, detection = np.zeros(len(self.counts)), np.zeros(len(self.counts))
+        for feature, record in self.interpretations.items():
+            tests[feature] = record["generation"]["pair_accuracy"]
+            detection[feature] = record["detection"]["balanced_accuracy"]
+        # Generated tests first, detection breaking ties.
+        self.check_rank = np.empty(len(self.counts), dtype=np.int64)
+        self.check_rank[np.lexsort((-detection, -tests))] = np.arange(len(self.counts))
 
     def overview(self) -> dict:
         return {
@@ -92,7 +99,7 @@ class FeatureIndex:
         return {"id": int(feature), "density": float(self.density[feature]), "peak_token": self.peak_tokens[feature], "title": title}
 
     def browse(self, sort: str, offset: int, limit: int, low: float | None, high: float | None) -> list[dict]:
-        keys = {"density": -self.density, "rarity": self.density, "max": -self.max, "id": np.arange(len(self.counts))}
+        keys = {"density": -self.density, "rarity": self.density, "max": -self.max, "id": np.arange(len(self.counts)), "check": self.check_rank}
         features = np.argsort(keys[sort], kind="stable")
         if low is not None:
             # Bounds are log10 densities from the overview histogram; the tolerance keeps exact edges inside.
