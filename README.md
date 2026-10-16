@@ -27,4 +27,5 @@ pip install -r requirements.txt
 
 ## Todos
 
+- [ ] Test on instruct (chat) models
 - [ ] Dead features: `--dead-window 1000000`, linear decay over last 20%
