@@ -98,7 +98,7 @@ kbd {
 .brand { align-self: stretch; display: flex; align-items: center; gap: 11px; padding-left: 22px; background: var(--frame); font-size: 14.5px; font-weight: 500; letter-spacing: -0.01em; }
 .brand span { color: var(--muted); font-weight: 400; }
 .brand span::before { content: "/"; margin: 0 6px 0 -3px; color: var(--faint); }
-.logo { width: 26px; height: 26px; margin-left: -3px; }
+.logo { width: 24px; height: 24px; margin-left: -2px; }
 
 #search { position: relative; width: min(460px, 100%); margin-left: var(--gutter); }
 #search .icon { position: absolute; top: 50%; left: 14px; translate: 0 -50%; color: var(--muted); pointer-events: none; }

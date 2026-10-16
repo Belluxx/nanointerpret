@@ -1,271 +1,41 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg
-   width="1400"
-   height="300"
-   viewBox="0 60 1400 300"
-   role="img"
-   aria-labelledby="title description"
-   version="1.1"
-   id="svg35"
-   sodipodi:docname="banner_plain.svg"
-   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
-   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
-   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
-   xmlns="http://www.w3.org/2000/svg"
-   xmlns:svg="http://www.w3.org/2000/svg">
-  <defs
-     id="defs35" />
-  <sodipodi:namedview
-     id="namedview35"
-     pagecolor="#ffffff"
-     bordercolor="#000000"
-     borderopacity="0.25"
-     inkscape:showpageshadow="2"
-     inkscape:pageopacity="0.0"
-     inkscape:pagecheckerboard="0"
-     inkscape:deskcolor="#d1d1d1"
-     inkscape:zoom="0.64428571"
-     inkscape:cx="658.86918"
-     inkscape:cy="82.261641"
-     inkscape:window-width="1920"
-     inkscape:window-height="1027"
-     inkscape:window-x="0"
-     inkscape:window-y="25"
-     inkscape:window-maximized="1"
-     inkscape:current-layer="wordmark" />
-  <title
-     id="title">nanointerpret</title>
-  <desc
-     id="description">A minimal diagram of a residual stream passing through a sparse feature bottleneck.</desc>
-  <style
-     id="style1">
-    :root {
-      color-scheme: light dark;
-    }
-
-    .foreground { fill: #171717; }
-    .muted { fill: #8b8b86; }
-    .connections { fill: none; stroke: #171717; }
-    .inactive-feature { fill: #ffffff; stroke: #d7d7d1; }
-    .wordmark {
-      font-family: ui-monospace, &quot;SFMono-Regular&quot;, Menlo, Consolas, monospace;
-      font-size: 98.335px;
-      font-weight: 600;
-      letter-spacing: -5.463px;
-    }
-    .tagline {
-      font-family: ui-monospace, &quot;SFMono-Regular&quot;, Menlo, Consolas, monospace;
-      font-size: 24.925px;
-      font-weight: 400;
-      letter-spacing: 3.399px;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      .foreground { fill: #f0f0ec; }
-      .muted { fill: #858581; }
-      .connections { stroke: #f0f0ec; }
-      .inactive-feature { fill: #0d1117; stroke: #383836; }
-    }
-  </style>
-  <!-- Standard SVG text remains editable in text and vector editors. -->
-  <g
-     id="wordmark"
-     transform="translate(0 -4.3482167) scale(0.88918323)">
-    <text
-       id="name"
-       class="foreground wordmark"
-       x="62.245"
-       y="252.699">nanointerpret</text>
-    <text
-       id="tagline"
-       class="muted tagline"
-       x="67.699997"
-       y="306.716">INTERPRETABILITY PLAYGROUND</text>
-  </g>
-  <g
-     id="feature-diagram"
-     transform="translate(-245.71888 -101.67578) scale(1.3979)">
-    <g
-       id="connections"
-       class="connections"
-       transform="translate(885.59 291.64) rotate(-90) scale(0.50247 1)"
-       stroke-width="1.1">
-      <path
-         d="M 20 58 C 102 58, 166 15, 248 15"
-         id="path1" />
-      <path
-         d="M 20 112 C 112 112, 166 15, 248 15"
-         id="path2" />
-      <path
-         d="M 20 76 C 108 76, 170 99, 248 99"
-         id="path3" />
-      <path
-         d="M 20 76 C 110 76, 174 155, 248 155"
-         id="path4" />
-      <path
-         d="M 20 112 C 100 112, 166 155, 248 155"
-         id="path5" />
-      <path
-         d="M 20 148 C 108 148, 174 155, 248 155"
-         id="path6" />
-      <path
-         d="M 20 166 C 106 166, 174 155, 248 155"
-         id="path7" />
-      <path
-         d="M 20 130 C 110 130, 176 211, 248 211"
-         id="path8" />
-      <path
-         d="M 20 184 C 108 184, 174 211, 248 211"
-         id="path9" />
-      <path
-         d="M 20 166 C 106 166, 174 225.664, 248 225.664"
-         id="path10" />
-    </g>
-    <g
-       id="input-nodes"
-       class="muted"
-       transform="rotate(-90 594.74 -290.85)">
-      <circle
-         cx="12"
-         cy="58"
-         r="3.5"
-         id="circle10" />
-      <circle
-         cx="12"
-         cy="76"
-         r="3.5"
-         id="circle11" />
-      <circle
-         cx="12"
-         cy="94"
-         r="3.5"
-         id="circle12" />
-      <circle
-         cx="12"
-         cy="112"
-         r="3.5"
-         id="circle13" />
-      <circle
-         cx="12"
-         cy="130"
-         r="3.5"
-         id="circle14" />
-      <circle
-         cx="12"
-         cy="148"
-         r="3.5"
-         id="circle15" />
-      <circle
-         cx="12"
-         cy="166"
-         r="3.5"
-         id="circle16" />
-      <circle
-         cx="12"
-         cy="184"
-         r="3.5"
-         id="circle17" />
-    </g>
-    <g
-       id="inactive-features"
-       class="inactive-feature"
-       transform="rotate(-90 650.31 -235.28)"
-       stroke-width="1.25">
-      <circle
-         cx="260"
-         cy="1"
-         r="3.25"
-         id="circle18" />
-      <circle
-         cx="260"
-         cy="29"
-         r="3.25"
-         id="circle19" />
-      <circle
-         cx="260"
-         cy="43"
-         r="3.25"
-         id="circle20" />
-      <circle
-         cx="260"
-         cy="57"
-         r="3.25"
-         id="circle21" />
-      <circle
-         cx="260"
-         cy="71"
-         r="3.25"
-         id="circle22" />
-      <circle
-         cx="260"
-         cy="85"
-         r="3.25"
-         id="circle23" />
-      <circle
-         cx="260"
-         cy="113"
-         r="3.25"
-         id="circle24" />
-      <circle
-         cx="260"
-         cy="127"
-         r="3.25"
-         id="circle25" />
-      <circle
-         cx="260"
-         cy="141"
-         r="3.25"
-         id="circle26" />
-      <circle
-         cx="260"
-         cy="169"
-         r="3.25"
-         id="circle27" />
-      <circle
-         cx="260"
-         cy="183"
-         r="3.25"
-         id="circle28" />
-      <circle
-         cx="260"
-         cy="197"
-         r="3.25"
-         id="circle29" />
-      <circle
-         cx="260"
-         cy="239"
-         r="3.25"
-         id="circle30" />
-    </g>
-    <g
-       id="active-features"
-       class="foreground"
-       transform="rotate(-90 650.31 -235.28)">
-      <circle
-         cx="260"
-         cy="15"
-         r="4.5"
-         id="circle31" />
-      <circle
-         cx="260"
-         cy="99"
-         r="4.5"
-         id="circle32" />
-      <circle
-         cx="260"
-         cy="155"
-         r="4.5"
-         id="circle33" />
-      <circle
-         cx="260"
-         cy="211"
-         r="4.5"
-         id="circle34" />
-      <circle
-         cx="260"
-         cy="225.07"
-         r="4.5"
-         id="circle35" />
-    </g>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="300" viewBox="0 0 1400 300" role="img" aria-labelledby="title description">
+<title id="title">nanointerpret</title>
+<desc id="description">The nanointerpret logo and wordmark, the name shown as Qwen3 tokens shaded by a sparse feature's activation.</desc>
+<style>.bg{fill:#F6F6F4}.heat{fill:#222221}.word{fill:#222221}.word-on{fill:#FFFFFF}.muted{fill:#8C8C87}.tip{fill:#222221;fill-opacity:.88}.tip-text{fill:#FFFFFF}.cell-pale{fill:#D9D9D5}.cell-soft{fill:#BDBDB8}.cell-mid{fill:#8C8C87}.cell-ink{fill:#222221}.icon-line{fill:none;stroke:#8C8C87}@media (prefers-color-scheme: dark){.bg{fill:#181817}.heat{fill:#E9E9E6}.word{fill:#E9E9E6}.word-on{fill:#1F1F1E}.muted{fill:#85857F}.tip{fill:#E9E9E6;fill-opacity:.88}.tip-text{fill:#1F1F1E}.cell-pale{fill:#363634}.cell-soft{fill:#55554F}.cell-mid{fill:#85857F}.cell-ink{fill:#E9E9E6}.icon-line{fill:none;stroke:#85857F}}</style>
+<rect class="bg" x="0" y="0" width="1400" height="300"/>
+<rect class="heat" x="505.64" y="103.6" width="149.54" height="107" fill-opacity="0.06"/>
+<rect class="heat" x="655.19" y="103.6" width="141.96" height="107" fill-opacity="0.14"/>
+<rect class="heat" x="797.14" y="103.6" width="77.01" height="107" fill-opacity="0.28"/>
+<rect class="heat" x="874.15" y="103.6" width="161.21" height="107" fill-opacity="0.66"/>
+<text class="word" x="505.64" y="183.6" font-family="'Inter Display', Inter, sans-serif" font-weight="300" font-size="100" letter-spacing="-3">nan</text>
+<text class="word" x="655.19" y="183.6" font-family="'Inter Display', Inter, sans-serif" font-weight="300" font-size="100" letter-spacing="-3">oint</text>
+<text class="word" x="797.14" y="183.6" font-family="'Inter Display', Inter, sans-serif" font-weight="300" font-size="100" letter-spacing="-3">er</text>
+<text class="word-on" x="874.15" y="183.6" font-family="'Inter Display', Inter, sans-serif" font-weight="300" font-size="100" letter-spacing="-3">pret</text>
+<rect class="heat" x="874.15" y="210.6" width="161.21" height="4"/>
+<rect class="cell-pale" x="368.64" y="103.6" width="32.1" height="32.1"/>
+<rect class="cell-mid" x="368.64" y="141.05" width="32.1" height="32.1"/>
+<rect class="cell-pale" x="368.64" y="178.5" width="32.1" height="32.1"/>
+<rect class="cell-pale" x="406.09" y="103.6" width="32.1" height="32.1"/>
+<rect class="cell-pale" x="406.09" y="141.05" width="32.1" height="32.1"/>
+<rect class="cell-pale" x="406.09" y="178.5" width="32.1" height="32.1"/>
+<rect class="cell-ink" x="443.54" y="103.6" width="32.1" height="32.1"/>
+<rect class="cell-pale" x="443.54" y="141.05" width="32.1" height="32.1"/>
+<rect class="cell-pale" x="443.54" y="178.5" width="32.1" height="32.1"/>
+<rect class="tip" x="880.8" y="47.4" width="147.9" height="44.2"/>
+<text class="tip-text" x="893.55" y="75.62" font-family="'JetBrains Mono', ui-monospace, monospace" font-weight="700" font-size="17">14.96</text>
+<g opacity="0.6">
+<text class="tip-text" x="954.75" y="75.62" font-family="'JetBrains Mono', ui-monospace, monospace" font-weight="400" font-size="17">"pret"</text>
+</g>
+<rect class="cell-soft" x="505.64" y="236.6" width="4" height="16"/>
+<rect class="cell-mid" x="511.64" y="242.6" width="4" height="10"/>
+<rect class="cell-ink" x="517.64" y="247.6" width="4" height="5"/>
+<text class="muted" x="531.64" y="252.6" font-family="'JetBrains Mono', ui-monospace, monospace" font-weight="400" font-size="20">train</text>
+<rect class="cell-ink" x="619.64" y="236.6" width="16" height="4"/>
+<rect class="cell-mid" x="619.64" y="242.6" width="16" height="4"/>
+<rect class="cell-soft" x="619.64" y="248.6" width="16" height="4"/>
+<text class="muted" x="645.64" y="252.6" font-family="'JetBrains Mono', ui-monospace, monospace" font-weight="400" font-size="20">record</text>
+<rect class="cell-soft" x="745.64" y="236.6" width="12" height="12"/>
+<rect class="cell-ink" x="749.64" y="240.6" width="4" height="4"/>
+<path class="icon-line" stroke-width="3.2" d="M756.64 247.6L761.64 252.6"/>
+<text class="muted" x="771.64" y="252.6" font-family="'JetBrains Mono', ui-monospace, monospace" font-weight="400" font-size="20">explore</text>
 </svg>
