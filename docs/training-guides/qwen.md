@@ -23,3 +23,9 @@ python3 train.py \
 ```sh
 python3 record_activations.py --sae-dir artifacts/qwen3-1.7b-base_l14_w16_k32_500m
 ```
+
+3. Explore the features at http://127.0.0.1:8000 (the first launch summarizes every feature once, which takes a couple of minutes):
+
+```sh
+python3 explore.py --sae-dir artifacts/qwen3-1.7b-base_l14_w16_k32_500m
+```

@@ -6,10 +6,13 @@ Minimal training and feature interpretability analysis of LLMs with sparse autoe
 
 - `train.py`: set up the model and data (streamed or cached residuals), calibrate, train the SAE, and plot metrics.
 - `record_activations.py`: record SAE feature activations on the recording split and index them by token and by feature.
+- `explore.py`: serve the local feature explorer over a recorded activation index.
+- `explorer/`: the explorer's static web UI (overview, feature pages, token search).
 - `docs/experiments.md`: experiment results and reproduction commands.
 - `docs/overview.md`: brief notes on activation layer, width multiplier, and K.
 - `src/data.py`: token cache, residual cache, and context batching.
 - `src/experiment.py`: run config, calibration, training loop, evaluation, and downstream KL.
+- `src/features.py`: queries over a recorded activation index and the cached per-feature summary (peak tokens, logit effects).
 - `src/plot.py`: training and feature-density plots.
 - `src/runtime.py`: device selection, model loading, and layer-input capture/patching.
 - `src/sae.py`: Top-K SAE (including input normalization, sink tokens, and pass-through dims), AuxK loss, and running metrics.
