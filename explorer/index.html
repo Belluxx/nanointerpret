@@ -10,29 +10,23 @@
 <body>
   <header class="topbar">
     <a class="brand" href="#/">nanointerpret<span>/explorer</span></a>
-    <form class="search" id="search" autocomplete="off">
-      <input id="query" type="search" placeholder="Feature # or token" aria-label="Feature number or token" spellcheck="false">
-    </form>
+    <form id="search"><input id="query" type="search" placeholder="Feature # or token" aria-label="Feature number or token" autocomplete="off" spellcheck="false"></form>
     <button class="button" id="random" type="button" title="Random feature (R)">Random</button>
   </header>
-
   <div class="layout">
-    <aside class="sidebar" aria-label="Feature list">
-      <div class="list-controls">
-        <select id="sort" aria-label="Sort">
-          <option value="density">Density ↓</option>
-          <option value="rarity">Density ↑</option>
-          <option value="max">Max activation ↓</option>
-          <option value="id">Feature #</option>
-        </select>
-      </div>
-      <div class="range-filter" id="range-filter" hidden></div>
-      <div class="list" id="list" role="list"></div>
+    <aside class="sidebar">
+      <select id="sort" aria-label="Sort">
+        <option value="density">Density ↓</option>
+        <option value="rarity">Density ↑</option>
+        <option value="max">Max activation ↓</option>
+        <option value="id">Feature #</option>
+      </select>
+      <button class="range" id="range" type="button" title="Clear the density filter" hidden></button>
+      <div class="list" id="list"></div>
     </aside>
     <main class="main" id="main"></main>
   </div>
-
-  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+  <div class="tooltip" id="tooltip" hidden></div>
   <script type="module" src="/app.js"></script>
 </body>
 </html>

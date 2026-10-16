@@ -36,33 +36,25 @@ class ExplorerHandler(SimpleHTTPRequestHandler):
             return super().do_GET()
         query = {key: values[-1] for key, values in parse_qs(url.query).items()}
         try:
-            payload = self.route(url.path, query)
+            self.send_json(self.route(url.path, query))
         except (KeyError, ValueError, IndexError) as error:
-            return self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
-        if payload is None:
-            return self.send_json({"error": f"unknown endpoint {url.path}"}, HTTPStatus.NOT_FOUND)
-        self.send_json(payload)
+            self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
 
-    def route(self, path: str, query: dict[str, str]) -> dict | None:
+    def route(self, path: str, query: dict[str, str]) -> object:
         if path == "/api/overview":
             return self.index.overview()
         if path == "/api/features":
-            return self.index.browse(
-                query.get("sort", "density"),
-                int(query.get("offset", 0)),
-                min(int(query.get("limit", 200)), 1000),
-                float(query["low"]) if "low" in query else None,
-                float(query["high"]) if "high" in query else None,
-            )
+            low, high = (float(query["low"]), float(query["high"])) if "low" in query else (None, None)
+            return self.index.browse(query["sort"], int(query["offset"]), int(query["limit"]), low, high)
         if path == "/api/random":
             return {"id": self.index.random()}
         if path.startswith("/api/feature/"):
             return self.index.feature(int(path.removeprefix("/api/feature/")))
         if path == "/api/token":
             return self.index.token_search(query["q"])
-        return None
+        raise KeyError(f"unknown endpoint {path}")
 
-    def send_json(self, payload: dict, status: HTTPStatus = HTTPStatus.OK) -> None:
+    def send_json(self, payload: object, status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(payload, separators=(",", ":")).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -74,15 +66,17 @@ class ExplorerHandler(SimpleHTTPRequestHandler):
         pass
 
 
+def summarize(index: FeatureIndex, sae_dir: Path, device_name: str) -> None:
+    device = choose_device(device_name)
+    sae, config = load_sae(sae_dir, device)
+    index.summarize(sae, load_causal_lm(config.model_id, config.model_dtype, device))
+
+
 def main() -> None:
     args = parse_args()
     index = FeatureIndex(args.activations or args.sae_dir / "activations")
     if not index.summary_path.exists():
-        device = choose_device(args.device)
-        sae, config = load_sae(args.sae_dir, device)
-        model = load_causal_lm(config.model_id, config.model_dtype, device)
-        index.write_summary(sae, model)
-        del sae, model
+        summarize(index, args.sae_dir, args.device)
     index.load_summary()
 
     server = ThreadingHTTPServer((args.host, args.port), partial(ExplorerHandler, index=index))

@@ -21,7 +21,7 @@ python3 train.py \
 python3 record_activations.py --sae-dir artifacts/gemma-3-270m_l9_w16_k32_500m
 ```
 
-3. Explore the features at http://127.0.0.1:8000 (the first launch summarizes every feature once, which takes a couple of minutes):
+3. Explore the features at http://127.0.0.1:8000 (the first launch summarizes every feature once, which takes under a minute):
 
 ```sh
 python3 explore.py --sae-dir artifacts/gemma-3-270m_l9_w16_k32_500m
