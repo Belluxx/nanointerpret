@@ -76,6 +76,7 @@ def main() -> None:
     if not index.summary_path.exists():
         summarize(index, args.sae_dir, args.device)
     index.load_summary()
+    index.load_interpretations()
 
     server = ThreadingHTTPServer((args.host, args.port), partial(ExplorerHandler, index=index))
     print(f"Feature explorer: http://{args.host}:{args.port}")

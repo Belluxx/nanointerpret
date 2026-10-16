@@ -28,6 +28,7 @@ class FeatureIndex:
 
     def __init__(self, directory: Path):
         self.summary_path = directory / "summary.npz"
+        self.interpretations_path = directory / "interpretations.jsonl"
         metadata = json.loads((directory / "metadata.json").read_text())
         self.run = Path(metadata["sae_dir"]).name
         self.config = metadata["sae_config"]
@@ -68,6 +69,13 @@ class FeatureIndex:
         self.peak_tokens = [self.vocab[token] if count else None for token, count in zip(peak_tokens, self.counts)]
         self.promoted_ids, self.promoted_logits = summary["promoted_ids"], summary["promoted_logits"]
 
+    def load_interpretations(self) -> None:
+        # Written by interpret.py; features without one are shown unnamed.
+        lines = self.interpretations_path.read_text().splitlines() if self.interpretations_path.exists() else []
+        self.interpretations = {record["feature"]: record for record in map(json.loads, lines)}
+        self.named = np.zeros(len(self.counts), dtype=bool)
+        self.named[list(self.interpretations)] = True
+
     def overview(self) -> dict:
         return {
             "run": self.run,
@@ -80,7 +88,8 @@ class FeatureIndex:
         }
 
     def row(self, feature: int) -> dict:
-        return {"id": int(feature), "density": float(self.density[feature]), "peak_token": self.peak_tokens[feature]}
+        title = self.interpretations.get(int(feature), {}).get("title")
+        return {"id": int(feature), "density": float(self.density[feature]), "peak_token": self.peak_tokens[feature], "title": title}
 
     def browse(self, sort: str, offset: int, limit: int, low: float | None, high: float | None) -> list[dict]:
         keys = {"density": -self.density, "rarity": self.density, "max": -self.max, "id": np.arange(len(self.counts))}
@@ -90,6 +99,8 @@ class FeatureIndex:
             with np.errstate(divide="ignore"):
                 log_density = np.log10(self.density[features])
             features = features[(log_density >= low - 1e-9) & (log_density < high - 1e-9)]
+        # Named features first, each group in the chosen order.
+        features = features[np.argsort(~self.named[features], kind="stable")]
         return [self.row(feature) for feature in features[offset : offset + limit]]
 
     @lru_cache(maxsize=64)
@@ -129,6 +140,7 @@ class FeatureIndex:
                 {"token": self.vocab[token], "logit": float(logit)}
                 for token, logit in zip(self.promoted_ids[feature], self.promoted_logits[feature])
             ],
+            "interpretation": self.interpretations.get(feature),
         }
 
     def top_activations(self, positions: np.ndarray, values: np.ndarray) -> np.ndarray:

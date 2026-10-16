@@ -41,6 +41,20 @@
 
 Values are fp16 in SAE input units; divide them by `activation_scale` for residual-stream units.
 
+## Feature interpretation
+
+`interpret.py` names each feature with an LLM, then checks the name ([results](experiments.md#feature-interpretation)):
+- **Explain**: the explainer sees the 8 strongest activations and 12 drawn evenly from activation-quantile bins (0-50, 50-80, 80-95, 95-100%), 32 tokens before and 8 after, with the firing tokens marked and their activations on a 1-10 scale, plus the tokens the feature fires on most and the share of their occurrences it fires on. Sampling across the range keeps the name from describing only the peak. [3]
+- **Detection**: a judge given only the name says whether the feature fires on each of 24 marked tokens it hasn't seen: 12 activations from the same bins, and 12 silent tokens split between random ones, the feature's frequent tokens where it stays silent, and activations of the feature with the closest decoder direction. The last two are hard negatives: a vague or token-level name says yes to them. Balanced accuracy averages recall with the specificity on each kind of silent token. [3]
+- **Generated tests**: the judge writes 6 pairs of texts from the name, one meant to make the feature fire and a minimal contrast meant to keep it silent, and the model and SAE measure the actual activations; a pair passes when the first text activates the feature more. The model, not a judge, is the ground truth, so this catches names that are right about the examples but too broad. [4, 5]
+- **Revision**: when fewer than 4 of 6 pairs pass, the explainer sees the measured activations and revises the name once; the version with the higher detection plus pass rate is kept. [5]
+- **Steering**: the decoder direction is added at the SAE's layer on 8 neutral prompts, at the strongest multiple of the max activation (0.5-16x) that keeps the KL from the unsteered next-token predictions within 1 nat, and the tokens whose log-probability rises most are reported. A fixed multiple doesn't work: at 4x the KL ranges from under 0.5 to 6 nats across features. This stays separate from the name, since what a mid-layer feature fires on and what it promotes often differ. [6, 7]
+
 Sources:
 - [1] [Scaling and evaluating sparse autoencoders](https://arxiv.org/abs/2406.04093)
 - [2] [Scaling Monosemanticity](https://transformer-circuits.pub/2024/scaling-monosemanticity/index.html)
+- [3] [Automatically Interpreting Millions of Features in Large Language Models](https://arxiv.org/abs/2410.13928)
+- [4] [FADE: Why Bad Descriptions Happen to Good Features](https://arxiv.org/abs/2502.16994)
+- [5] [SAEExplainer: Interpreting SAE Features with Activation-Guided Preference Optimization](https://arxiv.org/abs/2606.08496)
+- [6] [SAEs Are Good for Steering – If You Select the Right Features](https://arxiv.org/abs/2505.20063)
+- [7] [Enhancing Automated Interpretability with Output-Centric Feature Descriptions](https://arxiv.org/abs/2501.08319)

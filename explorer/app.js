@@ -204,22 +204,53 @@ function overviewView() {
       el('span', {}, kbd('←'), kbd('→'), 'Step through features')));
 }
 
+const share = (fraction) => `${Math.round(100 * fraction)}%`;
+// Rare features can lack test examples of some kind.
+const rate = (fraction) => (fraction == null ? '–' : share(fraction));
+
+function checkStats({ detection, pairs }) {
+  const says = detection.says_fires;
+  const passed = pairs.filter((pair) => pair.fires_activation > pair.silent_activation).length;
+  return [
+    ['Detection', el('span', { dataset: { tip: [
+      `${share(detection.balanced_accuracy)} balanced accuracy`,
+      'A judge given only the name says whether held-out marked tokens fire.',
+      `Says yes to activations in the top 5%: ${rate(says.q3)}, 80–95%: ${rate(says.q2)}, 50–80%: ${rate(says.q1)}, bottom half: ${rate(says.q0)}`,
+      `Says yes to silent tokens: random ${rate(says.random)}, same token ${rate(says.same_token)}, closest feature's ${rate(says.neighbor)}`,
+    ].join('\n') } }, share(detection.balanced_accuracy))],
+    ['Generated tests', el('span', { dataset: { tip: `${passed} of ${pairs.length} pairs pass\nTexts written from the name, run through the model:\nthe one meant to fire must activate it more than its contrast` } },
+      `${passed} / ${pairs.length}`)],
+  ];
+}
+
+function testsCard(pairs) {
+  const line = (text, activation) => el('div', { class: 'test-line' }, el('span', { class: 'num' }, share(activation)), el('span', {}, text));
+  return card('Generated tests', 'activation / max', el('div', { class: 'tests' }, pairs.map((pair) =>
+    el('div', { class: pair.fires_activation > pair.silent_activation ? 'test' : 'test failed' },
+      line(pair.fires, pair.fires_activation), line(pair.silent, pair.silent_activation)))));
+}
+
 function featureView(data) {
   const sections = [['Top activations', 'one per context', data.top], ...data.ranges.map((range) => [
     [quartile(range.low), `${range.low * 100}–${range.high * 100}% of max`], `${percent(range.share)} of fires`, range.examples])];
+  const named = data.interpretation;
   return el('div', {},
     pageHead('Feature', el('h1', {}, el('span', { class: 'hash' }, '#'), data.id),
       el('nav', { class: 'stepper' },
         el('a', { class: 'button', href: featureHref(data.id - 1), title: 'Previous feature (←)' }, icon('M10 3.5 5.5 8l4.5 4.5')),
         el('a', { class: 'button', href: featureHref(data.id + 1), title: 'Next feature (→)' }, icon('M6 3.5 10.5 8 6 12.5')))),
+    named && el('div', { class: 'naming' }, el('p', { class: 'name' }, named.title), el('p', { class: 'description' }, named.description)),
     data.fires
       ? stats([['Density', percent(data.density), densitySpark(data.density)], ['Fires', integer.format(data.fires)],
-        ['Max activation', data.max.toFixed(2)], ['Peaks on', tokenLabel(data.peak_token)]])
+        ['Max activation', data.max.toFixed(2)], ['Peaks on', tokenLabel(data.peak_token)], ...(named ? checkStats(named) : [])])
       : el('p', { class: 'lede' }, 'Never fires in the recorded tokens'),
     el('div', { class: 'columns' },
       data.fires > 0 && el('div', { class: 'stack' },
         sections.map(([title, meta, examples]) => card(title, meta, examples.map((example) => exampleRow(example, data.max))))),
       el('div', { class: 'stack side' },
+        named && testsCard(named.pairs),
+        named && card('Steers toward', `${named.steering.strength}× max · KL ${named.steering.kl.toFixed(2)}`,
+          el('div', { class: 'chips' }, named.steering.tokens.map((token) => el('a', { href: tokenHref(token) }, tokenLabel(token))))),
         data.fires > 0 && card('Fires on', 'share of fires', barList(data.fires_on, (row) => row.share, (row) => percent(row.share),
           (row) => `${percent(row.share)} of this feature's fires\n${quoted(row.token)}: fires on ${percent(row.precision)} of its occurrences`)),
         card('Promotes', 'logit effect', barList(data.promotes, (row) => row.logit, (row) => `+${row.logit.toFixed(2)}`,
@@ -307,7 +338,7 @@ async function loadMore() {
   if (generation !== list.generation) return;
   sentinel.before(...rows.map((row) => el('a', { class: row.id === current ? 'row active' : 'row', href: featureHref(row.id), dataset: { id: row.id } },
     el('span', {}, `#${row.id}`),
-    row.peak_token == null ? el('span') : tokenLabel(row.peak_token, 'peak'),
+    row.title ? el('span', { class: 'label' }, row.title) : row.peak_token == null ? el('span') : tokenLabel(row.peak_token, 'peak'),
     el('span', { class: 'density' }, percent(row.density)))));
   Object.assign(list, { offset: list.offset + rows.length, done: rows.length < LIST_PAGE, loading: false });
 }
