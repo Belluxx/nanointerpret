@@ -24,7 +24,10 @@ NEGATIVE_KINDS = ("random", "same_token", "neighbor")
 TOKEN_STATS = 8
 TOKEN_STATS_MIN_SHARE = 0.01
 GENERATED_PAIRS = 6
-# Descriptions whose generated texts trigger the feature less reliably than this get one revision.
+# A generated pair passes when its contrast activates the feature under this fraction of the first text's activation.
+# Irrelevant changes, such as a neutral sentence before the text, cut activation that much for under 2% of texts.
+CONTRAST_RATIO = 0.5
+# Descriptions whose generated pairs pass less often than this get one revision.
 REVISE_BELOW = 0.67
 MIN_FIRES = 40
 NEWLINE = "↵"
@@ -401,12 +404,16 @@ def detection_scores(examples: list[Example], answers: list[bool]) -> dict:
     }
 
 
+def measured_pairs(pairs: list[dict], fires: list[float], silent: list[float]) -> list[dict]:
+    return [
+        pair | {"fires_activation": round(a, 3), "silent_activation": round(b, 3), "passed": a > 0 and b < CONTRAST_RATIO * a}
+        for pair, a, b in zip(pairs, fires, silent)
+    ]
+
+
 def generation_scores(pairs: list[dict]) -> dict:
-    fires = np.array([pair["fires_activation"] for pair in pairs])
-    silent = np.array([pair["silent_activation"] for pair in pairs])
     return {
-        # Pairs where the text meant to fire activates the feature more than its contrast.
-        "pair_accuracy": float(np.mean(fires > silent)),
-        "recall": float(np.mean(fires > 0)),
-        "specificity": float(np.mean(silent == 0)),
+        "pass_rate": float(np.mean([pair["passed"] for pair in pairs])),
+        "recall": float(np.mean([pair["fires_activation"] > 0 for pair in pairs])),
+        "specificity": float(np.mean([pair["silent_activation"] == 0 for pair in pairs])),
     }

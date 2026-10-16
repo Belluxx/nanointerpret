@@ -210,7 +210,7 @@ const rate = (fraction) => (fraction == null ? '–' : share(fraction));
 
 function checkStats({ detection, pairs }) {
   const says = detection.says_fires;
-  const passed = pairs.filter((pair) => pair.fires_activation > pair.silent_activation).length;
+  const passed = pairs.filter((pair) => pair.passed).length;
   return [
     ['Detection', el('span', { dataset: { tip: [
       `${share(detection.balanced_accuracy)} balanced accuracy`,
@@ -218,7 +218,7 @@ function checkStats({ detection, pairs }) {
       `Says yes to activations in the top 5%: ${rate(says.q3)}, 80–95%: ${rate(says.q2)}, 50–80%: ${rate(says.q1)}, bottom half: ${rate(says.q0)}`,
       `Says yes to silent tokens: random ${rate(says.random)}, same token ${rate(says.same_token)}, closest feature's ${rate(says.neighbor)}`,
     ].join('\n') } }, share(detection.balanced_accuracy))],
-    ['Generated tests', el('span', { dataset: { tip: `${passed} of ${pairs.length} pairs pass\nTexts written from the name, run through the model:\nthe one meant to fire must activate it more than its contrast` } },
+    ['Generated tests', el('span', { dataset: { tip: `${passed} of ${pairs.length} pairs pass\nTexts written from the name, run through the model:\nthe contrast must reach under half the activation of the text meant to fire` } },
       `${passed} / ${pairs.length}`)],
   ];
 }
@@ -226,7 +226,7 @@ function checkStats({ detection, pairs }) {
 function testsCard(pairs) {
   const line = (text, activation) => el('div', { class: 'test-line' }, el('span', { class: 'num' }, share(activation)), el('span', {}, text));
   return card('Generated tests', 'activation / max', el('div', { class: 'tests' }, pairs.map((pair) =>
-    el('div', { class: pair.fires_activation > pair.silent_activation ? 'test' : 'test failed' },
+    el('div', { class: pair.passed ? 'test' : 'test failed' },
       line(pair.fires, pair.fires_activation), line(pair.silent, pair.silent_activation)))));
 }
 

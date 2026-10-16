@@ -77,7 +77,7 @@ class FeatureIndex:
         self.named[list(self.interpretations)] = True
         tests, detection = np.zeros(len(self.counts)), np.zeros(len(self.counts))
         for feature, record in self.interpretations.items():
-            tests[feature] = record["generation"]["pair_accuracy"]
+            tests[feature] = record["generation"]["pass_rate"]
             detection[feature] = record["detection"]["balanced_accuracy"]
         # Generated tests first, detection breaking ties.
         self.check_rank = np.empty(len(self.counts), dtype=np.int64)

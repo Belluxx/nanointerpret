@@ -24,6 +24,7 @@ from src.interpret import (
     explain_prompt,
     generate_prompt,
     generation_scores,
+    measured_pairs,
     revise_prompt,
     shuffled,
 )
@@ -76,7 +77,7 @@ def main() -> None:
         pairs = judge(generate_prompt(explanation), GENERATE_SCHEMA, max_tokens=2048)["pairs"]
         fires = probe.max_activations([pair["fires"] for pair in pairs], feature)
         silent = probe.max_activations([pair["silent"] for pair in pairs], feature)
-        pairs = [pair | {"fires_activation": round(a, 3), "silent_activation": round(b, 3)} for pair, a, b in zip(pairs, fires, silent)]
+        pairs = measured_pairs(pairs, fires, silent)
         return {**explanation, "detection": detection_scores(test, answers), "generation": generation_scores(pairs), "pairs": pairs}
 
     def interpret(feature: int) -> dict:
@@ -84,11 +85,11 @@ def main() -> None:
         test = shuffled(examples.test, feature)
         explain = explain_prompt(sampler, feature, examples.explain)
         result = evaluate(feature, judge(explain, EXPLAIN_SCHEMA, max_tokens=512), test) | {"revised": False}
-        if result["generation"]["pair_accuracy"] < REVISE_BELOW:
+        if result["generation"]["pass_rate"] < REVISE_BELOW:
             # One revision, informed by how the generated texts actually activated the feature; the better-scoring one is kept.
             first = {key: result[key] for key in ("title", "description")}
             revised = evaluate(feature, judge(revise_prompt(explain, first, result["pairs"]), EXPLAIN_SCHEMA, max_tokens=512), test)
-            score = lambda record: record["detection"]["balanced_accuracy"] + record["generation"]["pair_accuracy"]
+            score = lambda record: record["detection"]["balanced_accuracy"] + record["generation"]["pass_rate"]
             if score(revised) >= score(result):
                 result = revised | {"revised": True}
         return {"feature": feature, **result, "steering": probe.steer(feature)}
