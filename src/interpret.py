@@ -358,7 +358,9 @@ class Probe:
     def steer(self, feature: int) -> dict:
         # The next tokens made likelier by adding the decoder direction at the SAE's layer, at the strongest
         # multiple of the max activation that keeps the KL from the unsteered predictions within STEER_KL.
-        direction = self.sae.decoder_weight[feature] / self.sae.activation_scale
+        # Pass-through dims are outside the SAE, so the direction leaves them unchanged.
+        direction = torch.zeros(len(self.sae.keep), device=self.sae.keep.device)
+        direction[self.sae.keep] = self.sae.decoder_weight[feature] / self.sae.activation_scale
         delta = self.steer_scales[:, None] * float(self.feature_max[feature]) * direction
 
         def add(hidden):
