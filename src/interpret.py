@@ -27,8 +27,8 @@ GENERATED_PAIRS = 6
 # A generated pair passes when its contrast activates the feature under this fraction of the first text's activation.
 # Irrelevant changes, such as a neutral sentence before the text, cut activation that much for under 2% of texts.
 CONTRAST_RATIO = 0.5
-# Descriptions whose generated pairs pass less often than this get one revision.
-REVISE_BELOW = 0.67
+# Descriptions with fewer generated pairs passing than this get one revision.
+REVISE_BELOW = 4
 MIN_FIRES = 40
 NEWLINE = "↵"
 STEER_PROMPTS = (

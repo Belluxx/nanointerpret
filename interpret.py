@@ -85,7 +85,7 @@ def main() -> None:
         test = shuffled(examples.test, feature)
         explain = explain_prompt(sampler, feature, examples.explain)
         result = evaluate(feature, judge(explain, EXPLAIN_SCHEMA, max_tokens=512), test) | {"revised": False}
-        if result["generation"]["pass_rate"] < REVISE_BELOW:
+        if sum(pair["passed"] for pair in result["pairs"]) < REVISE_BELOW:
             # One revision, informed by how the generated texts actually activated the feature; the better-scoring one is kept.
             first = {key: result[key] for key in ("title", "description")}
             revised = evaluate(feature, judge(revise_prompt(explain, first, result["pairs"]), EXPLAIN_SCHEMA, max_tokens=512), test)
