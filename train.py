@@ -34,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recording-tokens", type=int, default=10_000_000, help="Dedicated token split for recording feature activations. Default: 10000000.")
     parser.add_argument("--model-batch-size", type=int, default=32, help="Contexts processed together; lower this if memory is limited.")
     parser.add_argument("--normalization-tokens", type=int, default=1_000_000, help="Training-token sample used to calibrate sink tokens, pass-through dims, and the activation scale.")
-    parser.add_argument("--no-exclude-sinks", action="store_false", dest="exclude_sinks", help="Let the SAE model attention-sink tokens, whose residual norm is far above the median token's.")
+    parser.add_argument("--no-exclude-sinks", action="store_false", dest="exclude_sinks", help="Let the SAE model attention-sink tokens: the first token of each context and those with at least half its norm, when it stands out.")
     parser.add_argument("--no-passthrough-massive-dims", action="store_false", dest="passthrough_massive_dims", help="Let the SAE model every residual dimension, including massive-activation dims whose std is far above the rest.")
     parser.add_argument("--width-multiplier", type=int, default=16, help="SAE feature count as a multiple of the model residual width. Default: 16.")
     parser.add_argument("--k", type=int, default=32, help="Maximum number of SAE features active for each token. Default: 32.")
@@ -136,7 +136,7 @@ def main() -> None:
         passthrough_dims, activation_scale = saved["passthrough_dims"], saved["activation_scale"]
     else:
         sink_norm_threshold, passthrough_dims, activation_scale = calibrate(
-            batches("train", shuffle=True), args.normalization_tokens, args.exclude_sinks, args.passthrough_massive_dims
+            batches("train", shuffle=True), args.normalization_tokens, args.context_size, args.exclude_sinks, args.passthrough_massive_dims
         )
     config = Config(
         model_id=args.model_id,

@@ -16,9 +16,9 @@ from .runtime import patch_layer_input
 from .sae import FIRING_THRESHOLD, RunningMetrics, TopKSAE, auxk_loss
 
 DOWNSTREAM_KL_TOKENS = 1_000_000
-# Tokens whose residual norm exceeds this multiple of the median token norm are attention
-# sinks and bypass the SAE unchanged.
-SINK_NORM_RATIO = 30.0
+# Attention sinks include the first token of every context. When half its median norm exceeds this
+# multiple of the other tokens' 99th-percentile norm, tokens over that half are sinks and bypass the SAE unchanged.
+SINK_SEPARATION = 1.3
 # Dimensions whose std exceeds this multiple of the median dimension's std are
 # "massive activations" (attention-sink channels) and bypass the SAE unchanged.
 PASSTHROUGH_STD_RATIO = 15.0
@@ -72,39 +72,51 @@ def load_sae(sae_dir: Path, device: torch.device) -> tuple[TopKSAE, Config]:
     return sae.to(device).eval().requires_grad_(False), config
 
 
+def sink_norm_threshold_of(norms: Tensor) -> float | None:
+    # (contexts, context_size) token norms -> the norm above which tokens are sinks, or None without sinks.
+    threshold = norms[:, 0].median().item() / 2
+    return threshold if threshold > SINK_SEPARATION * norms[:, 1:].quantile(0.99).item() else None
+
+
 @torch.inference_mode()
 def calibrate(
-    batches: Iterable[Tensor], token_count: int, exclude_sinks: bool, detect_passthrough: bool
+    batches: Iterable[Tensor], token_count: int, context_size: int, exclude_sinks: bool, detect_passthrough: bool
 ) -> tuple[float | None, list[int], float]:
     # Pick the sink-token norm threshold and the pass-through dims, then the scale giving the
     # remaining dims of non-sink tokens a mean squared norm equal to their width.
     seen = kept = 0
     sink_norm_threshold = None
+    largest_kept_norm = 0.0
     dim_sum = dim_sq_sum = 0
     with tqdm(total=token_count, unit="tok", desc="Calibrate", leave=False, dynamic_ncols=True) as progress:
         for residual in batches:
             # Float64 avoids cancellation on dims with large constant offsets. MPS silently
             # zeroes a direct float64 transfer, so move to the CPU first.
-            residual = residual[: token_count - seen].cpu().double()
+            residual = residual.cpu().double()
+            norms = torch.linalg.vector_norm(residual, dim=1)
+            if not seen:
+                # Sinks are rare, so the first batch already gives stable statistics.
+                median_norm = norms.median().item()
+                if exclude_sinks:
+                    sink_norm_threshold = sink_norm_threshold_of(norms.view(-1, context_size))
+            residual, norms = residual[: token_count - seen], norms[: token_count - seen]
             seen += len(residual)
             progress.update(len(residual))
-            norms = torch.linalg.vector_norm(residual, dim=1)
-            if exclude_sinks and sink_norm_threshold is None:
-                # Sinks are rare, so the first batch already gives a stable median.
-                sink_norm_threshold = SINK_NORM_RATIO * norms.median().item()
             if sink_norm_threshold is not None:
-                residual = residual[norms <= sink_norm_threshold]
+                residual, norms = residual[norms <= sink_norm_threshold], norms[norms <= sink_norm_threshold]
             kept += len(residual)
+            largest_kept_norm = max(largest_kept_norm, norms.max().item())
             dim_sum = dim_sum + residual.sum(dim=0)
             dim_sq_sum = dim_sq_sum + residual.square().sum(dim=0)
             if seen >= token_count:
                 break
 
     if exclude_sinks:
-        print(
-            f"Sink tokens: {seen - kept:,} of {seen:,} ({(seen - kept) / seen:.2%}) | "
-            f"norm over {sink_norm_threshold:.4g} ({SINK_NORM_RATIO:.0f}x median)"
+        sinks = "none" if sink_norm_threshold is None else (
+            f"{seen - kept:,} of {seen:,} ({(seen - kept) / seen:.2%}), norm over {sink_norm_threshold / median_norm:.1f}x median"
         )
+        # An outlier here, far above the median, may be a sink the first-token rule can't see.
+        print(f"Sink tokens: {sinks} | largest other token: {largest_kept_norm / median_norm:.1f}x median")
     passthrough_dims = []
     if detect_passthrough:
         dim_std = (dim_sq_sum / kept - (dim_sum / kept).square()).sqrt()

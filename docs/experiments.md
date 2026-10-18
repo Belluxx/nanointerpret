@@ -45,16 +45,16 @@ Qwen3 1.7B, layer 14, `k=32`:
 | Default | | none | 9.7% | 0.148 |
 | No sink exclusion | `--no-exclude-sinks` | 1401, 1793, 1999 | 12.3% | 0.148 |
 
-- Excluding [sink tokens](#massive-activations) leaves KL unchanged but lowers dead features, and frees the 36 features that otherwise fire almost only at position 0.
+- Excluding [sink tokens](#massive-activations) leaves KL unchanged but lowers dead features, and frees the 37 features that otherwise fire almost only at position 0.
 
 ## Massive activations
 
 A few residual dimensions carry extremely large activations that mark attention sinks. They hold little information but dominate SAE normalization and inflate explained variance (in Gemma 3 270M one dimension holds 96% of the variance). Two automatic fixes, both on by default, keep them out of the SAE; the bypassed values are fed back to the model unchanged.
 
-- **Sink tokens** (`--no-exclude-sinks` to disable): tokens whose residual norm exceeds 30x the median token's. In Qwen, 0.39% of tokens: the first token of every context ([paper](https://arxiv.org/pdf/2605.11887), bottom of page 2; Qwen has no BOS) and rarely one at position 1-2. Their norm is 65-97x the median, while every other token stays under 4x. Gemma has none: its BOS and punctuation sinks stay under 17x.
+- **Sink tokens** (`--no-exclude-sinks` to disable): the first token of every context and any token with at least half its norm, when first tokens stand out (half their median norm over 1.3x the other tokens' 99th-percentile norm). In Qwen, 0.39% of tokens: the first token of every context ([paper](https://arxiv.org/pdf/2605.11887), bottom of page 2; Qwen has no BOS) and rarely one at position 1. Gemma has none: its first tokens are ordinary. No fixed multiple of the median finds sinks at every layer: Qwen's fall from 480x the median at layer 3 to 4.3x at layer 27.
 - **Pass-through dims** (`--no-passthrough-massive-dims` to disable): dimensions whose std over non-sink tokens exceeds 15x the median dimension's. Gemma gets 163 and 400. Qwen gets none, as its massive dimensions only spike on sink tokens.
 
-![Token norms by context position for Gemma and Qwen, and the Qwen SAE features that capture sink tokens without exclusion](../assets/plots/attention_sink_tokens.png)
+![Token norms by context position for Gemma and Qwen, Qwen's first-token norms across layers, and the Qwen SAE features that capture sink tokens without exclusion](../assets/plots/attention_sink_tokens.png)
 
 ![Residual dimensions ranked by std as calibration measures them, for Gemma and for Qwen with and without sink tokens](../assets/plots/massive_activation_dims.png)
 
