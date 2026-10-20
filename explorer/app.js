@@ -7,7 +7,8 @@ const rangeButton = document.getElementById('range');
 
 const LIST_PAGE = 200;
 const integer = new Intl.NumberFormat('en-US');
-const list = { offset: 0, done: false, loading: false, generation: 0, range: null };
+const list = { offset: 0, done: false, loading: false, generation: 0, range: null, group: null };
+const GROUPS = ['Trusted', 'Low confidence', 'Unnamed'];
 let overview;
 let current = null;
 let viewGeneration = 0;
@@ -223,6 +224,15 @@ function checkStats({ detection, pairs }) {
   ];
 }
 
+function confidenceTag({ detection, pairs }) {
+  const passed = pairs.filter((pair) => pair.passed).length;
+  const failed = [
+    detection.balanced_accuracy < overview.trusted_detection && `Detection ${share(detection.balanced_accuracy)}, needs ${share(overview.trusted_detection)}`,
+    passed < overview.trusted_pairs && `${passed} of ${pairs.length} generated tests pass, needs ${overview.trusted_pairs}`,
+  ];
+  return el('span', { class: 'tag', dataset: { tip: ['Low confidence', ...failed.filter(Boolean)].join('\n') } }, 'Low confidence');
+}
+
 function testsCard(pairs) {
   const line = (text, activation) => el('div', { class: 'test-line' }, el('span', { class: 'num' }, share(activation)), el('span', {}, text));
   return card('Generated tests', 'activation / max', el('div', { class: 'tests' }, pairs.map((pair) =>
@@ -239,7 +249,9 @@ function featureView(data) {
       el('nav', { class: 'stepper' },
         el('a', { class: 'button', href: featureHref(data.id - 1), title: 'Previous feature (←)' }, icon('M10 3.5 5.5 8l4.5 4.5')),
         el('a', { class: 'button', href: featureHref(data.id + 1), title: 'Next feature (→)' }, icon('M6 3.5 10.5 8 6 12.5')))),
-    named && el('div', { class: 'naming' }, el('p', { class: 'name' }, named.title), el('p', { class: 'description' }, named.description)),
+    named && el('div', { class: 'naming' },
+      el('p', { class: 'name' }, named.title, !data.trusted && confidenceTag(named)),
+      el('p', { class: 'description' }, named.description)),
     data.fires
       ? stats([['Density', percent(data.density), densitySpark(data.density)], ['Fires', integer.format(data.fires)],
         ['Max activation', data.max.toFixed(2)], ['Peaks on', tokenLabel(data.peak_token)], ...(named ? checkStats(named) : [])])
@@ -324,7 +336,7 @@ function filterDensity(low, high, label) {
 }
 
 function resetList() {
-  Object.assign(list, { offset: 0, done: false, loading: false, generation: list.generation + 1 });
+  Object.assign(list, { offset: 0, done: false, loading: false, generation: list.generation + 1, group: null });
   listElement.replaceChildren(sentinel);
   loadMore();
 }
@@ -336,10 +348,16 @@ async function loadMore() {
   const range = list.range ? `&low=${list.range.low}&high=${list.range.high}` : '';
   const rows = await api(`/api/features?sort=${sort.value}&offset=${list.offset}&limit=${LIST_PAGE}${range}`);
   if (generation !== list.generation) return;
-  sentinel.before(...rows.map((row) => el('a', { class: row.id === current ? 'row active' : 'row', href: featureHref(row.id), dataset: { id: row.id } },
-    el('span', {}, `#${row.id}`),
-    row.title ? el('span', { class: 'label' }, row.title) : row.peak_token == null ? el('span') : tokenLabel(row.peak_token, 'peak'),
-    el('span', { class: 'density' }, percent(row.density)))));
+  sentinel.before(...rows.flatMap((row) => {
+    const group = row.title ? (row.trusted ? 0 : 1) : 2;
+    // A heading where the group changes, unless no feature in the list has a title.
+    const heading = group !== list.group && !(list.group == null && group === 2) && el('div', { class: 'group' }, GROUPS[group]);
+    list.group = group;
+    return [heading, el('a', { class: row.id === current ? 'row active' : 'row', href: featureHref(row.id), dataset: { id: row.id } },
+      el('span', {}, `#${row.id}`),
+      row.title ? el('span', { class: row.trusted ? 'label' : 'label weak' }, row.title) : row.peak_token == null ? el('span') : tokenLabel(row.peak_token, 'peak'),
+      el('span', { class: 'density' }, percent(row.density)))].filter(Boolean);
+  }));
   Object.assign(list, { offset: list.offset + rows.length, done: rows.length < LIST_PAGE, loading: false });
 }
 

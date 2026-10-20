@@ -203,6 +203,9 @@ kbd {
 .row .peak { overflow: hidden; text-overflow: ellipsis; white-space: pre; }
 .row .density { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
 .row .label { overflow: hidden; font-family: var(--sans); text-overflow: ellipsis; white-space: nowrap; }
+.row .label.weak { color: var(--muted); }
+.group { padding: 14px 16px 6px 22px; color: var(--muted); font-size: 10.5px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; }
+.group:first-child { padding-top: 4px; }
 
 /* Page */
 
@@ -244,6 +247,19 @@ kbd {
 
 .naming { max-width: 72ch; margin-top: 22px; }
 .naming .name { font-size: 24px; font-weight: 400; letter-spacing: -0.02em; }
+.tag {
+  display: inline-block;
+  margin-left: 12px;
+  padding: 3px 8px;
+  border: 1px solid var(--tint-strong);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  vertical-align: 5px;
+  cursor: default;
+}
 .naming .description { margin-top: 8px; color: var(--ink-2); line-height: 1.5; }
 
 .lede { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 24px 0 36px; color: var(--muted); }

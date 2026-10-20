@@ -21,6 +21,14 @@ RANGE_EXAMPLES = 6
 FIRES_ON_TOKENS = 8
 TOKEN_SAMPLE = 4096
 TOKEN_FEATURES = 20
+# A title and description is trusted when both checks reach these; the others are listed after it and marked.
+TRUSTED_DETECTION = 0.7
+TRUSTED_PAIRS = 4
+
+
+def trusted(interpretation: dict) -> bool:
+    passed = sum(pair["passed"] for pair in interpretation["pairs"])
+    return interpretation["detection"]["balanced_accuracy"] >= TRUSTED_DETECTION and passed >= TRUSTED_PAIRS
 
 
 class FeatureIndex:
@@ -73,10 +81,11 @@ class FeatureIndex:
         # Written by interpret.py; features without one are shown unnamed.
         lines = self.interpretations_path.read_text().splitlines() if self.interpretations_path.exists() else []
         self.interpretations = {record["feature"]: record for record in map(json.loads, lines)}
-        self.named = np.zeros(len(self.counts), dtype=bool)
-        self.named[list(self.interpretations)] = True
+        # 0 trusted, 1 low confidence, 2 unnamed: the order of the groups in the feature list.
+        self.group = np.full(len(self.counts), 2)
         tests, detection = np.zeros(len(self.counts)), np.zeros(len(self.counts))
         for feature, record in self.interpretations.items():
+            self.group[feature] = 0 if trusted(record) else 1
             tests[feature] = record["generation"]["pass_rate"]
             detection[feature] = record["detection"]["balanced_accuracy"]
         # Generated tests first, detection breaking ties.
@@ -92,11 +101,14 @@ class FeatureIndex:
             "k": self.config["k"],
             "tokens": len(self.token_ids),
             "density_histogram": feature_density_histogram(torch.from_numpy(self.counts), self.active_tokens),
+            "trusted_detection": TRUSTED_DETECTION,
+            "trusted_pairs": TRUSTED_PAIRS,
         }
 
     def row(self, feature: int) -> dict:
         title = self.interpretations.get(int(feature), {}).get("title")
-        return {"id": int(feature), "density": float(self.density[feature]), "peak_token": self.peak_tokens[feature], "title": title}
+        return {"id": int(feature), "density": float(self.density[feature]), "peak_token": self.peak_tokens[feature], "title": title,
+                "trusted": bool(self.group[feature] == 0)}
 
     def browse(self, sort: str, offset: int, limit: int, low: float | None, high: float | None) -> list[dict]:
         keys = {"density": -self.density, "rarity": self.density, "max": -self.max, "id": np.arange(len(self.counts)), "check": self.check_rank}
@@ -106,8 +118,8 @@ class FeatureIndex:
             with np.errstate(divide="ignore"):
                 log_density = np.log10(self.density[features])
             features = features[(log_density >= low - 1e-9) & (log_density < high - 1e-9)]
-        # Named features first, each group in the chosen order.
-        features = features[np.argsort(~self.named[features], kind="stable")]
+        # Trusted titles first, then low-confidence ones, then unnamed features, each group in the chosen order.
+        features = features[np.argsort(self.group[features], kind="stable")]
         return [self.row(feature) for feature in features[offset : offset + limit]]
 
     @lru_cache(maxsize=64)
