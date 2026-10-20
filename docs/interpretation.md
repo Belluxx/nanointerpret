@@ -1,6 +1,6 @@
 # Feature interpretation
 
-`interpret.py` names each SAE feature with an LLM, then checks the name two ways: on recorded activations the LLM hasn't seen, and on the studied model itself. Names, scores, and test texts show up in the explorer.
+`interpret.py` has an LLM write a title and a one- or two-sentence description for each SAE feature, then checks them two ways: on recorded activations the LLM hasn't seen, and on the studied model itself. Below, "name" means the title and description together. Titles, descriptions, scores, and test texts show up in the explorer.
 
 ![For each feature: sample recorded activations, name the feature, check the name on held-out tokens, write test texts that the studied model scores, revise a failing name once, and steer the decoder direction](../assets/interpretation_pipeline.svg)
 

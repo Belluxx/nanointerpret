@@ -1,101 +1,176 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1128" viewBox="0 0 1000 1128" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1290" viewBox="0 0 1000 1290" role="img" aria-labelledby="title description">
 <title id="title">Feature interpretation pipeline</title>
-<desc id="description">For each feature, interpret.py samples recorded activations, an LLM names the feature from 20 excerpts, a fresh call checks the name on 24 held-out tokens, the LLM writes 6 test pairs that the studied model and SAE score, a failing name is revised once, and the feature's decoder direction is steered to find the tokens it promotes. Results go to interpretations.jsonl and the explorer.</desc>
-<style>.bg{fill:#F6F6F4}.lane{fill:#EDEDEA}.card{fill:#FFFFFF}.ink{fill:#222221}.ink2{fill:#565653}.muted{fill:#8C8C87}.wire{fill:none;stroke:#8C8C87;stroke-width:1.3}.head{fill:#8C8C87}.decision{fill:#FFFFFF;stroke:#8C8C87;stroke-width:1.3}.pill{fill:#EB6834;fill-opacity:.13}.dot{fill:#EB6834}@media (prefers-color-scheme: dark){.bg{fill:#181817}.lane{fill:#121211}.card{fill:#1F1F1E}.ink{fill:#E9E9E6}.ink2{fill:#B5B5B0}.muted{fill:#85857F}.wire{stroke:#85857F}.head{fill:#85857F}.decision{fill:#1F1F1E;stroke:#85857F}.pill{fill:#D95926;fill-opacity:.22}.dot{fill:#D95926}}</style>
+<desc id="description">For each feature, interpret.py samples recorded activations, an LLM writes a title and description from 20 excerpts, a fresh call checks them on 24 held-out tokens, the LLM writes 6 test pairs from them that the studied model and SAE score, a failing title and description is revised once, and the feature's decoder direction is added at increasing strengths, keeping the strongest that moves next-token predictions by at most 1 nat of KL, to find the tokens it makes more likely. Results go to interpretations.jsonl and the explorer.</desc>
+<style>.bg{fill:#F6F6F4}.lane{fill:#EDEDEA}.card{fill:#FFFFFF}.ink{fill:#222221}.ink2{fill:#565653}.muted{fill:#8C8C87}.wire{fill:none;stroke:#8C8C87;stroke-width:1.3}.head{fill:#8C8C87}.decision{fill:#FFFFFF;stroke:#8C8C87;stroke-width:1.3}.rule{stroke:#EDEDEA;stroke-width:1}.band0{fill:#E5E5E1}.band1{fill:#BDBDB8}.band2{fill:#8C8C87}.band3{fill:#222221}.pick{fill:#222221}.held{fill:#FFFFFF;stroke:#565653;stroke-width:1.2}.ring{fill:none;stroke:#222221;stroke-width:1.2}.curve{fill:none;stroke:#BDBDB8;stroke-width:1.2}.threshold{stroke:#8C8C87;stroke-width:1;stroke-dasharray:3 3}.allowed{fill:#F2F2EF}@media (prefers-color-scheme: dark){.bg{fill:#181817}.lane{fill:#121211}.card{fill:#1F1F1E}.ink{fill:#E9E9E6}.ink2{fill:#B5B5B0}.muted{fill:#85857F}.wire{stroke:#85857F}.head{fill:#85857F}.decision{fill:#1F1F1E;stroke:#85857F}.rule{stroke:#2A2A28}.band0{fill:#2C2C2B}.band1{fill:#55554F}.band2{fill:#85857F}.band3{fill:#E9E9E6}.pick{fill:#E9E9E6}.held{fill:#1F1F1E;stroke:#B5B5B0}.ring{stroke:#E9E9E6}.curve{stroke:#55554F}.threshold{stroke:#85857F}.allowed{fill:#262625}}</style>
 <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0 0 L10 5 L0 10 z"/></marker></defs>
-<rect class="bg" x="0" y="0" width="1000" height="1128"/>
-<rect class="lane" x="16" y="16" width="296" height="984"/>
-<rect class="lane" x="360" y="16" width="304" height="984"/>
-<rect class="lane" x="680" y="16" width="304" height="984"/>
+<rect class="bg" x="0" y="0" width="1000" height="1290"/>
+<rect class="lane" x="16" y="16" width="296" height="1154"/>
+<rect class="lane" x="360" y="16" width="304" height="1154"/>
+<rect class="lane" x="680" y="16" width="304" height="1154"/>
 <text x="32" y="46" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="15" text-anchor="start" font-weight="600">Recorded activations</text>
-<text x="32" y="66" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" text-anchor="start">record_activations.py index</text>
-<text x="32" y="84" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" text-anchor="start">read only, no model runs</text>
 <text x="376" y="46" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="15" text-anchor="start" font-weight="600">Explainer and judge LLM</text>
-<text x="376" y="66" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" text-anchor="start">e.g. gemma-4-31B-it on llama-server</text>
-<text x="376" y="84" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" text-anchor="start">3 calls per feature, 6 if revised</text>
 <text x="696" y="46" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="15" text-anchor="start" font-weight="600">Studied model + SAE</text>
-<text x="696" y="66" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" text-anchor="start">e.g. Qwen3 1.7B, run by interpret.py</text>
-<text x="696" y="84" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" text-anchor="start">13 passes per feature, 25 if revised</text>
-<rect class="card" x="32" y="112" width="264" height="116"/>
+<g transform="translate(0 -32)">
+<rect class="card" x="32" y="112" width="264" height="232"/>
 <text x="48" y="138" class="muted" font-family="'SF Mono', ui-monospace, Menlo, Consolas, monospace" font-size="13" text-anchor="start">1</text>
 <text x="66" y="138" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" text-anchor="start" font-weight="600">Sample</text>
-<text x="48" y="160" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">the 8 strongest activations, plus</text>
-<text x="48" y="178" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">3 from each activation-quantile bin:</text>
-<text x="48" y="196" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">0–50 · 50–80 · 80–95 · 95–100%</text>
-<text x="48" y="214" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">32 tokens before, 8 after each</text>
-<rect class="card" x="376" y="260" width="272" height="98"/>
-<text x="392" y="286" class="muted" font-family="'SF Mono', ui-monospace, Menlo, Consolas, monospace" font-size="13" text-anchor="start">2</text>
-<text x="410" y="286" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" text-anchor="start" font-weight="600">Explain</text>
-<text x="392" y="308" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">reads the excerpts, firing tokens</text>
-<text x="392" y="326" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">marked with a 1–10 activation, and</text>
-<text x="392" y="344" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">the tokens it fires on most</text>
-<rect class="card" x="32" y="398" width="264" height="120"/>
-<text x="48" y="424" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" text-anchor="start" font-weight="600">Held-out tokens</text>
-<text x="48" y="446" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">12 firing: 3 from each bin</text>
-<text x="48" y="464" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">12 silent: 4 random, 4 of its usual</text>
-<text x="48" y="482" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">tokens where it stays silent, 4 of</text>
-<text x="48" y="500" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">the nearest feature&#x27;s activations</text>
-<rect class="card" x="376" y="398" width="272" height="120"/>
-<text x="392" y="424" class="muted" font-family="'SF Mono', ui-monospace, Menlo, Consolas, monospace" font-size="13" text-anchor="start">3</text>
-<text x="410" y="424" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" text-anchor="start" font-weight="600">Detect</text>
-<text x="392" y="446" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">a fresh call sees only the name and</text>
-<text x="392" y="464" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">says whether each token fires</text>
-<rect class="pill" x="392" y="478" width="140" height="22" rx="11"/>
-<circle class="dot" cx="404" cy="489" r="3.5"/>
-<text x="414" y="493" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" text-anchor="start" font-weight="500">balanced accuracy</text>
-<rect class="card" x="376" y="558" width="272" height="128"/>
-<text x="392" y="584" class="muted" font-family="'SF Mono', ui-monospace, Menlo, Consolas, monospace" font-size="13" text-anchor="start">4</text>
-<text x="410" y="584" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" text-anchor="start" font-weight="600">Write tests</text>
-<text x="392" y="606" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">6 pairs from the name: a text that</text>
-<text x="392" y="624" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">should fire and a minimal contrast</text>
-<text x="392" y="642" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">that should stay silent</text>
-<rect class="card" x="696" y="558" width="272" height="128"/>
-<text x="712" y="584" class="muted" font-family="'SF Mono', ui-monospace, Menlo, Consolas, monospace" font-size="13" text-anchor="start">5</text>
-<text x="730" y="584" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" text-anchor="start" font-weight="600">Measure</text>
-<text x="712" y="606" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">runs each text to the SAE&#x27;s layer;</text>
-<text x="712" y="624" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">a pair passes if the contrast stays</text>
-<text x="712" y="642" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">under half the first text&#x27;s activation</text>
-<rect class="pill" x="712" y="656" width="167" height="22" rx="11"/>
-<circle class="dot" cx="724" cy="667" r="3.5"/>
-<text x="734" y="671" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" text-anchor="start" font-weight="500">pass rate, of 6 pairs</text>
-<rect class="card" x="376" y="712" width="272" height="96"/>
-<text x="392" y="738" class="muted" font-family="'SF Mono', ui-monospace, Menlo, Consolas, monospace" font-size="13" text-anchor="start">6</text>
-<text x="410" y="738" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" text-anchor="start" font-weight="600">Revise, once</text>
-<text x="392" y="760" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">sees what each test text scored and</text>
-<text x="392" y="778" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">writes a new name; the one with the</text>
-<text x="392" y="796" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">higher detection + pass rate is kept</text>
-<rect class="card" x="696" y="844" width="272" height="140"/>
-<text x="712" y="870" class="muted" font-family="'SF Mono', ui-monospace, Menlo, Consolas, monospace" font-size="13" text-anchor="start">7</text>
-<text x="730" y="870" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" text-anchor="start" font-weight="600">Steer</text>
-<text x="712" y="892" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">adds the decoder direction at the</text>
-<text x="712" y="910" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">SAE&#x27;s layer on 8 neutral prompts, at</text>
-<text x="712" y="928" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">the strongest of 0.5–16× the max</text>
-<text x="712" y="946" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">activation that keeps KL ≤ 1 nat</text>
-<text x="712" y="964" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">→ the 10 tokens it promotes most</text>
-<polygon class="decision" points="832,722 924,762 832,802 740,762"/>
-<text x="832" y="767" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="13.5" text-anchor="middle" font-weight="600">4+ of 6 pass?</text>
-<path class="wire" d="M296 150 L512 150 L512 256" marker-end="url(#arrow)"/>
-<text x="376" y="142" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11.5" text-anchor="start">20 marked excerpts</text>
-<path class="wire" d="M164 228 L164 394" marker-end="url(#arrow)"/>
-<text x="174" y="316" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11.5" text-anchor="start">kept out of step 2</text>
-<path class="wire" d="M296 434 L372 434" marker-end="url(#arrow)"/>
-<path class="wire" d="M512 358 L512 394" marker-end="url(#arrow)"/>
-<text x="522" y="381" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11.5" text-anchor="start">title + description</text>
-<path class="wire" d="M512 518 L512 554" marker-end="url(#arrow)"/>
-<text x="522" y="541" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11.5" text-anchor="start">the name</text>
-<path class="wire" d="M648 616 L692 616" marker-end="url(#arrow)"/>
-<text x="672" y="607" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11.5" text-anchor="middle">12 texts</text>
-<path class="wire" d="M832 686 L832 718" marker-end="url(#arrow)"/>
-<path class="wire" d="M740 762 L652 762" marker-end="url(#arrow)"/>
-<text x="694" y="754" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11.5" text-anchor="middle">no, first try</text>
-<path class="wire" d="M376 762 L336 762 L336 488 L372 488" marker-end="url(#arrow)"/>
-<text x="329" y="625" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11.5" text-anchor="middle" transform="rotate(-90 329 625)">new name: steps 3–5 rerun</text>
-<path class="wire" d="M832 802 L832 840" marker-end="url(#arrow)"/>
-<text x="842" y="826" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11.5" text-anchor="start">yes, or revised</text>
-<path class="wire" d="M832 984 L832 1020" marker-end="url(#arrow)"/>
-<rect class="card" x="16" y="1024" width="968" height="88"/>
-<text x="36" y="1052" class="ink" font-family="'SF Mono', ui-monospace, Menlo, Consolas, monospace" font-size="13.5" text-anchor="start" font-weight="600">interpretations.jsonl</text>
-<text x="216" y="1052" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" text-anchor="start">one line per feature, in the activation directory</text>
-<text x="36" y="1074" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">title · description · detection scores · the 6 measured test pairs · generation scores · steering strength, KL and tokens</text>
-<text x="36" y="1094" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">explore.py lists named features first and shows the name, both scores, the test pairs and the steering tokens on each feature page</text>
+<text x="48" y="160" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">the feature&#x27;s recorded activations,</text>
+<text x="48" y="178" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">ranked into percentile bands:</text>
+<line class="rule" x1="32" y1="312" x2="296" y2="312"/>
+<text x="48" y="332" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"><tspan class="muted" font-size="10.5" font-weight="500" letter-spacing="1.2">OUTPUT</tspan><tspan class="ink" font-size="12.5" font-weight="500" dx="10">20 excerpts, 12 held out</tspan></text>
+<rect class="band0" x="49.0" y="208" width="56.0" height="12"/>
+<circle class="pick" cx="57.0" cy="198" r="2.8"/>
+<circle class="pick" cx="65.0" cy="198" r="2.8"/>
+<circle class="pick" cx="73.0" cy="198" r="2.8"/>
+<circle class="held" cx="81.0" cy="198" r="2.8"/>
+<circle class="held" cx="89.0" cy="198" r="2.8"/>
+<circle class="held" cx="97.0" cy="198" r="2.8"/>
+<rect class="band1" x="107.0" y="208" width="56.0" height="12"/>
+<circle class="pick" cx="115.0" cy="198" r="2.8"/>
+<circle class="pick" cx="123.0" cy="198" r="2.8"/>
+<circle class="pick" cx="131.0" cy="198" r="2.8"/>
+<circle class="held" cx="139.0" cy="198" r="2.8"/>
+<circle class="held" cx="147.0" cy="198" r="2.8"/>
+<circle class="held" cx="155.0" cy="198" r="2.8"/>
+<rect class="band2" x="165.0" y="208" width="56.0" height="12"/>
+<circle class="pick" cx="173.0" cy="198" r="2.8"/>
+<circle class="pick" cx="181.0" cy="198" r="2.8"/>
+<circle class="pick" cx="189.0" cy="198" r="2.8"/>
+<circle class="held" cx="197.0" cy="198" r="2.8"/>
+<circle class="held" cx="205.0" cy="198" r="2.8"/>
+<circle class="held" cx="213.0" cy="198" r="2.8"/>
+<rect class="band3" x="223.0" y="208" width="56.0" height="12"/>
+<circle class="pick" cx="231.0" cy="198" r="2.8"/>
+<circle class="pick" cx="239.0" cy="198" r="2.8"/>
+<circle class="pick" cx="247.0" cy="198" r="2.8"/>
+<circle class="held" cx="255.0" cy="198" r="2.8"/>
+<circle class="held" cx="263.0" cy="198" r="2.8"/>
+<circle class="held" cx="271.0" cy="198" r="2.8"/>
+<text x="48.0" y="236" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" text-anchor="start">0</text>
+<text x="106.0" y="236" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" text-anchor="middle">50</text>
+<text x="164.0" y="236" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" text-anchor="middle">80</text>
+<text x="222.0" y="236" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" text-anchor="middle">95</text>
+<text x="280.0" y="236" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" text-anchor="end">100</text>
+<circle class="pick" cx="51" cy="254" r="2.8"/>
+<text x="60" y="258" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">3 per band and the 8 strongest</text>
+<circle class="held" cx="51" cy="272" r="2.8"/>
+<text x="60" y="276" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">3 more per band, held out</text>
+<text x="48" y="298" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12" text-anchor="start">each excerpt: 32 tokens before, 8 after</text>
+<rect class="card" x="376" y="206" width="272" height="130"/>
+<text x="392" y="232" class="muted" font-family="'SF Mono', ui-monospace, Menlo, Consolas, monospace" font-size="13" text-anchor="start">2</text>
+<text x="410" y="232" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" text-anchor="start" font-weight="600">Explain</text>
+<text x="392" y="254" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">reads the excerpts, firing tokens</text>
+<text x="392" y="272" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">marked with a 1–10 activation, and</text>
+<text x="392" y="290" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">the tokens it fires on most</text>
+<line class="rule" x1="376" y1="304" x2="648" y2="304"/>
+<text x="392" y="324" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"><tspan class="muted" font-size="10.5" font-weight="500" letter-spacing="1.2">OUTPUT</tspan><tspan class="ink" font-size="12.5" font-weight="500" dx="10">title + description</tspan></text>
+<rect class="card" x="32" y="422" width="264" height="136"/>
+<text x="48" y="448" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" text-anchor="start" font-weight="600">Held-out tokens</text>
+<text x="48" y="470" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">12 firing: 3 per band, from step 1</text>
+<text x="48" y="488" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">12 where it doesn&#x27;t fire:</text>
+<text x="48" y="506" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">– 4 random tokens</text>
+<text x="48" y="524" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">– 4 of the tokens it usually fires on</text>
+<text x="48" y="542" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">– 4 where its closest feature fires</text>
+<rect class="card" x="376" y="422" width="272" height="136"/>
+<text x="392" y="448" class="muted" font-family="'SF Mono', ui-monospace, Menlo, Consolas, monospace" font-size="13" text-anchor="start">3</text>
+<text x="410" y="448" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" text-anchor="start" font-weight="600">Detect</text>
+<text x="392" y="470" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">sees only the title + description and</text>
+<text x="392" y="488" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">guesses, for each held-out token,</text>
+<text x="392" y="506" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">whether the feature fires there</text>
+<line class="rule" x1="376" y1="526" x2="648" y2="526"/>
+<text x="392" y="546" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"><tspan class="muted" font-size="10.5" font-weight="500" letter-spacing="1.2">SCORE</tspan><tspan class="ink" font-size="12.5" font-weight="500" dx="10">balanced accuracy</tspan></text>
+<rect class="card" x="376" y="598" width="272" height="128"/>
+<text x="392" y="624" class="muted" font-family="'SF Mono', ui-monospace, Menlo, Consolas, monospace" font-size="13" text-anchor="start">4</text>
+<text x="410" y="624" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" text-anchor="start" font-weight="600">Write tests</text>
+<text x="392" y="646" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">6 pairs from the title + description:</text>
+<text x="392" y="664" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">a text that should fire and a minimal</text>
+<text x="392" y="682" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">contrast that should stay silent</text>
+<line class="rule" x1="376" y1="694" x2="648" y2="694"/>
+<text x="392" y="714" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"><tspan class="muted" font-size="10.5" font-weight="500" letter-spacing="1.2">OUTPUT</tspan><tspan class="ink" font-size="12.5" font-weight="500" dx="10">6 pairs, 12 texts</tspan></text>
+<rect class="card" x="696" y="598" width="272" height="128"/>
+<text x="712" y="624" class="muted" font-family="'SF Mono', ui-monospace, Menlo, Consolas, monospace" font-size="13" text-anchor="start">5</text>
+<text x="730" y="624" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" text-anchor="start" font-weight="600">Measure</text>
+<text x="712" y="646" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">runs each text to the SAE&#x27;s layer;</text>
+<text x="712" y="664" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">a pair passes if the contrast stays</text>
+<text x="712" y="682" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">under half the first text&#x27;s activation</text>
+<line class="rule" x1="696" y1="694" x2="968" y2="694"/>
+<text x="712" y="714" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"><tspan class="muted" font-size="10.5" font-weight="500" letter-spacing="1.2">SCORE</tspan><tspan class="ink" font-size="12.5" font-weight="500" dx="10">pass rate, of 6 pairs</tspan></text>
+<rect class="card" x="376" y="752" width="272" height="128"/>
+<text x="392" y="778" class="muted" font-family="'SF Mono', ui-monospace, Menlo, Consolas, monospace" font-size="13" text-anchor="start">6</text>
+<text x="410" y="778" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" text-anchor="start" font-weight="600">Revise, once</text>
+<text x="392" y="800" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">sees what each test text scored and</text>
+<text x="392" y="818" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">rewrites the title + description;</text>
+<text x="392" y="836" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">the better-scoring version is kept</text>
+<line class="rule" x1="376" y1="848" x2="648" y2="848"/>
+<text x="392" y="868" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"><tspan class="muted" font-size="10.5" font-weight="500" letter-spacing="1.2">OUTPUT</tspan><tspan class="ink" font-size="12.5" font-weight="500" dx="10">new title + description</tspan></text>
+<rect class="card" x="696" y="920" width="272" height="266"/>
+<text x="712" y="946" class="muted" font-family="'SF Mono', ui-monospace, Menlo, Consolas, monospace" font-size="13" text-anchor="start">7</text>
+<text x="730" y="946" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" text-anchor="start" font-weight="600">Steer</text>
+<text x="712" y="968" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">adds the decoder direction at the</text>
+<text x="712" y="986" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">SAE&#x27;s layer on 8 neutral prompts:</text>
+<line class="rule" x1="696" y1="1154" x2="968" y2="1154"/>
+<text x="712" y="1174" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"><tspan class="muted" font-size="10.5" font-weight="500" letter-spacing="1.2">OUTPUT</tspan><tspan class="ink" font-size="12.5" font-weight="500" dx="10">10 tokens it makes more likely</tspan></text>
+<text x="712" y="1010" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" text-anchor="start">KL from the unsteered predictions</text>
+<rect class="allowed" x="712" y="1039.3" width="240" height="46.7"/>
+<line class="threshold" x1="712" y1="1039.3" x2="952" y2="1039.3"/>
+<text x="946" y="1080" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" text-anchor="end">KL ≤ 1 nat</text>
+<polyline class="curve" points="720.0,1075.6 748.0,1061.6 776.0,1044.5 804.0,1037.0 832.0,1032.9 860.0,1027.5 888.0,1025.2 916.0,1023.4 944.0,1022.0"/>
+<circle class="pick" cx="720.0" cy="1075.6" r="2.8"/>
+<text x="720.0" y="1102" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="10.5" text-anchor="middle">0.5</text>
+<circle class="pick" cx="748.0" cy="1061.6" r="2.8"/>
+<text x="748.0" y="1102" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="10.5" text-anchor="middle">1</text>
+<circle class="pick" cx="776.0" cy="1044.5" r="2.8"/>
+<text x="776.0" y="1102" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="10.5" text-anchor="middle">2</text>
+<circle class="held" cx="804.0" cy="1037.0" r="2.8"/>
+<text x="804.0" y="1102" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="10.5" text-anchor="middle">3</text>
+<circle class="held" cx="832.0" cy="1032.9" r="2.8"/>
+<text x="832.0" y="1102" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="10.5" text-anchor="middle">4</text>
+<circle class="held" cx="860.0" cy="1027.5" r="2.8"/>
+<text x="860.0" y="1102" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="10.5" text-anchor="middle">6</text>
+<circle class="held" cx="888.0" cy="1025.2" r="2.8"/>
+<text x="888.0" y="1102" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="10.5" text-anchor="middle">8</text>
+<circle class="held" cx="916.0" cy="1023.4" r="2.8"/>
+<text x="916.0" y="1102" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="10.5" text-anchor="middle">12</text>
+<circle class="held" cx="944.0" cy="1022.0" r="2.8"/>
+<text x="944.0" y="1102" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="10.5" text-anchor="middle">16</text>
+<circle class="ring" cx="776.0" cy="1044.5" r="5.5"/>
+<text x="712" y="1118" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11" text-anchor="start">strength, × the max activation</text>
+<circle class="ring" cx="716" cy="1136" r="4.5"/>
+<text x="726" y="1140" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">the strongest under 1 nat is used</text>
+<polygon class="decision" points="832,776 924,816 832,856 740,816"/>
+<text x="832" y="821" class="ink" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="13.5" text-anchor="middle" font-weight="600">4+ of 6 pass?</text>
+<path class="wire" d="M296 254 L372 254" marker-end="url(#arrow)"/>
+<text x="336" y="246" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11.5" text-anchor="middle">20 excerpts</text>
+<path class="wire" d="M164 344 L164 418" marker-end="url(#arrow)"/>
+<text x="174" y="385" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11.5" text-anchor="start">never shown in step 2</text>
+<path class="wire" d="M296 458 L372 458" marker-end="url(#arrow)"/>
+<text x="336" y="450" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11.5" text-anchor="middle">24 excerpts</text>
+<path class="wire" d="M512 336 L512 418" marker-end="url(#arrow)"/>
+<path class="wire" d="M512 558 L512 594" marker-end="url(#arrow)"/>
+<text x="522" y="581" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11.5" text-anchor="start">title + description</text>
+<path class="wire" d="M648 656 L692 656" marker-end="url(#arrow)"/>
+<path class="wire" d="M832 726 L832 772" marker-end="url(#arrow)"/>
+<path class="wire" d="M740 816 L652 816" marker-end="url(#arrow)"/>
+<text x="694" y="808" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11.5" text-anchor="middle">no, first try</text>
+<path class="wire" d="M376 816 L336 816 L336 512 L372 512" marker-end="url(#arrow)"/>
+<text x="329" y="664" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11.5" text-anchor="middle" transform="rotate(-90 329 664)">steps 3–5 rerun</text>
+<path class="wire" d="M832 856 L832 916" marker-end="url(#arrow)"/>
+<text x="842" y="892" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="11.5" text-anchor="start">yes, or revised</text>
+<path class="wire" d="M832 1186 L832 1222" marker-end="url(#arrow)"/>
+<rect class="card" x="16" y="1226" width="968" height="80"/>
+<text x="36" y="1271" class="ink" font-family="'SF Mono', ui-monospace, Menlo, Consolas, monospace" font-size="13.5" text-anchor="start" font-weight="600">interpretations.jsonl</text>
+<line class="rule" x1="228" y1="1242" x2="228" y2="1290"/>
+<text x="248" y="1252" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"><tspan font-size="10.5" font-weight="500" letter-spacing="1.2">NAME</tspan><tspan font-size="11.5" dx="8">steps 2 and 6</tspan></text>
+<text x="248" y="1270" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">title and description,</text>
+<text x="248" y="1287" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">whether it was revised</text>
+<text x="427" y="1252" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"><tspan font-size="10.5" font-weight="500" letter-spacing="1.2">DETECTION</tspan><tspan font-size="11.5" dx="8">step 3</tspan></text>
+<text x="427" y="1270" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">balanced accuracy, recall,</text>
+<text x="427" y="1287" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">specificity, yes rate per kind</text>
+<text x="606" y="1252" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"><tspan font-size="10.5" font-weight="500" letter-spacing="1.2">TESTS</tspan><tspan font-size="11.5" dx="8">steps 4 and 5</tspan></text>
+<text x="606" y="1270" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">the 6 pairs with their</text>
+<text x="606" y="1287" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">activations, pass rate</text>
+<text x="785" y="1252" class="muted" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"><tspan font-size="10.5" font-weight="500" letter-spacing="1.2">STEERING</tspan><tspan font-size="11.5" dx="8">step 7</tspan></text>
+<text x="785" y="1270" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">strength, KL, and the 10</text>
+<text x="785" y="1287" class="ink2" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="12.5" text-anchor="start">tokens it makes more likely</text>
+</g>
 </svg>
