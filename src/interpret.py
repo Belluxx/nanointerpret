@@ -29,7 +29,9 @@ GENERATED_PAIRS = 6
 CONTRAST_RATIO = 0.5
 # Descriptions with fewer generated pairs passing than this get one revision.
 REVISE_BELOW = 4
-MIN_FIRES = 40
+# Rarer features barely make the top k: their activations are small and vanish with any change of context,
+# so their titles come out vague and their tests fail.
+MIN_FIRES = 1000
 NEWLINE = "↵"
 STEER_PROMPTS = (
     "In my experience,",
