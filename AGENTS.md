@@ -10,6 +10,7 @@ Minimal training and feature interpretability analysis of LLMs with sparse autoe
 - `explore.py`: serve the local feature explorer over a recorded activation index.
 - `explorer/`: the explorer's static web UI (overview, feature pages, token search).
 - `docs/experiments.md`: experiment results and reproduction commands.
+- `docs/interpretation.md`: the feature interpretation pipeline: how to run it, how it works, and its results.
 - `docs/overview.md`: brief notes on activation layer, width multiplier, and K.
 - `src/data.py`: token cache, residual cache, and context batching.
 - `src/experiment.py`: run config, calibration, training loop, evaluation, and downstream KL.

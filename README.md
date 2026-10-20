@@ -3,7 +3,7 @@
 Nanointerpret objective is being a minimal but full-fledged interpretability playground where you can:
 - Train your own [SAE](https://www.lesswrong.com/posts/8YnHuN55XJTDwGPMr/a-gentle-introduction-to-sparse-autoencoders) on your own LLM
 - Record SAE feature activations
-- Name the features with a local LLM, checking each name against held-out text and the model itself
+- Name the features with a local LLM, checking each name against held-out text and the model itself ([how](docs/interpretation.md))
 - Explore the features in a local dashboard
 
 To train your SAE locally, check [Train your SAE](#train-your-sae) below.
