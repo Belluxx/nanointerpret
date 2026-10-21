@@ -332,7 +332,7 @@ class Probe:
         self.model, self.layer, self.sae, self.tokenizer = model, layer, sae, tokenizer
         self.feature_max = feature_max
         self.vocab = vocab
-        # Worker threads share one model.
+        # Worker threads share one model, and MPS crashes on concurrent use, so all work on its device holds this lock.
         self.lock = threading.Lock()
         encoded = [tokenizer.encode(prompt) for prompt in STEER_PROMPTS]
         input_ids = torch.full((len(encoded), max(map(len, encoded))), tokenizer.pad_token_id)
@@ -361,19 +361,20 @@ class Probe:
         # The next tokens made likelier by adding the decoder direction at the SAE's layer, at the strongest
         # multiple of the max activation that keeps the KL from the unsteered predictions within STEER_KL.
         # Pass-through dims are outside the SAE, so the direction leaves them unchanged.
-        direction = torch.zeros(len(self.sae.keep), device=self.sae.keep.device)
-        direction[self.sae.keep] = self.sae.decoder_weight[feature] / self.sae.activation_scale
-        delta = self.steer_scales[:, None] * float(self.feature_max[feature]) * direction
+        with self.lock:
+            direction = torch.zeros(len(self.sae.keep), device=self.sae.keep.device)
+            direction[self.sae.keep] = self.sae.decoder_weight[feature] / self.sae.activation_scale
+            delta = self.steer_scales[:, None] * float(self.feature_max[feature]) * direction
 
-        def add(hidden):
-            steered = hidden.clone()
-            # Position 0 is an attention sink and is left alone.
-            steered[:, 1:] += delta[:, None].to(hidden.dtype)
-            return steered
+            def add(hidden):
+                steered = hidden.clone()
+                # Position 0 is an attention sink and is left alone.
+                steered[:, 1:] += delta[:, None].to(hidden.dtype)
+                return steered
 
-        with self.lock, patch_layer_input(self.layer, add):
-            logits = self.model(input_ids=self.steer_ids, use_cache=False).logits
-        logprobs = torch.log_softmax(logits[torch.arange(len(logits)), self.steer_last].float(), dim=-1)
+            with patch_layer_input(self.layer, add):
+                logits = self.model(input_ids=self.steer_ids, use_cache=False).logits
+            logprobs = torch.log_softmax(logits[torch.arange(len(logits)), self.steer_last].float(), dim=-1).cpu()
         base, *steered = logprobs.view(len(STEER_STRENGTHS) + 1, len(STEER_PROMPTS), -1)
         kls = [float((run.exp() * (run - base)).sum(dim=-1).mean()) for run in steered]
         chosen = max([index for index, kl in enumerate(kls) if kl <= STEER_KL], default=0)
