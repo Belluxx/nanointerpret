@@ -189,12 +189,12 @@ def explain_prompt(sampler: Sampler, feature: int, examples: list[Example]) -> s
     peak = float(values.max())
     lines = [
         f"A sparse autoencoder was trained on the residual stream of the base language model {index.config['model_id'].split('/')[-1]} "
-        f"(layer {index.config['layer_index']}). Each of its features fires on some tokens. Explain feature {feature}.",
+        f"(layer {index.config['layer_index']}). Each of its features fires on some tokens. Explain one of them.",
         "",
-        "In each excerpt the tokens where the feature fires are wrapped in << >>, followed by their activations "
-        f"on a 1-10 scale relative to the feature's maximum. {NEWLINE} marks a line break.",
+        "In each excerpt, the tokens where the feature fires are wrapped in << >>, and the line below lists their activations "
+        f"from 1 to 10, where 10 is the feature's maximum. {NEWLINE} marks a line break.",
     ]
-    for title, top in (("Strongest activations", True), ("Activations sampled across the feature's range, weakest last", False)):
+    for title, top in (("Strongest activations", True), ("Activations across the feature's range, weakest last", False)):
         lines += ["", f"## {title}"]
         chosen = sorted((example for example in examples if (example.kind == "top") == top), key=lambda example: -example.activation)
         for number, example in enumerate(chosen, 1):
@@ -218,7 +218,8 @@ def explain_prompt(sampler: Sampler, feature: int, examples: list[Example]) -> s
     lines += [
         "",
         "Describe when the feature fires. Name the exact token(s) if it is tied to specific tokens, and the context that "
-        "decides whether it fires. The description must also cover the weaker activations, not only the strongest.",
+        "decides whether it fires: the model reads left to right, so only the token and the text before it can matter. "
+        "The description must also cover the weaker activations, not only the strongest.",
         'Return compact JSON: {"title": a specific name of at most 8 words, without the word "feature", "description": one or two precise sentences}.',
     ]
     return "\n".join(lines)
