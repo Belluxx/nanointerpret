@@ -6,7 +6,7 @@ Minimal training and feature interpretability analysis of LLMs with sparse autoe
 
 - `train.py`: set up the model and data (streamed or cached residuals), calibrate, train the SAE, and plot metrics.
 - `record_activations.py`: record SAE feature activations on the recording split and index them by token and by feature.
-- `interpret.py`: name features with an LLM and check each name: detection on held-out text, generated test texts run through the model, one revision on failure, and steering tokens.
+- `interpret.py`: name features with an LLM and check each name: detection on held-out text, generated test texts run through the model, and steering tokens.
 - `explore.py`: serve the local feature explorer over a recorded activation index.
 - `explorer/`: the explorer's static web UI (overview, feature pages, token search).
 - `docs/experiments.md`: experiment results and reproduction commands.

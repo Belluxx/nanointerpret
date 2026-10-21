@@ -27,8 +27,6 @@ GENERATED_PAIRS = 6
 # A generated pair passes when its contrast activates the feature under this fraction of the first text's activation.
 # Irrelevant changes, such as a neutral sentence before the text, cut activation that much for under 2% of texts.
 CONTRAST_RATIO = 0.5
-# Descriptions with fewer generated pairs passing than this get one revision.
-REVISE_BELOW = 4
 # Rarer features barely make the top k: their activations are small and vanish with any change of context,
 # so their titles come out vague and their tests fail.
 MIN_FIRES = 1000
@@ -222,27 +220,6 @@ def explain_prompt(sampler: Sampler, feature: int, examples: list[Example]) -> s
         "Describe when the feature fires. Name the exact token(s) if it is tied to specific tokens, and the context that "
         "decides whether it fires. The description must also cover the weaker activations, not only the strongest.",
         'Return compact JSON: {"title": a specific name of at most 8 words, without the word "feature", "description": one or two precise sentences}.',
-    ]
-    return "\n".join(lines)
-
-
-def revise_prompt(explain: str, explanation: dict, pairs: list[dict]) -> str:
-    lines = [
-        explain,
-        "",
-        f"A first attempt described it as: {json.dumps(explanation, ensure_ascii=False)}",
-        "Texts were written from that description, each meant to make the feature fire or to keep it silent, and run "
-        "through the model. The feature's strongest activation on each, on the same 1-10 scale (0 = silent):",
-    ]
-    for pair in pairs:
-        for key, intent in (("fires", "meant to fire"), ("silent", "meant to stay silent")):
-            level = max(1, round(10 * pair[f"{key}_activation"])) if pair[f"{key}_activation"] > 0 else 0
-            lines.append(f"- [{level}] ({intent}) {pair[key]}")
-    lines += [
-        "",
-        "Where a text meant to fire stayed silent, the description is too broad or misses a condition: compare it with the "
-        "excerpts to find what they have and it lacks. Where a text meant to stay silent fired, the description misses a trigger. "
-        "Revise the description so it agrees with both the excerpts and these results, and still covers the excerpts.",
     ]
     return "\n".join(lines)
 

@@ -14,7 +14,6 @@ from src.interpret import (
     EXPLAIN_SCHEMA,
     GENERATE_SCHEMA,
     MIN_FIRES,
-    REVISE_BELOW,
     Judge,
     Probe,
     Sampler,
@@ -25,7 +24,6 @@ from src.interpret import (
     generate_prompt,
     generation_scores,
     measured_pairs,
-    revise_prompt,
     shuffled,
 )
 from src.runtime import choose_device, find_transformer_layers, load_causal_lm
@@ -72,27 +70,23 @@ def main() -> None:
     sampler = Sampler(index, sae.decoder_weight.float().cpu())
     judge = Judge(args.base_url, args.model)
 
-    def evaluate(feature: int, explanation: dict, test: list) -> dict:
+    def interpret(feature: int) -> dict:
+        examples = sampler.sample(feature)
+        test = shuffled(examples.test, feature)
+        explanation = judge(explain_prompt(sampler, feature, examples.explain), EXPLAIN_SCHEMA, max_tokens=512)
         answers = judge(detect_prompt(explanation, test), detect_schema(len(test)), max_tokens=512)["fires"]
         pairs = judge(generate_prompt(explanation), GENERATE_SCHEMA, max_tokens=2048)["pairs"]
         fires = probe.max_activations([pair["fires"] for pair in pairs], feature)
         silent = probe.max_activations([pair["silent"] for pair in pairs], feature)
         pairs = measured_pairs(pairs, fires, silent)
-        return {**explanation, "detection": detection_scores(test, answers), "generation": generation_scores(pairs), "pairs": pairs}
-
-    def interpret(feature: int) -> dict:
-        examples = sampler.sample(feature)
-        test = shuffled(examples.test, feature)
-        explain = explain_prompt(sampler, feature, examples.explain)
-        result = evaluate(feature, judge(explain, EXPLAIN_SCHEMA, max_tokens=512), test) | {"revised": False}
-        if sum(pair["passed"] for pair in result["pairs"]) < REVISE_BELOW:
-            # One revision, informed by how the generated texts actually activated the feature; the better-scoring one is kept.
-            first = {key: result[key] for key in ("title", "description")}
-            revised = evaluate(feature, judge(revise_prompt(explain, first, result["pairs"]), EXPLAIN_SCHEMA, max_tokens=512), test)
-            score = lambda record: record["detection"]["balanced_accuracy"] + record["generation"]["pass_rate"]
-            if score(revised) >= score(result):
-                result = revised | {"revised": True}
-        return {"feature": feature, **result, "steering": probe.steer(feature)}
+        return {
+            "feature": feature,
+            **explanation,
+            "detection": detection_scores(test, answers),
+            "generation": generation_scores(pairs),
+            "pairs": pairs,
+            "steering": probe.steer(feature),
+        }
 
     def attempt(feature: int) -> dict | None:
         # A failed feature is reported and left out of the output, so the next run retries it.
