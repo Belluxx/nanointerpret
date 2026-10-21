@@ -151,8 +151,9 @@ class Sampler:
     def same_token_negatives(self, positions: np.ndarray, firing: set[int], rng) -> list[Example]:
         tokens, counts = np.unique(np.asarray(self.index.token_ids[positions]), return_counts=True)
         precision = counts / np.maximum(self.index.token_occurrences[tokens], 1)
-        # Tokens it fires on only sometimes are the informative near-misses; always-firing tokens have none.
-        ranked = tokens[np.lexsort((-counts, (precision < 0.05) | (precision > 0.95)))]
+        # Near-misses come from tokens it fires on at most half the time. On tokens it mostly fires on, the silent
+        # occurrences are weak activations that missed the top k, which no description can predict.
+        ranked = tokens[np.lexsort((-counts, (precision < 0.05) | (precision > 0.5)))]
         examples = []
         for token in ranked[:3]:
             occurrences = np.flatnonzero(self.index.token_ids == token)
