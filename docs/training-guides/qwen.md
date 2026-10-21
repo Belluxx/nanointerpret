@@ -5,7 +5,7 @@
 ```sh
 python3 train.py \
   --model-id unsloth/Qwen3-1.7B-Base \
-  --activation-layer 14 \
+  --activation-layer 20 \
   --width-multiplier 16 \
   --train-tokens 500000000 \
   --checkpoint-every 250000000 \
@@ -21,7 +21,7 @@ python3 train.py \
 2. Record feature activations:
 
 ```sh
-python3 record_activations.py --sae-dir artifacts/qwen3-1.7b-base_l14_w16_k32_500m
+python3 record_activations.py --sae-dir artifacts/qwen3-1.7b-base_l20_w16_k32_500m
 ```
 
 3. Optionally, name the features with a local LLM and check each name: see [Feature interpretation](../interpretation.md).
@@ -29,5 +29,5 @@ python3 record_activations.py --sae-dir artifacts/qwen3-1.7b-base_l14_w16_k32_50
 4. Explore the features at http://127.0.0.1:8000 (the first launch summarizes every feature once, which takes under a minute):
 
 ```sh
-python3 explore.py --sae-dir artifacts/qwen3-1.7b-base_l14_w16_k32_500m
+python3 explore.py --sae-dir artifacts/qwen3-1.7b-base_l20_w16_k32_500m
 ```

@@ -11,14 +11,14 @@ Hardware: M4 Max Mac Studio (CPU 16C, GPU 40C, 64GB RAM)
 
 ## Ablations
 
-Runs train on 100M FineWeb tokens and validate on 10M held-out ones, with downstream KL on 1M of them (95% CIs are about ±0.005 for Gemma and ±0.002 for Qwen). Each row adds its flags to the base command.
+Gemma runs train on 100M FineWeb tokens and Qwen runs on 500M. Both validate on 10M held-out tokens, with downstream KL on 1M of them (95% CIs are about ±0.005 for Gemma and ±0.003 for Qwen). Each row adds its flags to the base command.
 
 <details>
 <summary>Base commands</summary>
 
 ```sh
 python3 train.py --model-id unsloth/gemma-3-270m --activation-layer 9 --k 16 --train-tokens 100000000 --validation-tokens 10000000 --recording-tokens 0 --validate-every 100000000 --cache-activations
-python3 train.py --model-id unsloth/Qwen3-1.7B-Base --activation-layer 14 --train-tokens 100000000 --validation-tokens 10000000 --recording-tokens 0 --validate-every 100000000
+python3 train.py --model-id unsloth/Qwen3-1.7B-Base --activation-layer 20 --train-tokens 500000000 --validation-tokens 10000000 --recording-tokens 0 --validate-every 100000000
 ```
 
 </details>
@@ -38,14 +38,14 @@ Gemma 3 270M, layer 9, `k=16`:
 - Gradient clipping makes no difference within the KL's confidence interval but slows training by 35%, so it's off by default.
 - Passing [massive dimensions](#massive-activations) through lowers KL by 18%.
 
-Qwen3 1.7B, layer 14, `k=32`:
+Qwen3 1.7B, layer 20, `k=32`:
 
 | Run | Flags | Pass-through dims | Dead features | Downstream KL |
 |---|---|---|---:|---:|
-| Default | | none | 9.7% | 0.148 |
-| No sink exclusion | `--no-exclude-sinks` | 1401, 1793, 1999 | 12.3% | 0.148 |
+| Default | | none | 8.3% | 0.184 |
+| No sink exclusion | `--no-exclude-sinks` | 1793, 1999 | 11.2% | 0.185 |
 
-- Excluding [sink tokens](#massive-activations) leaves KL unchanged but lowers dead features, and frees the 37 features that otherwise fire almost only at position 0.
+- Excluding [sink tokens](#massive-activations) leaves KL unchanged but lowers dead features, and frees the 26 features that otherwise fire almost only at position 0.
 
 ## Massive activations
 
@@ -61,7 +61,7 @@ A few residual dimensions carry extremely large activations that mark attention 
 ## Performance
 
 - On MPS, compiling the layers before the capture point speeds up activation capture by ~2x for Gemma 3 270M, ~1.5x for Qwen3 0.6B, and ~1.2x for Qwen3 1.7B.
-- With the defaults, Gemma 3 270M trains at ~122k tok/s on cached residuals and Qwen3 1.7B at ~6.3k tok/s streamed; both are GPU-bound.
+- With the defaults, Gemma 3 270M trains at ~122k tok/s on cached residuals and Qwen3 1.7B at layer 20 at ~4.9k tok/s streamed; both are GPU-bound.
 
 ## Feature interpretation
 

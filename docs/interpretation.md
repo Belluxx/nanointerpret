@@ -1,68 +1,63 @@
 # Feature interpretation
 
-`interpret.py` has an LLM write a title and a one- or two-sentence description for each SAE feature, then checks them two ways: on recorded activations the LLM hasn't seen, and on the studied model itself. Below, "name" means the title and description together. Titles, descriptions, scores, and test texts show up in the explorer.
+`interpret.py` has an LLM write a title and description for each SAE feature. It then checks whether they are right in two independent ways, and records which tokens the feature makes more likely when added to the model. Everything shows up in the explorer.
 
-![For each feature: sample recorded activations, name the feature, check the name on held-out tokens, write test texts that the studied model scores, revise a failing name once, and steer the decoder direction](../assets/interpretation_pipeline.svg)
+![For each feature: sample recorded activations, write a title and description, check them on held-out tokens, write test texts that the studied model scores, revise once on failure, and steer along the decoder direction](../assets/interpretation_pipeline.svg)
 
 ## Run
 
+Start a judge LLM, interpret a sample of features, then browse them:
+
 ```sh
 llama-server -m gemma-4-31B-it-Q8_0.gguf --port 8080 -c 32768 -np 4 -cram 0 --reasoning off
-python3 interpret.py --sae-dir artifacts/qwen3-1.7b-base_l14_w16_k32_500m --base-url http://127.0.0.1:8080/v1 --sample 500
-python3 explore.py --sae-dir artifacts/qwen3-1.7b-base_l14_w16_k32_500m
+python3 interpret.py --sae-dir artifacts/qwen3-1.7b-base_l20_w16_k32_500m --base-url http://127.0.0.1:8080/v1 --sample 1000
+python3 explore.py --sae-dir artifacts/qwen3-1.7b-base_l20_w16_k32_500m
 ```
 
-- `--sample N` names N features spread evenly over activation density, `--features` names specific ones, and neither names every feature with at least 40 recorded activations.
-- Results are appended to `interpretations.jsonl` in the activation directory. A rerun skips features already there, so it resumes where it stopped and retries features that failed.
-- `-cram 0` keeps llama-server's prompt cache from filling RAM. `--reasoning off` makes every call answer directly in JSON, which the token limits are sized for. `-np 4` matches the default `--workers 4`.
-- On an M4 Max, gemma-4-31B-it (~40GB of RAM) takes about 36 s per feature, 5 hours for 500. gemma-4-12B-it decodes ~3x faster and is a bit less precise ([results](#results)).
+- `--sample N` picks N features spread over activation density, `--features` picks specific ones, and without either every feature with at least 1,000 recorded activations is interpreted. Rarer features barely make the SAE's top k, so their activations are small and vanish with any change of context: their titles come out vague and their tests fail.
+- Results go to `interpretations.jsonl` in the activation directory. A rerun skips the features already there, so an interrupted run resumes.
+- `-cram 0` keeps llama-server's prompt cache from filling RAM, `--reasoning off` makes the LLM answer directly, and `-np 4` matches `interpret.py`'s 4 workers.
+- With gemma-4-31B-it on an M4 Max, a feature takes about 45 s (1,000 in about 12 hours). gemma-4-12B-it is about 3x faster but its titles and descriptions pass fewer tests.
 
-## Method
+## How it works
 
-- **Sample and explain**: the explainer sees the 8 strongest activations and 12 drawn evenly from activation-quantile bins (0-50, 50-80, 80-95, 95-100%), 32 tokens before and 8 after, with the firing tokens marked and their activations on a 1-10 scale, plus the tokens the feature fires on most and the share of their occurrences it fires on. Sampling across the range keeps the name from describing only the peak. [1]
-- **Detect**: a judge given only the name says whether the feature fires on each of 24 marked tokens it hasn't seen: 12 activations from the same bins, and 12 silent tokens split between random ones, the feature's frequent tokens where it stays silent, and activations of the feature with the closest decoder direction. The last two are hard negatives: a vague or token-level name says yes to them. Balanced accuracy averages recall with the specificity on each kind of silent token. [1]
-- **Write tests and measure**: the judge writes 6 pairs of texts from the name, one meant to make the feature fire and a minimal contrast meant to keep it silent, and the model and SAE measure the actual activations; a pair passes when the contrast's activation is under half the first text's (a smaller drop is within what irrelevant changes cause). The model, not a judge, is the ground truth, so this catches names that are right about the examples but too broad. [2, 3]
-- **Revise**: when fewer than 4 of 6 pairs pass, the explainer sees the measured activations and revises the name once; the version with the higher detection plus pass rate is kept. [3]
-- **Steer**: the decoder direction is added at the SAE's layer on 8 neutral prompts, at the strongest multiple of the max activation (0.5-16x) that keeps the KL from the unsteered next-token predictions within 1 nat, and the tokens whose log-probability rises most are reported. This stays separate from the name, since what a mid-layer feature fires on and what it promotes often differ. [4, 5]
-- **Output**: one JSON line per feature with the name, both scores, the measured test pairs, and the steering result. The explorer lists named features first and shows these on each feature page.
+The steps match the diagram.
+
+1. **Sample.** Pick 20 excerpts where the feature fires: the 8 strongest, plus 3 from each activation band (0-50, 50-80, 80-95 and 95-100th percentile), so that the title and description cover how the feature usually fires, not only its peak. 12 more are kept aside for step 3. [1]
+2. **Explain.** The LLM reads the excerpts, with the firing tokens marked by strength, and writes a title and description.
+3. **Detect.** A fresh LLM call sees only the title and description and guesses, for 24 tokens it has never seen, whether the feature fires there. Half are firing tokens. The other half are tokens where it stays silent, including tricky ones: tokens it fires on only sometimes, in places where it doesn't, and tokens where its most similar feature fires. A title and description that only list tokens, or are too vague, fail on those. The score is balanced accuracy: 0.5 is chance, 1 is perfect. [1]
+4. **Write tests.** The LLM writes 6 pairs of new texts: one that should make the feature fire, and a minimal edit of it that should not. The edit comes at or before the token where the feature should fire, since the model reads left to right.
+5. **Measure.** The studied model reads each text and the SAE measures the feature. A pair passes if the edit at least halves the activation. Here the model itself is the judge, which catches titles and descriptions that fit the examples but are too broad. [2, 3]
+6. **Revise.** If fewer than 4 of 6 pairs pass, the LLM sees the measured activations and rewrites the title and description once. Steps 3-5 run again, and the version with the better scores is kept. [3]
+7. **Steer.** The feature's direction is added to the model on 8 neutral prompts, and the 10 next tokens whose probability rises the most are recorded. This shows what the feature does to the output, which can differ from what it fires on. [4, 5]
+
+   The strength is the strongest one that changes the next-token predictions by at most 1 nat of KL divergence. A weaker push barely changes anything, and a stronger one makes the model output generic junk. A fixed strength would not work either: at 4x the max activation, the KL ranges from 0.7 to 6.8 nats across features.
+
+## Reading the scores
+
+- **Detection** says whether the title and description cover where the feature fires. **Tests** say whether the conditions they state are real. The two barely correlate, so both matter:
+  - Feature 7778, "Possessive or Contraction Apostrophe", scores 0.92 on detection, but none of its 6 tests fire. It fires on a standalone apostrophe token, as in "the dogs' leash" or "Charles' book". The tokenizer merges the apostrophe in "Sarah's" and "doesn't" into `'s` and `'t`, so the feature never fires on standard possessives and contractions.
+  - Feature 28476, "Applied Sciences and Academic Disciplines", passes all 6 tests ("Applied Physics" fires, "Theoretical Physics" doesn't), but detection is at chance: most of its activations are on words like " apply" and " application", which the description calls weak.
+- A title and description is trusted when it passes both checks: detection of at least 0.7 and at least 4 of 6 passing tests. Every feature is saved either way, and the explorer lists trusted features first, then low-confidence ones (greyed out and tagged), then features without a title.
+- Steering tokens are recorded separately from the title and description. They often agree (feature 14551, on bending and curving, steers toward " sideways", " forward", " downward"), but sometimes show something more: feature 27441 fires on the first comma of lists like "local, state and national", and steers toward " middle", " intermediate", " medium", the item it expects next.
 
 ## Results
 
-Names come from the Qwen3 1.7B layer-14 run, with gemma-4-31B-it (Q8_0, llama-server) as explainer and judge. The design was settled on 60 features stratified by activation density, then the final pipeline ran on 40 others.
+1,000 features of the Qwen3 1.7B layer-20 SAE, spread over activation density (the `--sample 1000` command above), with gemma-4-31B-it writing and judging:
 
-Detection on the 60 features, with the judge given different descriptions (before revision):
+- Detection averages 0.71. The judge recognizes 80% of the strongest activations (top 5%) but only 32% of the weakest half: titles and descriptions describe the peak better than the tail.
+- 64% of test pairs pass, 64% of features pass at least 4 of 6, and 10% pass none.
+- 39% of features are trusted, and 30% of the titles and descriptions were revised.
+- Rarer features are easier to describe. 69% are trusted in the rarest tenth (1,000 to 5,800 activations in 100M tokens), but only 8% in the densest tenth (over 340,000): those fire in so many contexts that the title only covers the strongest.
+- The steering strength is 1-4x the max activation for 93% of features.
 
-| Description | Balanced accuracy |
+Detection measures the description, not just the tokens it names. On 200 of these features and a fresh set of held-out tokens, the judge did much better with the explainer's title and description than with a token list or another feature's description:
+
+| Judge given | Balanced accuracy |
 |---|---:|
-| Explainer's | 0.69 |
-| The feature's most frequent tokens only | 0.57 |
-| Another feature's | 0.51 |
-
-Final pipeline on the 40 other features, in 24 minutes (36 s per feature, 4 parallel requests on an M4 Max Mac Studio):
-- Detection balanced accuracy 0.71. The judge says the feature fires on 80% of the activations in the top 5%, 66% at 80-95%, 51% at 50-80% and 28% in the bottom half; and on 3% of random tokens, 14% of the closest feature's activations and 26% of the feature's frequent tokens where it stays silent.
-- Generated tests: 63% of pairs pass, 70% of features pass at least 4 of 6, 20% pass none.
-- 40% of features pass both checks (detection at least 0.7 and 4 of 6 generated tests). 22% of the names come from the revision.
-
-- Names describe the peak, not the tail: weak activations often land on arbitrary tokens in a topical context (any token of a firearms spec sheet), which a name doesn't predict.
-- Detection alone overrates broad names, since the held-out examples share the training examples' quirks. Feature 29056 fires on the comma after page ranges in RePEc citations (`vol. 74(1), pages 119-147, September`): "academic citation volume and page range" scored 1.00 on detection, but none of 6 citations in other formats activated it. The two checks barely correlate (Spearman 0.17): detection measures coverage, generated tests precision.
-- Until the margin below was chosen, a pair passed when the first text fired more by any margin; the design-phase numbers here use that rule.
-- Revision with the measured activations raised the generated-test pass rate of the 28 failing names from 26% to 44% (10 then passed 4 of 6). Re-testing the original names on freshly sampled texts gave 28% (1 passed), so the gain isn't regression to the mean. Detection held (0.66 to 0.64) as names got narrower: the judge said yes to 41% of same-token negatives instead of 54%.
-- Short texts suffice for generated tests: real top-activation excerpts fire as strongly alone as after a preceding paragraph.
-- Any margin was too lenient: for feature 4064, an adjective after an indefinite pronoun ("something new", "nothing special"), every contrast still fired at 43-89% of the max, yet "positive or novel qualifiers" passed 5 of 6 pairs. A neutral sentence before a firing text (420 texts, 3 sentences) leaves the median activation unchanged, cuts it below 0.76x for only 5% of texts and halves it for 1.7%, while swapping words the feature doesn't care about moves it by up to half; so a pair now passes only if the contrast stays under half. That rule flips 23 of 175 passing pairs, and 4064 drops to 0 of 6. Agreement between two independent sets of generated texts for the same names falls slightly, from 0.78 to 0.70 (Pearson over features): the stricter rule tests a harder property.
-- Logit-lens tokens in the explainer prompt made no difference (detection +0.002 ± 0.020, generated tests -0.025 ± 0.064, 95% CIs) and were dropped.
-- gemma-4-12B-it decodes ~3x faster. As judge of the same names its per-feature detection correlates 0.81 with the 31B's, and it is slightly stricter (0.66 vs 0.69 detection, 54% vs 62% generated tests). As explainer, judged by the 12B, its names match the 31B's on detection (0.65 vs 0.66) but pass fewer generated tests (48% vs 54%).
-- At a fixed 4x max activation the steering KL spans 0.5 to 5.8 nats (10th to 90th percentile), hence the per-feature calibration; the median feature stays within 1 nat up to 2x. Steering tokens often confirm the name (coal: " coal", " methane", " mines"), but some show an effect the name misses: feature 15393, "major sporting events", steers toward " terrorist", " protests", " ISIS".
-
-<details>
-<summary>Command for the 40 features</summary>
-
-```sh
-llama-server -m gemma-4-31B-it-Q8_0.gguf --port 8080 -c 32768 -np 4 -cram 0 --reasoning off
-python3 interpret.py --sae-dir artifacts/qwen3-1.7b-base_l14_w16_k32_500m --base-url http://127.0.0.1:8080/v1 \
-  --features 29735 7213 3573 4023 5255 20162 11626 12119 21637 10036 27736 25036 3303 16911 16739 5989 5509 29444 11997 7825 29895 20163 4064 8481 6118 20468 14934 4979 20010 20963 29412 7464 160 18972 16090 1877 27889 16601 5063 21072
-```
-
-</details>
+| The explainer's title and description | 0.73 |
+| Only the feature's most frequent tokens | 0.62 |
+| Another feature's title and description | 0.50 |
 
 Sources:
 - [1] [Automatically Interpreting Millions of Features in Large Language Models](https://arxiv.org/abs/2410.13928)
