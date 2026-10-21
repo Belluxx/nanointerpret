@@ -259,9 +259,7 @@ def generate_prompt(explanation: dict) -> str:
         "",
         f"Write {GENERATED_PAIRS} pairs of short texts (one or two sentences, like ordinary web text) to test the description. "
         "In each pair, the feature should fire on the first text and stay silent on the second, which is otherwise as similar "
-        "as possible: change only what the description says the feature depends on. The model reads left to right, so its "
-        "activation on a token depends only on that token and the text before it: make the change at or before the token "
-        "where the feature should fire. Make the pairs varied.",
+        "as possible: change only what the description says the feature depends on. Make the pairs varied.",
         'Return compact JSON: {"pairs": [{"fires": text, "silent": text}, ...]}.',
     ])
 
