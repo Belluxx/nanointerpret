@@ -1,7 +1,10 @@
 import os
+import random
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -14,54 +17,141 @@ RESIDUAL_FP16_SCALE = 1 / 256
 TOKENIZE_BATCH_CHARS = 32 << 20
 # Residual-cache batches read in the background ahead of the one in use.
 READ_AHEAD = 4
+# Longer documents are cut to a random window, so a few long ones can't fill a source.
+MAX_DOCUMENT_CHARS = 8192
+SHUFFLE_BUFFER = 1000
+# Stack v3 rows are whole repositories: a few of their source files in these languages are kept.
+CODE_LANGUAGES = frozenset({
+    "C", "C#", "C++", "Dart", "Go", "Haskell", "Java", "JavaScript", "Julia", "Kotlin", "Lua", "MATLAB",
+    "Objective-C", "PHP", "Perl", "Python", "R", "Ruby", "Rust", "Scala", "Shell", "SQL", "Swift", "TSX", "TypeScript",
+})
+MIN_CODE_BYTES = 256
+MAX_FILES_PER_REPO = 8
+
+
+@dataclass(frozen=True)
+class Source:
+    name: str
+    dataset_id: str
+    dataset_config: str | None
+    share: float
+    column: str = "text"
+
+
+MIXES = {
+    "fineweb": (Source("fineweb", "HuggingFaceFW/fineweb", "sample-10BT", 1.0),),
+    "broad": (
+        Source("fineweb", "HuggingFaceFW/fineweb", "sample-10BT", 0.475),
+        Source("finepdfs", "HuggingFaceFW/finepdfs", "eng_Latn", 0.1),
+        Source("stack-v3", "HuggingFaceCode/stack-v3-train", None, 0.15, column="files"),
+        Source("open-web-math", "open-web-math/open-web-math", None, 0.125),
+        # FineWeb-2's Chinese is mostly SEO spam; the quality-filtered FineWeb2-HQ much less so.
+        Source("chinese", "epfml/FineWeb2-HQ", "cmn_Hani", 0.05),
+        Source("german", "HuggingFaceFW/fineweb-2", "deu_Latn", 0.025),
+        Source("french", "HuggingFaceFW/fineweb-2", "fra_Latn", 0.025),
+        Source("spanish", "HuggingFaceFW/fineweb-2", "spa_Latn", 0.025),
+        Source("italian", "HuggingFaceFW/fineweb-2", "ita_Latn", 0.025),
+    ),
+}
 
 
 def cache_name(*parts: object) -> str:
     return "_".join(str(part).replace("/", "--") for part in parts)
 
 
+def context_splits(train_tokens: int, validation_tokens: int, recording_tokens: int, context_size: int) -> dict[str, slice]:
+    # Consecutive context ranges; each split drops its trailing partial context.
+    stops = np.cumsum([count // context_size for count in (train_tokens, validation_tokens, recording_tokens)])
+    starts = np.concatenate([[0], stops[:-1]])
+    return {name: slice(int(start), int(stop)) for name, start, stop in zip(("train", "validation", "recording"), starts, stops)}
+
+
 def token_cache(
-    cache_dir: Path, model_id: str, dataset_id: str, dataset_config: str, token_count: int
-) -> np.ndarray:
-    # The first `token_count` tokens of the dataset; a longer existing cache is reused.
-    path = cache_dir / f"{cache_name(model_id, dataset_id, dataset_config)}.uint32"
-    if not path.exists() or path.stat().st_size < token_count * 4:
-        tokenize_dataset(path, model_id, dataset_id, dataset_config, token_count)
+    cache_dir: Path, model_id: str, mix: str, context_size: int, context_count: int
+) -> tuple[np.ndarray, np.ndarray]:
+    # The first `context_count` contexts of the mix and each one's source index. Each context comes
+    # whole from one source, drawn by share, and the draws don't depend on `context_count`, so a
+    # longer existing cache is reused and every split keeps the mix.
+    sources = MIXES[mix]
+    source_ids = np.random.default_rng(0).choice(len(sources), size=context_count, p=[s.share for s in sources])
+    path = cache_dir / f"{cache_name(model_id, mix, f'ctx{context_size}')}.uint32"
+    if not path.exists() or path.stat().st_size < context_count * context_size * 4:
+        tokenize_mix(path, model_id, sources, source_ids, context_size)
     else:
         print(f"Using token cache {path}")
-    return np.memmap(path, dtype=np.uint32, mode="r")[:token_count]
+    return np.memmap(path, dtype=np.uint32, mode="r").reshape(-1, context_size)[:context_count], source_ids
 
 
-def tokenize_dataset(path: Path, model_id: str, dataset_id: str, dataset_config: str, token_count: int) -> None:
-    import awkward as ak
-    from datasets import load_dataset
+def tokenize_mix(path: Path, model_id: str, sources: tuple[Source, ...], source_ids: np.ndarray, context_size: int) -> None:
     from gigatoken import Tokenizer
     from transformers import AutoTokenizer
 
     hf_tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer = Tokenizer(hf_tokenizer)
-    bos, eos = hf_tokenizer.bos_token_id, hf_tokenizer.eos_token_id
-    dataset = load_dataset(dataset_id, name=dataset_config, split="train", streaming=True)
-
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
-    written = 0
-    with temporary.open("wb") as file, tqdm(total=token_count, unit="tok", desc="Token cache") as progress:
-        for texts in text_batches(filter(None, dataset["text"])):
+    mixed = np.memmap(temporary, dtype=np.uint32, mode="w+", shape=(len(source_ids), context_size))
+    # One source at a time: streams hold large buffers, so only one is open.
+    for index, source in enumerate(sources):
+        rows = np.flatnonzero(source_ids == index)
+        streamed = source_contexts(source, tokenizer, hf_tokenizer.bos_token_id, hf_tokenizer.eos_token_id, context_size)
+        with closing(streamed) as contexts:
+            written = 0
+            for row, context in zip(tqdm(rows, unit="ctx", desc=f"Tokenize {source.name}", dynamic_ncols=True), contexts):
+                mixed[row] = context
+                written += 1
+        if written < len(rows):
+            raise RuntimeError(f"{source.name} ended after {written:,} contexts; expected {len(rows):,}")
+    mixed.flush()
+    del mixed
+    os.replace(temporary, path)
+
+
+def source_contexts(source: Source, tokenizer, bos: int | None, eos: int | None, context_size: int) -> Iterator[np.ndarray]:
+    # The source's documents, tokenized and packed into contexts.
+    import awkward as ak
+
+    tokens = np.empty(0, dtype=np.uint32)
+    with closing(source_documents(source)) as documents:
+        for texts in text_batches(documents):
             rows = tokenizer.encode_batch(texts)
             if bos is not None:
                 rows = ak.concatenate([np.full((len(texts), 1), bos, dtype=np.uint32), rows], axis=1)
             if eos is not None:
                 rows = ak.concatenate([rows, np.full((len(texts), 1), eos, dtype=np.uint32)], axis=1)
-            tokens = ak.to_numpy(ak.flatten(rows))[: token_count - written]
-            tokens.tofile(file)
-            written += len(tokens)
-            progress.update(len(tokens))
-            if written == token_count:
-                break
-    if written != token_count:
-        raise RuntimeError(f"dataset ended after {written:,} tokens; expected {token_count:,}")
-    os.replace(temporary, path)
+            tokens = np.concatenate([tokens, ak.to_numpy(ak.flatten(rows))])
+            packed = len(tokens) // context_size * context_size
+            yield from tokens[:packed].reshape(-1, context_size)
+            tokens = tokens[packed:]
+
+
+def source_documents(source: Source) -> Iterator[str]:
+    from datasets import load_dataset
+
+    rows = load_dataset(
+        source.dataset_id, name=source.dataset_config, split="train", streaming=True, columns=[source.column]
+    ).shuffle(seed=0, buffer_size=SHUFFLE_BUFFER)
+    rng = random.Random(source.name)
+    for row in rows:
+        texts = code_files(row["files"], rng) if source.column == "files" else [row["text"]]
+        for text in texts:
+            if text:
+                yield document_window(text, rng)
+
+
+def code_files(files: list[dict], rng: random.Random) -> list[str]:
+    kept = [
+        file["content"] for file in files
+        if file["language"] in CODE_LANGUAGES and not file["is_vendor"] and file["size_bytes"] >= MIN_CODE_BYTES
+    ]
+    return rng.sample(kept, min(len(kept), MAX_FILES_PER_REPO))
+
+
+def document_window(text: str, rng: random.Random) -> str:
+    if len(text) <= MAX_DOCUMENT_CHARS:
+        return text
+    start = text.find("\n", rng.randrange(len(text) - MAX_DOCUMENT_CHARS)) + 1
+    return text[start : start + MAX_DOCUMENT_CHARS]
 
 
 def text_batches(texts: Iterable[str]) -> Iterator[list[str]]:
@@ -74,11 +164,6 @@ def text_batches(texts: Iterable[str]) -> Iterator[list[str]]:
             batch, chars = [], 0
     if batch:
         yield batch
-
-
-def as_contexts(tokens: np.ndarray, context_size: int) -> np.ndarray:
-    # A trailing partial context is dropped.
-    return tokens[: len(tokens) // context_size * context_size].reshape(-1, context_size)
 
 
 def context_batches(

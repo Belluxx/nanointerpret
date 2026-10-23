@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-from src.data import as_contexts, context_batches, token_cache
+from src.data import context_batches, context_splits, token_cache
 from src.experiment import load_sae
 from src.runtime import capture_layer_input, choose_device, compile_layers_before, find_transformer_layers, load_causal_lm
 from src.sae import FIRING_THRESHOLD, TopKSAE
@@ -126,15 +126,12 @@ def main() -> None:
     device = choose_device(args.device)
     sae, config = load_sae(args.sae_dir, device)
 
-    offset = config.train_tokens + config.validation_tokens
-    tokens = token_cache(
-        args.cache_dir, config.model_id, config.dataset_id, config.dataset_config, offset + config.recording_tokens
-    )[offset:]
+    split = context_splits(config.train_tokens, config.validation_tokens, config.recording_tokens, config.context_size)["recording"]
+    contexts = token_cache(args.cache_dir, config.model_id, config.mix, config.context_size, split.stop)[0][split]
     if args.tokens is not None:
-        if args.tokens > len(tokens):
-            raise ValueError(f"--tokens requests {args.tokens:,} tokens, but the recording split has {len(tokens):,}")
-        tokens = tokens[: args.tokens]
-    contexts = as_contexts(tokens, config.context_size)
+        if args.tokens > contexts.size:
+            raise ValueError(f"--tokens requests {args.tokens:,} tokens, but the recording split has {contexts.size:,}")
+        contexts = contexts[: args.tokens // config.context_size]
     if not contexts.size:
         raise ValueError("no recording tokens; train with --recording-tokens of at least one context")
 
@@ -158,7 +155,7 @@ def main() -> None:
         np.save(temporary / "feature_max.npy", feature_max)
         metadata = {
             "sae_dir": str(args.sae_dir.resolve()),
-            "dataset_token_offset": offset,
+            "dataset_context_offset": split.start,
             "token_count": contexts.size,
             "firing_threshold": FIRING_THRESHOLD,
             "sae_config": asdict(config),

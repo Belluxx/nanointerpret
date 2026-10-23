@@ -30,8 +30,7 @@ class Config:
     model_dtype: str
     layer_index: int
     d_model: int
-    dataset_id: str
-    dataset_config: str
+    mix: str
     context_size: int
     train_tokens: int
     validation_tokens: int
@@ -165,9 +164,18 @@ def feature_density_histogram(fire_counts: Tensor, token_count: int) -> dict:
 
 
 @torch.inference_mode()
-def downstream_kl(sae: TopKSAE, model: nn.Module, layer: nn.Module, contexts: np.ndarray, batch_size: int) -> dict:
-    # Mean KL(base || SAE) over next-token predictions, with a 95% CI over contexts.
+def downstream_kl(
+    sae: TopKSAE,
+    model: nn.Module,
+    layer: nn.Module,
+    contexts: np.ndarray,
+    context_sources: np.ndarray,
+    source_names: list[str],
+    batch_size: int,
+) -> dict:
+    # Mean KL(base || SAE) over next-token predictions, with a 95% CI over contexts, and the mean for each source.
     contexts = contexts[: DOWNSTREAM_KL_TOKENS // contexts.shape[1]]
+    context_sources = context_sources[: len(contexts)]
     context_kls = []
     for start in tqdm(range(0, len(contexts), batch_size), unit="batch", desc="Downstream KL", leave=False, disable=None):
         input_ids = torch.from_numpy(contexts[start : start + batch_size].astype(np.int64)).to(model.device)
@@ -187,7 +195,15 @@ def downstream_kl(sae: TopKSAE, model: nn.Module, layer: nn.Module, contexts: np
     context_kls = torch.cat(context_kls).cpu().double().numpy()
     mean_kl = float(np.mean(context_kls))
     margin = 1.96 * float(np.std(context_kls, ddof=1)) / math.sqrt(len(context_kls))
-    return {"downstream_kl": mean_kl, "downstream_kl_ci": [max(0.0, mean_kl - margin), mean_kl + margin]}
+    by_source = {
+        name: float(np.mean(context_kls[context_sources == index]))
+        for index, name in enumerate(source_names) if (context_sources == index).any()
+    }
+    return {
+        "downstream_kl": mean_kl,
+        "downstream_kl_ci": [max(0.0, mean_kl - margin), mean_kl + margin],
+        "downstream_kl_by_source": by_source,
+    }
 
 
 def train_step(
@@ -314,6 +330,8 @@ def format_metrics(record: dict) -> str:
         parts.append(f"AuxK NMSE {record['auxk_loss']:,.4f}")
     if record["dead_feature_pct"] is not None:
         parts.append(f"dead {record['dead_feature_pct']:.2f}%")
+    if len(record.get("downstream_kl_by_source", {})) > 1:
+        parts.append("KL by source " + ", ".join(f"{name} {kl:.3f}" for name, kl in record["downstream_kl_by_source"].items()))
     return " | ".join(parts)
 
 

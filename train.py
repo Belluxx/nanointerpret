@@ -11,13 +11,10 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from src.data import as_contexts, cache_name, context_batches, read_residual_cache, residual_cache, token_cache
+from src.data import MIXES, cache_name, context_batches, context_splits, read_residual_cache, residual_cache, token_cache
 from src.experiment import Config, build_sae, calibrate, downstream_kl, evaluate_sae, train_sae
 from src.plot import save_plots
 from src.runtime import capture_layer_input, choose_device, compile_layers_before, find_transformer_layers, load_causal_lm
-
-DATASET_ID = "HuggingFaceFW/fineweb"
-DATASET_CONFIG = "sample-10BT"
 
 
 def parse_args() -> argparse.Namespace:
@@ -26,8 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-dtype", choices=("float32", "float16", "bfloat16"), default="bfloat16", help="Language-model inference dtype used while capturing residuals. Default: bfloat16.")
     parser.add_argument("--activation-layer", type=int, default=None, help="Layer whose input is captured. Default: len(transformer.layers) // 2.")
     parser.add_argument("--no-compile-model", action="store_false", dest="compile_model", help="Disable compilation of transformer layers before the capture point on MPS.")
-    parser.add_argument("--dataset-id", default=DATASET_ID, help=f"Hugging Face text dataset used to build the token splits. Default: {DATASET_ID}.")
-    parser.add_argument("--dataset-config", default=DATASET_CONFIG, help=f"Named Hugging Face dataset configuration or subset. Default: {DATASET_CONFIG}.")
+    parser.add_argument("--mix", choices=MIXES, default="broad", help="Data mix the token splits are drawn from, defined in src/data.py: broad (web, PDFs, code, math, and five languages) or fineweb (FineWeb only). Default: broad.")
     parser.add_argument("--context-size", type=int, default=256, help="Tokens in each language-model input context. Default: 256.")
     parser.add_argument("--train-tokens", type=int, default=100_000_000, help="Number of dataset tokens used to train the SAE. Default: 100000000.")
     parser.add_argument("--validation-tokens", type=int, default=10_000_000, help="Dedicated token split used to evaluate the SAE. Default: 10000000.")
@@ -88,24 +84,20 @@ def main() -> None:
     if args.compile_model and device.type == "mps":
         compile_layers_before(layers, layer_index)
 
-    splits = {
-        "train": (0, args.train_tokens),
-        "validation": (args.train_tokens, args.train_tokens + args.validation_tokens),
-    }
-    tokens = token_cache(
-        args.cache_dir, args.model_id, args.dataset_id, args.dataset_config,
-        args.train_tokens + args.validation_tokens + args.recording_tokens,
+    splits = context_splits(args.train_tokens, args.validation_tokens, args.recording_tokens, args.context_size)
+    all_contexts, all_sources = token_cache(
+        args.cache_dir, args.model_id, args.mix, args.context_size, splits["recording"].stop
     )
-    contexts = {split: as_contexts(tokens[start:stop], args.context_size) for split, (start, stop) in splits.items()}
+    contexts = {split: all_contexts[splits[split]] for split in ("train", "validation")}
 
     def capture(split: str, ids: np.ndarray) -> torch.Tensor:
         return capture_layer_input(model, layer, torch.from_numpy(contexts[split][ids].astype(np.int64)).to(device))
 
     caches = {}
     if args.cache_activations or args.cache_only:
-        for split, (start, stop) in splits.items():
+        for split in contexts:
             name = cache_name(
-                args.model_id, args.dataset_id, args.dataset_config, f"tokens{start}-{stop}",
+                args.model_id, args.mix, f"contexts{splits[split].start}-{splits[split].stop}",
                 f"ctx{args.context_size}", f"layer{layer_index}", args.model_dtype,
             )
             caches[split] = residual_cache(
@@ -143,8 +135,7 @@ def main() -> None:
         model_dtype=args.model_dtype,
         layer_index=layer_index,
         d_model=d_model,
-        dataset_id=args.dataset_id,
-        dataset_config=args.dataset_config,
+        mix=args.mix,
         context_size=args.context_size,
         train_tokens=args.train_tokens,
         validation_tokens=args.validation_tokens,
@@ -178,7 +169,10 @@ def main() -> None:
         # Full-vocabulary logits dwarf residuals, so the KL runs on an eighth of the model batch.
         return {
             **evaluate_sae(sae, batches("validation"), contexts["validation"].size, config.sae_batch_size),
-            **downstream_kl(sae, model, layer, contexts["validation"], max(1, config.model_batch_size // 8)),
+            **downstream_kl(
+                sae, model, layer, contexts["validation"], all_sources[splits["validation"]],
+                [source.name for source in MIXES[config.mix]], max(1, config.model_batch_size // 8),
+            ),
         }
 
     train_sae(

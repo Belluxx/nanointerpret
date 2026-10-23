@@ -17,8 +17,8 @@ Gemma runs train on 100M FineWeb tokens and Qwen runs on 500M. Both validate on 
 <summary>Base commands</summary>
 
 ```sh
-python3 train.py --model-id unsloth/gemma-3-270m --activation-layer 9 --k 16 --train-tokens 100000000 --validation-tokens 10000000 --recording-tokens 0 --validate-every 100000000 --cache-activations
-python3 train.py --model-id unsloth/Qwen3-1.7B-Base --activation-layer 20 --train-tokens 500000000 --validation-tokens 10000000 --recording-tokens 0 --validate-every 100000000
+python3 train.py --model-id unsloth/gemma-3-270m --activation-layer 9 --k 16 --train-tokens 100000000 --validation-tokens 10000000 --recording-tokens 0 --validate-every 100000000 --cache-activations --mix fineweb
+python3 train.py --model-id unsloth/Qwen3-1.7B-Base --activation-layer 20 --train-tokens 500000000 --validation-tokens 10000000 --recording-tokens 0 --validate-every 100000000 --mix fineweb
 ```
 
 </details>

@@ -12,7 +12,7 @@ Minimal training and feature interpretability analysis of LLMs with sparse autoe
 - `docs/experiments.md`: experiment results and reproduction commands.
 - `docs/interpretation.md`: the feature interpretation pipeline: how to run it, how it works, and its results.
 - `docs/overview.md`: brief notes on activation layer, width multiplier, and K.
-- `src/data.py`: token cache, residual cache, and context batching.
+- `src/data.py`: data mixes (sources, document filters, context-level mixing), token cache, residual cache, and context batching.
 - `src/experiment.py`: run config, calibration, training loop, evaluation, and downstream KL.
 - `src/features.py`: queries over a recorded activation index, the cached per-feature summary (peak tokens, logit effects), and feature interpretations.
 - `src/interpret.py`: example sampling (activation-quantile bins, same-token and neighbor negatives), prompts, the judge client, the model probe (activations on new text, KL-calibrated steering), and scores.
