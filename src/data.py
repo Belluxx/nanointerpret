@@ -14,12 +14,13 @@ from tqdm.auto import tqdm
 
 # Residuals are cached as fp16, scaled down so outlier activations fit.
 RESIDUAL_FP16_SCALE = 1 / 256
-TOKENIZE_BATCH_CHARS = 32 << 20
+TOKENIZE_BATCH_CHARS = 8 << 20
 # Residual-cache batches read in the background ahead of the one in use.
 READ_AHEAD = 4
 # Longer documents are cut to a random window, so a few long ones can't fill a source.
 MAX_DOCUMENT_CHARS = 8192
-SHUFFLE_BUFFER = 1000
+# Parquet rows decoded at once; Stack v3 rows are whole repositories.
+READ_BATCH_ROWS = 64
 # Stack v3 rows are whole repositories: a few of their source files in these languages are kept.
 CODE_LANGUAGES = frozenset({
     "C", "C#", "C++", "Dart", "Go", "Haskell", "Java", "JavaScript", "Julia", "Kotlin", "Lua", "MATLAB",
@@ -32,25 +33,25 @@ MAX_FILES_PER_REPO = 8
 @dataclass(frozen=True)
 class Source:
     name: str
-    dataset_id: str
-    dataset_config: str | None
+    # Glob of the source's parquet files, as "<dataset repo>/<path>".
+    files: str
     share: float
     column: str = "text"
 
 
 MIXES = {
-    "fineweb": (Source("fineweb", "HuggingFaceFW/fineweb", "sample-10BT", 1.0),),
+    "fineweb": (Source("fineweb", "HuggingFaceFW/fineweb/sample/10BT/*.parquet", 1.0),),
     "broad": (
-        Source("fineweb", "HuggingFaceFW/fineweb", "sample-10BT", 0.475),
-        Source("finepdfs", "HuggingFaceFW/finepdfs", "eng_Latn", 0.1),
-        Source("stack-v3", "HuggingFaceCode/stack-v3-train", None, 0.15, column="files"),
-        Source("open-web-math", "open-web-math/open-web-math", None, 0.125),
+        Source("fineweb", "HuggingFaceFW/fineweb/sample/10BT/*.parquet", 0.475),
+        Source("finepdfs", "HuggingFaceFW/finepdfs/data/eng_Latn/train/*.parquet", 0.1),
+        Source("stack-v3", "HuggingFaceCode/stack-v3-train/data/*.parquet", 0.15, column="files"),
+        Source("open-web-math", "open-web-math/open-web-math/data/*.parquet", 0.125),
         # FineWeb-2's Chinese is mostly SEO spam; the quality-filtered FineWeb2-HQ much less so.
-        Source("chinese", "epfml/FineWeb2-HQ", "cmn_Hani", 0.05),
-        Source("german", "HuggingFaceFW/fineweb-2", "deu_Latn", 0.025),
-        Source("french", "HuggingFaceFW/fineweb-2", "fra_Latn", 0.025),
-        Source("spanish", "HuggingFaceFW/fineweb-2", "spa_Latn", 0.025),
-        Source("italian", "HuggingFaceFW/fineweb-2", "ita_Latn", 0.025),
+        Source("chinese", "epfml/FineWeb2-HQ/cmn_Hani/*.parquet", 0.05),
+        Source("german", "HuggingFaceFW/fineweb-2/data/deu_Latn/train/*.parquet", 0.025),
+        Source("french", "HuggingFaceFW/fineweb-2/data/fra_Latn/train/*.parquet", 0.025),
+        Source("spanish", "HuggingFaceFW/fineweb-2/data/spa_Latn/train/*.parquet", 0.025),
+        Source("italian", "HuggingFaceFW/fineweb-2/data/ita_Latn/train/*.parquet", 0.025),
     ),
 }
 
@@ -126,17 +127,33 @@ def source_contexts(source: Source, tokenizer, bos: int | None, eos: int | None,
 
 
 def source_documents(source: Source) -> Iterator[str]:
-    from datasets import load_dataset
-
-    rows = load_dataset(
-        source.dataset_id, name=source.dataset_config, split="train", streaming=True, columns=[source.column]
-    ).shuffle(seed=0, buffer_size=SHUFFLE_BUFFER)
     rng = random.Random(source.name)
-    for row in rows:
+    for row in source_rows(source, rng):
         texts = code_files(row["files"], rng) if source.column == "files" else [row["text"]]
         for text in texts:
             if text:
                 yield document_window(text, rng)
+
+
+def source_rows(source: Source, rng: random.Random) -> Iterator[dict]:
+    # Files in random order, one random row group of each per pass, so even a small share spans many
+    # files. Only one row group is read at a time, which keeps memory low.
+    import pyarrow.parquet as pq
+    from huggingface_hub import HfFileSystem
+
+    fs = HfFileSystem()
+    files = fs.glob(f"datasets/{source.files}")
+    rng.shuffle(files)
+    unread_groups = {}
+    while files:
+        for path in list(files):
+            with fs.open(path) as file:
+                parquet = pq.ParquetFile(file)
+                groups = unread_groups.setdefault(path, rng.sample(range(parquet.num_row_groups), parquet.num_row_groups))
+                for batch in parquet.iter_batches(READ_BATCH_ROWS, row_groups=[groups.pop()], columns=[source.column]):
+                    yield from batch.to_pylist()
+            if not groups:
+                files.remove(path)
 
 
 def code_files(files: list[dict], rng: random.Random) -> list[str]:

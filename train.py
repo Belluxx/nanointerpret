@@ -68,6 +68,13 @@ def main() -> None:
     torch.manual_seed(args.seed)
     device = choose_device(args.device)
 
+    # Tokenizing streams datasets through memory, so it runs before the model is loaded.
+    splits = context_splits(args.train_tokens, args.validation_tokens, args.recording_tokens, args.context_size)
+    all_contexts, all_sources = token_cache(
+        args.cache_dir, args.model_id, args.mix, args.context_size, splits["recording"].stop
+    )
+    contexts = {split: all_contexts[splits[split]] for split in ("train", "validation")}
+
     model = load_causal_lm(args.model_id, args.model_dtype, device)
     layers = find_transformer_layers(model)
     layer_index = len(layers) // 2 if args.activation_layer is None else args.activation_layer
@@ -83,12 +90,6 @@ def main() -> None:
         raise FileExistsError(f"{output_dir} already holds a run; pass --resume or choose another --output-dir")
     if args.compile_model and device.type == "mps":
         compile_layers_before(layers, layer_index)
-
-    splits = context_splits(args.train_tokens, args.validation_tokens, args.recording_tokens, args.context_size)
-    all_contexts, all_sources = token_cache(
-        args.cache_dir, args.model_id, args.mix, args.context_size, splits["recording"].stop
-    )
-    contexts = {split: all_contexts[splits[split]] for split in ("train", "validation")}
 
     def capture(split: str, ids: np.ndarray) -> torch.Tensor:
         return capture_layer_input(model, layer, torch.from_numpy(contexts[split][ids].astype(np.int64)).to(device))
