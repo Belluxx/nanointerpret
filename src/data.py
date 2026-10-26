@@ -1,7 +1,7 @@
 import os
 import random
 from collections import deque
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import dataclass
@@ -61,10 +61,19 @@ def cache_name(*parts: object) -> str:
 
 
 def context_splits(train_tokens: int, validation_tokens: int, recording_tokens: int, context_size: int) -> dict[str, slice]:
-    # Consecutive context ranges; each split drops its trailing partial context.
-    stops = np.cumsum([count // context_size for count in (train_tokens, validation_tokens, recording_tokens)])
+    # Consecutive context ranges; each split drops its trailing partial context. Training comes last,
+    # so extending it leaves the other splits in place.
+    names = ("validation", "recording", "train")
+    stops = np.cumsum([count // context_size for count in (validation_tokens, recording_tokens, train_tokens)])
     starts = np.concatenate([[0], stops[:-1]])
-    return {name: slice(int(start), int(stop)) for name, start, stop in zip(("train", "validation", "recording"), starts, stops)}
+    return {name: slice(int(start), int(stop)) for name, start, stop in zip(names, starts, stops)}
+
+
+def train_stages(stage_tokens: Sequence[int], context_size: int) -> list[slice]:
+    # Context ranges within the train split, one per `train_tokens` the run has had: a run's
+    # extensions are stages of their own, each shuffled and cached separately.
+    stops = [tokens // context_size for tokens in stage_tokens]
+    return [slice(start, stop) for start, stop in zip([0, *stops], stops)]
 
 
 def token_cache(
@@ -183,25 +192,31 @@ def text_batches(texts: Iterable[str]) -> Iterator[list[str]]:
         yield batch
 
 
-def context_batches(
-    context_count: int, batch_size: int, *, shuffle: bool = False, seed: int = 0, skip: int = 0
-) -> Iterator[np.ndarray]:
-    order = np.random.default_rng(seed).permutation(context_count) if shuffle else np.arange(context_count)
-    for start in range(skip, context_count, batch_size):
+def context_batches(order: np.ndarray, batch_size: int, skip: int = 0) -> Iterator[np.ndarray]:
+    for start in range(skip, len(order), batch_size):
         yield order[start : start + batch_size]
+
+
+def shuffled_stages(stages: Sequence[slice], seed: int) -> np.ndarray:
+    # Each stage shuffles only its own contexts, so appending a stage keeps the order of earlier ones.
+    return np.concatenate([
+        stage.start + np.random.default_rng((seed, index)).permutation(stage.stop - stage.start)
+        for index, stage in enumerate(stages)
+    ])
 
 
 def residual_cache(
     path: Path, contexts: np.ndarray, capture: Callable[[np.ndarray], Tensor], batch_size: int, d_model: int
 ) -> np.ndarray:
+    # `capture` maps a batch of contexts' tokens to their residuals.
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(".tmp")
         output = np.lib.format.open_memmap(temporary, mode="w+", dtype=np.float16, shape=(*contexts.shape, d_model))
         float16_max = torch.finfo(torch.float16).max
         with tqdm(total=contexts.size, unit="tok", desc="Residual cache",dynamic_ncols=True) as progress:
-            for ids in context_batches(len(contexts), batch_size):
-                residual = capture(ids).float().mul_(RESIDUAL_FP16_SCALE).clamp_(-float16_max, float16_max)
+            for ids in context_batches(np.arange(len(contexts)), batch_size):
+                residual = capture(contexts[ids]).float().mul_(RESIDUAL_FP16_SCALE).clamp_(-float16_max, float16_max)
                 output[ids] = residual.cpu().numpy()
                 progress.update(residual.shape[:2].numel())
         output.flush()
@@ -210,15 +225,26 @@ def residual_cache(
     return np.load(path, mmap_mode="r")
 
 
-def read_residual_cache(cache: np.ndarray, batches: Iterable[np.ndarray], device: torch.device) -> Iterator[Tensor]:
-    # Upcoming batches are read in background threads, so disk reads overlap GPU work.
+def read_residual_cache(caches: Sequence[np.ndarray], batches: Iterable[np.ndarray], device: torch.device) -> Iterator[Tensor]:
+    # `caches` hold consecutive context ranges of one split, read as a single array. Upcoming batches
+    # are read in background threads, so disk reads overlap GPU work.
+    starts = np.cumsum([0, *map(len, caches)])
+
+    def read(ids: np.ndarray) -> np.ndarray:
+        stages = np.searchsorted(starts, ids, side="right") - 1
+        residual = np.empty((len(ids), *caches[0].shape[1:]), dtype=caches[0].dtype)
+        for stage in np.unique(stages):
+            rows = stages == stage
+            residual[rows] = caches[stage][ids[rows] - starts[stage]]
+        return residual
+
     def to_device(residual: np.ndarray) -> Tensor:
         return torch.from_numpy(residual).to(device).flatten(0, 1).float() / RESIDUAL_FP16_SCALE
 
     with ThreadPoolExecutor(READ_AHEAD) as pool:
         pending = deque()
         for ids in batches:
-            pending.append(pool.submit(cache.__getitem__, ids))
+            pending.append(pool.submit(read, ids))
             if len(pending) > READ_AHEAD:
                 yield to_device(pending.popleft().result())
         while pending:

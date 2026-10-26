@@ -4,14 +4,13 @@ import argparse
 import json
 import math
 from collections.abc import Iterator
-from dataclasses import asdict
-from functools import partial
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
 import torch
 
-from src.data import MIXES, cache_name, context_batches, context_splits, read_residual_cache, residual_cache, token_cache
+from src.data import MIXES, cache_name, context_batches, context_splits, read_residual_cache, residual_cache, shuffled_stages, token_cache, train_stages
 from src.experiment import Config, build_sae, calibrate, downstream_kl, evaluate_sae, train_sae
 from src.plot import save_plots
 from src.runtime import capture_layer_input, choose_device, compile_layers_before, find_transformer_layers, load_causal_lm
@@ -52,7 +51,7 @@ def parse_args() -> argparse.Namespace:
     mode.add_argument("--cache-activations", action="store_true", help="Cache residual activations before training instead of streaming them.")
     mode.add_argument("--cache-only", action="store_true", help="Capture the residual cache, then exit before SAE training.")
     parser.add_argument("--output-dir", type=Path, default=None, help="Training output directory. Default: generated automatically under artifacts/.")
-    parser.add_argument("--resume", action="store_true", help="Continue from the output directory's checkpoint, with the original arguments.")
+    parser.add_argument("--resume", action="store_true", help="Continue from the output directory's checkpoint, with the original arguments; a larger --train-tokens extends the run.")
     return parser.parse_args()
 
 
@@ -63,6 +62,18 @@ def compact_count(count: int) -> str:
     return str(count)
 
 
+def extension_history(saved: dict | None, args: argparse.Namespace) -> list[int]:
+    # The run's earlier `train_tokens`; a resumed run with a larger --train-tokens adds its saved one.
+    if saved is None:
+        return []
+    if args.train_tokens == saved["train_tokens"]:
+        return saved["extended_from"]
+    if args.train_tokens // args.context_size <= saved["train_tokens"] // args.context_size:
+        raise ValueError(f"--resume can only grow --train-tokens, by at least one context, from {saved['train_tokens']:,}")
+    print(f"Extending training from {saved['train_tokens']:,} to {args.train_tokens:,} tokens")
+    return [*saved["extended_from"], saved["train_tokens"]]
+
+
 def main() -> None:
     args = parse_args()
     torch.manual_seed(args.seed)
@@ -71,7 +82,7 @@ def main() -> None:
     # Tokenizing streams datasets through memory, so it runs before the model is loaded.
     splits = context_splits(args.train_tokens, args.validation_tokens, args.recording_tokens, args.context_size)
     all_contexts, all_sources = token_cache(
-        args.cache_dir, args.model_id, args.mix, args.context_size, splits["recording"].stop
+        args.cache_dir, args.model_id, args.mix, args.context_size, splits["train"].stop
     )
     contexts = {split: all_contexts[splits[split]] for split in ("train", "validation")}
 
@@ -86,33 +97,46 @@ def main() -> None:
         f"{args.model_id.split('/')[-1].lower()}_l{layer_index}_w{args.width_multiplier}_k{args.k}_"
         f"{compact_count(args.train_tokens)}"
     )
+    config_path = output_dir / "config.json"
+    if args.resume and not config_path.exists():
+        raise FileNotFoundError(f"{output_dir} holds no run to resume; pass the run's --output-dir")
     if not args.resume and any(output_dir.glob("*.pt")):
         raise FileExistsError(f"{output_dir} already holds a run; pass --resume or choose another --output-dir")
+    saved = json.loads(config_path.read_text()) if args.resume else None
+    extended_from = extension_history(saved, args)
+    stages = train_stages([*extended_from, args.train_tokens], args.context_size)
     if args.compile_model and device.type == "mps":
         compile_layers_before(layers, layer_index)
 
-    def capture(split: str, ids: np.ndarray) -> torch.Tensor:
-        return capture_layer_input(model, layer, torch.from_numpy(contexts[split][ids].astype(np.int64)).to(device))
+    def capture(tokens: np.ndarray) -> torch.Tensor:
+        return capture_layer_input(model, layer, torch.from_numpy(tokens.astype(np.int64)).to(device))
+
+    def range_cache(split: str, contexts_range: slice) -> np.ndarray:
+        start, stop = splits[split].start + contexts_range.start, splits[split].start + contexts_range.stop
+        name = cache_name(
+            args.model_id, args.mix, f"contexts{start}-{stop}", f"ctx{args.context_size}", f"layer{layer_index}", args.model_dtype
+        )
+        return residual_cache(
+            args.residual_cache_dir / f"{name}.npy", contexts[split][contexts_range], capture, args.model_batch_size, d_model
+        )
 
     caches = {}
     if args.cache_activations or args.cache_only:
-        for split in contexts:
-            name = cache_name(
-                args.model_id, args.mix, f"contexts{splits[split].start}-{splits[split].stop}",
-                f"ctx{args.context_size}", f"layer{layer_index}", args.model_dtype,
-            )
-            caches[split] = residual_cache(
-                args.residual_cache_dir / f"{name}.npy", contexts[split], partial(capture, split), args.model_batch_size, d_model
-            )
+        caches = {
+            "train": [range_cache("train", stage) for stage in stages],
+            "validation": [range_cache("validation", slice(0, len(contexts["validation"])))],
+        }
         if args.cache_only:
             print(f"Residual cache: {args.residual_cache_dir}")
             return
 
-    def batches(split: str, shuffle: bool = False, skip: int = 0) -> Iterator[torch.Tensor]:
-        ids = context_batches(len(contexts[split]), args.model_batch_size, shuffle=shuffle, seed=args.seed, skip=skip)
+    def batches(split: str, skip: int = 0) -> Iterator[torch.Tensor]:
+        # Training contexts come shuffled, validation ones in order.
+        order = shuffled_stages(stages, args.seed) if split == "train" else np.arange(len(contexts[split]))
+        ids = context_batches(order, args.model_batch_size, skip)
         if caches:
             return read_residual_cache(caches[split], ids, device)
-        return (capture(split, batch_ids).flatten(0, 1) for batch_ids in ids)
+        return (capture(contexts[split][batch_ids]).flatten(0, 1) for batch_ids in ids)
 
     print(
         f"Device: {device} | Mode: {'cached' if caches else 'streaming'} | "
@@ -122,14 +146,12 @@ def main() -> None:
     )
     print(f"Output: {output_dir}")
 
-    config_path = output_dir / "config.json"
-    if args.resume:
-        saved = json.loads(config_path.read_text())
+    if saved:
         sink_norm_threshold = saved["sink_norm_threshold"]
         passthrough_dims, activation_scale = saved["passthrough_dims"], saved["activation_scale"]
     else:
         sink_norm_threshold, passthrough_dims, activation_scale = calibrate(
-            batches("train", shuffle=True), args.normalization_tokens, args.context_size, args.exclude_sinks, args.passthrough_massive_dims
+            batches("train"), args.normalization_tokens, args.context_size, args.exclude_sinks, args.passthrough_massive_dims
         )
     config = Config(
         model_id=args.model_id,
@@ -139,6 +161,7 @@ def main() -> None:
         mix=args.mix,
         context_size=args.context_size,
         train_tokens=args.train_tokens,
+        extended_from=extended_from,
         validation_tokens=args.validation_tokens,
         recording_tokens=args.recording_tokens,
         width_multiplier=args.width_multiplier,
@@ -157,14 +180,14 @@ def main() -> None:
         activation_scale=activation_scale,
         seed=args.seed,
     )
-    if args.resume and asdict(config) != saved:
-        raise ValueError("--resume needs the arguments of the original run")
+    if saved and asdict(replace(config, train_tokens=saved["train_tokens"], extended_from=saved["extended_from"])) != saved:
+        raise ValueError("--resume needs the arguments of the original run, apart from a larger --train-tokens")
     output_dir.mkdir(parents=True, exist_ok=True)
     config_path.write_text(json.dumps(asdict(config), indent=2) + "\n")
 
     sae = build_sae(config).to(device)
     if config.subtract_pre_bias and not args.resume:
-        sae.init_pre_bias(next(batches("train", shuffle=True)))
+        sae.init_pre_bias(next(batches("train")))
 
     def evaluate() -> dict:
         # Full-vocabulary logits dwarf residuals, so the KL runs on an eighth of the model batch.
@@ -179,7 +202,7 @@ def main() -> None:
     train_sae(
         sae,
         config,
-        lambda skip: batches("train", shuffle=True, skip=skip),
+        lambda skip: batches("train", skip=skip),
         evaluate,
         output_dir,
         args.resume,

@@ -55,7 +55,7 @@ def record(
         (output / "values.raw").open("wb") as values_file,
         tqdm(total=contexts.size, unit="tok", desc="Record", dynamic_ncols=True) as progress,
     ):
-        for ids in context_batches(len(contexts), batch_size):
+        for ids in context_batches(np.arange(len(contexts)), batch_size):
             input_ids = torch.from_numpy(contexts[ids].astype(np.int64)).to(model.device)
             residual = capture_layer_input(model, layer, input_ids).flatten(0, 1)
             sinks = sae.is_sink(residual)

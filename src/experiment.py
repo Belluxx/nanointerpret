@@ -33,6 +33,8 @@ class Config:
     mix: str
     context_size: int
     train_tokens: int
+    # Earlier `train_tokens` of a resumed run that was extended: each extension is its own shuffled stage.
+    extended_from: list[int]
     validation_tokens: int
     recording_tokens: int
     width_multiplier: int
@@ -304,7 +306,7 @@ def train_sae(
             append_jsonl(evaluation_log, record)
             tqdm.write(f"Validation: {tokens:,} tok | {format_metrics(record)}")
 
-        if crossed(previous, tokens, checkpoint_every):
+        if done or crossed(previous, tokens, checkpoint_every):
             temporary = checkpoint_path.with_suffix(".tmp")
             torch.save(
                 {"sae": sae.state_dict(), "optimizer": optimizer.state_dict(), "tokens": tokens, "last_fired": last_fired},
