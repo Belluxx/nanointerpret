@@ -1,3 +1,6 @@
+import functools
+import itertools
+import math
 import os
 import random
 from collections import deque
@@ -21,6 +24,10 @@ READ_AHEAD = 4
 MAX_DOCUMENT_CHARS = 8192
 # Parquet rows decoded at once; Stack v3 rows are whole repositories.
 READ_BATCH_ROWS = 64
+# Parquet row groups downloaded in parallel ahead of the one being tokenized
+DOWNLOAD_AHEAD = 4
+# Parquet footers kept, so revisiting a file doesn't download its footer again
+FOOTER_CACHE_FILES = 16
 # Stack v3 rows are whole repositories: a few of their source files in these languages are kept.
 CODE_LANGUAGES = frozenset({
     "C", "C#", "C++", "Dart", "Go", "Haskell", "Java", "JavaScript", "Julia", "Kotlin", "Lua", "MATLAB",
@@ -146,23 +153,41 @@ def source_documents(source: Source) -> Iterator[str]:
 
 def source_rows(source: Source, rng: random.Random) -> Iterator[dict]:
     # Files in random order, one random row group of each per pass, so even a small share spans many
-    # files. Only one row group is read at a time, which keeps memory low.
+    # files. Only the needed column's bytes are downloaded, a few row groups ahead.
     import pyarrow.parquet as pq
     from huggingface_hub import HfFileSystem
 
     fs = HfFileSystem()
     files = fs.glob(f"datasets/{source.files}")
     rng.shuffle(files)
-    unread_groups = {}
-    while files:
-        for path in list(files):
-            with fs.open(path) as file:
-                parquet = pq.ParquetFile(file)
-                groups = unread_groups.setdefault(path, rng.sample(range(parquet.num_row_groups), parquet.num_row_groups))
-                for batch in parquet.iter_batches(READ_BATCH_ROWS, row_groups=[groups.pop()], columns=[source.column]):
-                    yield from batch.to_pylist()
-            if not groups:
-                files.remove(path)
+    group_counts = {}
+
+    @functools.lru_cache(FOOTER_CACHE_FILES)
+    def footer(path: str):
+        with fs.open(path, cache_type="none") as file:
+            return pq.read_metadata(file)
+
+    def read(visit: tuple[str, int]):
+        path, index = visit
+        metadata = footer(path)
+        group_counts[path] = metadata.num_row_groups
+        if index >= metadata.num_row_groups:
+            return None
+        group = random.Random(path).sample(range(metadata.num_row_groups), metadata.num_row_groups)[index]
+        with fs.open(path, cache_type="none") as file:
+            return pq.ParquetFile(file, metadata=metadata).read_row_group(group, columns=[source.column])
+
+    def visits() -> Iterator[tuple[str, int]]:
+        for index in itertools.count():
+            unread = [path for path in files if index < group_counts.get(path, math.inf)]
+            if not unread:
+                return
+            yield from ((path, index) for path in unread)
+
+    for table in prefetched(read, visits(), DOWNLOAD_AHEAD):
+        if table is not None:
+            for batch in table.to_batches(READ_BATCH_ROWS):
+                yield from batch.to_pylist()
 
 
 def code_files(files: list[dict], rng: random.Random) -> list[str]:
@@ -190,6 +215,20 @@ def text_batches(texts: Iterable[str]) -> Iterator[list[str]]:
             batch, chars = [], 0
     if batch:
         yield batch
+
+
+def prefetched(function: Callable, items: Iterable, depth: int) -> Iterator:
+    pool = ThreadPoolExecutor(depth)
+    pending = deque()
+    try:
+        for item in items:
+            pending.append(pool.submit(function, item))
+            if len(pending) > depth:
+                yield pending.popleft().result()
+        while pending:
+            yield pending.popleft().result()
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def context_batches(order: np.ndarray, batch_size: int, skip: int = 0) -> Iterator[np.ndarray]:
@@ -241,11 +280,5 @@ def read_residual_cache(caches: Sequence[np.ndarray], batches: Iterable[np.ndarr
     def to_device(residual: np.ndarray) -> Tensor:
         return torch.from_numpy(residual).to(device).flatten(0, 1).float() / RESIDUAL_FP16_SCALE
 
-    with ThreadPoolExecutor(READ_AHEAD) as pool:
-        pending = deque()
-        for ids in batches:
-            pending.append(pool.submit(read, ids))
-            if len(pending) > READ_AHEAD:
-                yield to_device(pending.popleft().result())
-        while pending:
-            yield to_device(pending.popleft().result())
+    for residual in prefetched(read, batches, READ_AHEAD):
+        yield to_device(residual)
