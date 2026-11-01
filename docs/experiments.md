@@ -2,12 +2,6 @@
 
 Hardware: M4 Max Mac Studio (CPU 16C, GPU 40C, 64GB RAM)
 
-## Lessons learned
-
-- Compare runs on downstream KL: MSE and explained variance change meaning with pass-through dims and sink exclusion.
-- Lowering `K` from 32 to 16 improves interpretability at some reconstruction cost. Widening the SAE from 16x to 32x sometimes separates fused concepts, but needs more data, adds many duplicate features, and doesn't fix Gemma 270M's poor text understanding.
-- A later-layer Gemma run gave more abstract features that turned incoherent already at medium activations: check the whole activation distribution, not just the top.
-- FineWeb-Edu was a poor dataset: features picked up its educational style (a fire feature steered completions toward educational fire content), in both Gemma 3 270M and Qwen3 1.7B.
 
 ## Ablations
 
@@ -65,4 +59,4 @@ A few residual dimensions carry extremely large activations that mark attention 
 
 ## Feature interpretation
 
-Method and results: [interpretation.md](interpretation.md).
+Method: [interpretation.md](interpretation.md).

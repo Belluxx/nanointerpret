@@ -9,7 +9,7 @@
 - `K`: Maximum features active per token.
     - Low values can be more interpretable but lead to features that are too broad (worse reconstruction).
     - Higher values tend to be less interpretable (better reconstruction).
-- `AuxK`: Number of dead features used to reconstruct the error left by the primary TopK representation. It defaults to a power of 2 close to half the residual width (`256` for the default `d_model=640`).
+- `AuxK`: Number of dead features used to reconstruct the error left by the primary TopK representation. It defaults to a power of 2 close to half the residual width (`256` for Gemma 3 270M's `d_model=640`).
     - A feature is considered to fire above activation `1e-3`.
 - `aux_k_coef`: Weight on the normalized AuxK reconstruction loss. The default `1/32` is the value used by OpenAI for TopK SAEs. [1]
     - Larger values put more optimization pressure on dead features to explain the primary reconstruction error; smaller values make AuxK less influential. `0` disables AuxK. [1]
