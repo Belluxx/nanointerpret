@@ -18,7 +18,7 @@ Minimal training and feature interpretability analysis of LLMs with sparse autoe
 - `src/interpret.py`: example sampling (activation-quantile bins, same-token and neighbor negatives), prompts, the judge client, the model probe (activations on new text, KL-calibrated steering), and scores.
 - `src/plot.py`: training and feature-density plots.
 - `src/runtime.py`: device selection, model loading, and layer-input capture/patching.
-- `src/sae.py`: Top-K SAE (including input normalization, sink tokens, and pass-through dims), AuxK loss, and running metrics.
+- `src/sae.py`: Top-K SAE (including input normalization, sink tokens, and pass-through dims) with sparse backward passes and bf16 matmuls on CUDA, AuxK loss, and running metrics.
 
 ## Code style
 - Completely ignore backward-compatibility, do not account for it.

@@ -7,6 +7,57 @@ from torch import Tensor, nn
 FIRING_THRESHOLD = 1e-3
 
 
+def matmul_dtype(tensor: Tensor) -> torch.dtype:
+    # On CUDA the SAE's large matmuls take bf16 inputs and give float32 outputs: about twice as fast
+    # as TF32, while the top-k still ranks float32 pre-activations.
+    return torch.bfloat16 if tensor.is_cuda else tensor.dtype
+
+
+def matmul(a: Tensor, b: Tensor, bias: Tensor | None = None) -> Tensor:
+    # Float32 bias + a @ b, with inputs in the matmul dtype.
+    if not a.is_cuda:
+        return a @ b if bias is None else torch.addmm(bias, a, b)
+    a, b = a.bfloat16(), b.bfloat16()
+    return torch.mm(a, b, out_dtype=torch.float32) if bias is None else torch.addmm(bias, a, b, out_dtype=torch.float32)
+
+
+class SelectPreActivations(torch.autograd.Function):
+    # The pre-activations (x - shift) @ weight + bias at `indices`, gathered from their precomputed
+    # values. Only these entries get gradients, so the backward pass builds the dense gradient in the
+    # matmul dtype and sums the bias gradient over them alone.
+    @staticmethod
+    def forward(ctx, pre_activations: Tensor, indices: Tensor, x: Tensor, weight: Tensor, bias: Tensor, shift: Tensor) -> Tensor:
+        ctx.save_for_backward(indices, x, weight, shift)
+        return pre_activations.gather(1, indices)
+
+    @staticmethod
+    def backward(ctx, grad: Tensor) -> tuple[None, None, None, Tensor, Tensor, Tensor | None]:
+        indices, x, weight, shift = ctx.saved_tensors
+        dtype = matmul_dtype(grad)
+        dense_grad = grad.new_zeros(len(grad), weight.shape[1], dtype=dtype).scatter_add_(1, indices, grad.to(dtype))
+        grad_bias = grad.new_zeros(weight.shape[1]).index_add_(0, indices.flatten(), grad.flatten())
+        # The shift's gradient follows from the bias's, skipping a batch-sized matmul.
+        grad_shift = -(weight @ grad_bias) if ctx.needs_input_grad[5] else None
+        return None, None, None, matmul((x - shift).T, dense_grad), grad_bias, grad_shift
+
+
+class Decode(torch.autograd.Function):
+    # embedding_bag's sums of value-weighted decoder rows, with a backward pass of a gather and two
+    # matmuls: a third of the cost of embedding_bag's on CUDA, and far less on MPS.
+    @staticmethod
+    def forward(ctx, indices: Tensor, values: Tensor, weight: Tensor) -> Tensor:
+        ctx.save_for_backward(indices, values, weight)
+        return F.embedding_bag(indices, weight, mode="sum", per_sample_weights=values)
+
+    @staticmethod
+    def backward(ctx, grad: Tensor) -> tuple[None, Tensor, Tensor]:
+        indices, values, weight = ctx.saved_tensors
+        dtype = matmul_dtype(grad)
+        grad_values = (F.embedding(indices, weight.to(dtype)) @ grad.to(dtype).unsqueeze(2)).squeeze(2).to(grad.dtype)
+        activations = grad.new_zeros(len(grad), len(weight), dtype=dtype).scatter_(1, indices, values.to(dtype))
+        return None, grad_values, matmul(activations.T, grad)
+
+
 class TopKSAE(nn.Module):
     def __init__(
         self,
@@ -48,20 +99,33 @@ class TopKSAE(nn.Module):
         # (tokens, d_model) residuals -> SAE inputs of the non-sink tokens.
         return self.normalize(residual[~self.is_sink(residual)])
 
-    def encode(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-        pre_activations = x @ self.encoder_weight + self.encoder_bias
-        if self.subtract_pre_bias:
-            # Equal to encoding x - decoder_bias, but its gradient skips a batch-sized matmul.
-            pre_activations = pre_activations - self.decoder_bias @ self.encoder_weight
-        values, indices = torch.topk(F.relu(pre_activations), self.k, dim=-1, sorted=False)
-        return indices, values, pre_activations
+    def shift(self) -> Tensor:
+        # Subtracted from inputs before encoding.
+        return self.decoder_bias if self.subtract_pre_bias else torch.zeros_like(self.decoder_bias)
+
+    @torch.no_grad()
+    def pre_activations(self, x: Tensor) -> Tensor:
+        # Without gradients, which only the selected features get, through `select`.
+        return matmul(x - self.shift(), self.encoder_weight, self.encoder_bias)
+
+    def top_k(self, pre_activations: Tensor) -> Tensor:
+        return torch.topk(pre_activations, self.k, dim=-1, sorted=False).indices
+
+    def select(self, x: Tensor, pre_activations: Tensor, indices: Tensor) -> Tensor:
+        # Activations at `indices`. The ReLU comes after the top-k, as it keeps the order.
+        return F.relu(SelectPreActivations.apply(pre_activations, indices, x, self.encoder_weight, self.encoder_bias, self.shift()))
+
+    def encode(self, x: Tensor) -> tuple[Tensor, Tensor]:
+        pre_activations = self.pre_activations(x)
+        indices = self.top_k(pre_activations)
+        return indices, self.select(x, pre_activations, indices)
 
     def decode(self, indices: Tensor, values: Tensor) -> Tensor:
-        return F.embedding_bag(indices, self.decoder_weight, mode="sum", per_sample_weights=values)
+        return Decode.apply(indices, values, self.decoder_weight) + self.decoder_bias
 
-    def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-        indices, values, pre_activations = self.encode(x)
-        return self.decode(indices, values) + self.decoder_bias, indices, values, pre_activations
+    def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+        indices, values = self.encode(x)
+        return self.decode(indices, values), indices, values
 
     @torch.no_grad()
     def reconstruct(self, residual: Tensor) -> Tensor:
@@ -81,7 +145,8 @@ class TopKSAE(nn.Module):
     @torch.no_grad()
     def constrain_decoder_gradient(self) -> None:
         gradient = self.decoder_weight.grad
-        gradient.sub_((gradient * self.decoder_weight).sum(dim=1, keepdim=True) * self.decoder_weight)
+        parallel = torch.linalg.vecdot(gradient, self.decoder_weight).unsqueeze(1)
+        gradient.addcmul_(parallel, self.decoder_weight, value=-1)
 
     @torch.no_grad()
     def normalize_decoder(self) -> None:
@@ -99,16 +164,11 @@ def geometric_median(points: Tensor, max_iterations: int = 100, tolerance: float
     return estimate
 
 
-def auxk_loss(sae: TopKSAE, pre_activations: Tensor, error: Tensor, dead: Tensor, aux_k: int) -> Tensor:
-    dead_pre_activations = pre_activations[:, dead]
-    values, indices = torch.topk(dead_pre_activations, min(aux_k, len(dead)), dim=-1, sorted=False)
-    values = F.relu(values)
-    if pre_activations.device.type == "mps":
-        # MPS dense matmul is much faster than embedding_bag at AuxK's large k.
-        activations = torch.zeros_like(dead_pre_activations).scatter_(1, indices, values)
-        reconstruction = activations @ sae.decoder_weight[dead]
-    else:
-        reconstruction = sae.decode(dead[indices], values)
+def auxk_loss(sae: TopKSAE, dead: Tensor, indices: Tensor, values: Tensor, error: Tensor) -> Tensor:
+    # `values` activate the dead features `dead[indices]`. At AuxK's large k a dense matmul is much
+    # faster than embedding_bag.
+    activations = values.new_zeros(len(values), len(dead)).scatter_(1, indices, values)
+    reconstruction = activations @ sae.decoder_weight[dead]
     target = error.detach()
     if sae.subtract_pre_bias:
         # As in OpenAI's recipe: the shift cancels in the loss but routes AuxK's gradient into the pre-bias.
@@ -137,8 +197,7 @@ class RunningMetrics:
         self.x_sum += x.sum(dim=0)
         self.x_sq_sum += x.square().sum()
         self.error_sq_sum += (x - reconstruction).square().sum()
-        fired = indices[values > FIRING_THRESHOLD]
-        self.fire_counts.scatter_add_(0, fired, torch.ones_like(fired, dtype=torch.float32))
+        self.fire_counts.scatter_add_(0, indices.flatten(), (values > FIRING_THRESHOLD).flatten().float())
         if auxk is not None:
             self.auxk_sum += auxk.detach() * len(x)
             self.auxk_count += len(x)

@@ -330,7 +330,7 @@ class Probe:
         with self.lock:
             for text in texts:
                 input_ids = torch.tensor([self.tokenizer.encode(text)], device=self.model.device)
-                indices, values, _ = self.sae.encode(self.sae.inputs(capture_layer_input(self.model, self.layer, input_ids)[0]))
+                indices, values = self.sae.encode(self.sae.inputs(capture_layer_input(self.model, self.layer, input_ids)[0]))
                 value = float((values * (indices == feature)).sum(dim=1).max()) if len(values) else 0.0
                 result.append(value / float(self.feature_max[feature]) if value > FIRING_THRESHOLD else 0.0)
         return result

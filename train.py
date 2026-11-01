@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-id", required=True, help="Hugging Face causal language model to analyze.")
     parser.add_argument("--model-dtype", choices=("float32", "float16", "bfloat16"), default="bfloat16", help="Language-model inference dtype used while capturing residuals. Default: bfloat16.")
     parser.add_argument("--activation-layer", type=int, default=None, help="Layer whose input is captured. Default: len(transformer.layers) // 2.")
-    parser.add_argument("--no-compile-model", action="store_false", dest="compile_model", help="Disable compilation of transformer layers before the capture point on MPS.")
+    parser.add_argument("--no-compile-model", action="store_false", dest="compile_model", help="Disable compilation of the transformer layers before the capture point (MPS and CUDA).")
     parser.add_argument("--mix", choices=MIXES, default="broad", help="Data mix the token splits are drawn from, defined in src/data.py: broad (web, PDFs, code, math, and five languages) or fineweb (FineWeb only). Default: broad.")
     parser.add_argument("--context-size", type=int, default=256, help="Tokens in each language-model input context. Default: 256.")
     parser.add_argument("--train-tokens", type=int, default=100_000_000, help="Number of dataset tokens used to train the SAE. Default: 100000000.")
@@ -105,7 +105,7 @@ def main() -> None:
     saved = json.loads(config_path.read_text()) if args.resume else None
     extended_from = extension_history(saved, args)
     stages = train_stages([*extended_from, args.train_tokens], args.context_size)
-    if args.compile_model and device.type == "mps":
+    if args.compile_model and device.type != "cpu":
         compile_layers_before(layers, layer_index)
 
     def capture(tokens: np.ndarray) -> torch.Tensor:

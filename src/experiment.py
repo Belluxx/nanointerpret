@@ -138,7 +138,7 @@ def evaluate_sae(sae: TopKSAE, batches: Iterable[Tensor], token_count: int, sae_
     with tqdm(total=token_count, unit="tok", desc="Validate", leave=False, disable=None) as progress:
         for residual in batches:
             for x in sae.inputs(residual).split(sae_batch_size):
-                reconstruction, indices, values, _ = sae(x)
+                reconstruction, indices, values = sae(x)
                 metrics.update(x, reconstruction, indices, values)
             progress.update(len(residual))
 
@@ -217,15 +217,22 @@ def train_step(
     config: Config,
     metrics: RunningMetrics,
 ) -> None:
-    reconstruction, indices, values, pre_activations = sae(x)
-    last_fired[indices[values > FIRING_THRESHOLD]] = position
+    pre_activations = sae.pre_activations(x)
+    indices = sae.top_k(pre_activations)
+    last_fired[indices[pre_activations.gather(1, indices) > FIRING_THRESHOLD]] = position
+    # Features start at -1, so none is dead before the first window ends.
+    dead = torch.nonzero(last_fired < position - config.dead_window).flatten()
+    aux_k = min(config.aux_k, len(dead)) if config.aux_k_coef > 0 else 0
+    aux_indices = torch.topk(pre_activations[:, dead], aux_k, dim=-1, sorted=False).indices
+    # One selection for both, so their encoder gradients share a single matmul.
+    selected = sae.select(x, pre_activations, torch.cat([indices, dead[aux_indices]], dim=1))
+    values, aux_values = selected.split([sae.k, aux_k], dim=1)
+    reconstruction = sae.decode(indices, values)
     loss = F.mse_loss(reconstruction, x)
     aux = None
-    if config.aux_k_coef > 0 and position >= config.dead_window:
-        dead = torch.nonzero(last_fired < position - config.dead_window).flatten()
-        if len(dead):
-            aux = auxk_loss(sae, pre_activations, x - reconstruction, dead, config.aux_k)
-            loss = loss + config.aux_k_coef * aux
+    if aux_k:
+        aux = auxk_loss(sae, dead, aux_indices, aux_values, x - reconstruction)
+        loss = loss + config.aux_k_coef * aux
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
     sae.constrain_decoder_gradient()
@@ -249,7 +256,7 @@ def train_sae(
 ) -> None:
     # `train_batches(skip)` yields the shuffled training residuals, skipping `skip` contexts.
     device = sae.decoder_bias.device
-    optimizer = torch.optim.Adam(sae.parameters(), lr=config.learning_rate)
+    optimizer = torch.optim.Adam(sae.parameters(), lr=config.learning_rate, fused=True)
     checkpoint_path = output_dir / "checkpoint_latest.pt"
     train_log = output_dir / "train_metrics.jsonl"
     evaluation_log = output_dir / "evaluation_metrics.jsonl"

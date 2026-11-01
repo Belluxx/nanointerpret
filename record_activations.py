@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"), help="Token-cache directory populated during training. Default: artifacts/token_cache.")
     parser.add_argument("--tokens", type=int, default=None, help="Recording tokens to process, rounded down to whole contexts. Default: the full recording split.")
     parser.add_argument("--model-batch-size", type=int, default=None, help="Contexts processed together. Default: the training configuration.")
-    parser.add_argument("--no-compile-model", action="store_false", dest="compile_model", help="Disable compilation of transformer layers before the capture point on MPS.")
+    parser.add_argument("--no-compile-model", action="store_false", dest="compile_model", help="Disable compilation of the transformer layers before the capture point (MPS and CUDA).")
     parser.add_argument("--device", choices=("auto", "mps", "cuda", "cpu"), default="auto")
     parser.add_argument("--output", type=Path, default=None, help="Output directory. Default: <sae-dir>/activations.")
     return parser.parse_args()
@@ -61,7 +61,7 @@ def record(
             sinks = sae.is_sink(residual)
             sink_positions.append(torch.nonzero(sinks).flatten().cpu().numpy() + position)
             for rows in torch.nonzero(~sinks).flatten().split(sae_batch_size):
-                indices, values, _ = sae.encode(sae.normalize(residual[rows]))
+                indices, values = sae.encode(sae.normalize(residual[rows]))
                 firing = values > FIRING_THRESHOLD
                 features = indices[firing].cpu().numpy().astype(feature_dtype(sae.d_sae))
                 activations = values[firing].cpu().numpy().astype(VALUE_DTYPE)
@@ -137,7 +137,7 @@ def main() -> None:
 
     model = load_causal_lm(config.model_id, config.model_dtype, device)
     layers = find_transformer_layers(model)
-    if args.compile_model and device.type == "mps":
+    if args.compile_model and device.type != "cpu":
         compile_layers_before(layers, config.layer_index)
     layer = layers[config.layer_index]
     print(f"Device: {device} | Recording: {contexts.size:,} tokens | Layer: {config.layer_index} | Output: {output}")

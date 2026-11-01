@@ -9,6 +9,8 @@ from transformers import AutoModelForCausalLM
 def choose_device(name: str) -> torch.device:
     if name == "auto":
         name = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
+    # TF32 tensor cores for the remaining float32 matmuls, such as AuxK's.
+    torch.set_float32_matmul_precision("high")
     return torch.device(name)
 
 
@@ -29,7 +31,7 @@ def find_transformer_layers(model: nn.Module) -> nn.ModuleList:
 
 
 def compile_layers_before(layers: nn.ModuleList, layer_index: int) -> None:
-    print(f"Compiling {layer_index} transformer layers for MPS")
+    print(f"Compiling {layer_index} transformer layers")
     # The capture layer stays eager so its forward pre-hook remains visible.
     for index in range(layer_index):
         layers[index] = torch.compile(layers[index], dynamic=False)
