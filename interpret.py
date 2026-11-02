@@ -52,7 +52,7 @@ def choose_features(index: FeatureIndex, args: argparse.Namespace) -> list[int]:
         return eligible.tolist()
     by_density = eligible[np.argsort(index.density[eligible], kind="stable")]
     rng = np.random.default_rng(0)
-    return [int(rng.choice(stratum)) for stratum in np.array_split(by_density, args.sample)]
+    return [int(rng.choice(stratum)) for stratum in np.array_split(by_density, min(args.sample, len(by_density)))]
 
 
 def main() -> None:
