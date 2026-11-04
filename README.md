@@ -33,7 +33,7 @@ pip install -r requirements.txt
 
 ## Comparison with Qwen-Scope
 
-Nanointerpret Qwen3 1.7B SAE (layer 11, k50, 1B tokens) vs its [Qwen-Scope](https://huggingface.co/Qwen/SAE-Res-Qwen3-1.7B-Base-W32K-L0_50) equivalent.
+[Nanointerpret Qwen3 1.7B SAE](https://huggingface.co/Belluxx/nanointerpret-qwen3-1.7b-base-l11-k50) (layer 11, k50, 1B tokens) vs its [Qwen-Scope](https://huggingface.co/Qwen/SAE-Res-Qwen3-1.7B-Base-W32K-L0_50) equivalent.
 
 ![Table of both SAEs' key metrics on the validation split, and their downstream KL with paired gap and 95% confidence intervals, by test set and source](assets/plots/qwen_scope_comparison.svg)
 
