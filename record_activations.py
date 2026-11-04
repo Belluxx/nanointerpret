@@ -24,6 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sae-dir", type=Path, required=True, help="Training output directory containing config.json and sae_final.pt.")
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"), help="Token-cache directory populated during training. Default: artifacts/token_cache.")
+    parser.add_argument("--token-ids", type=Path, default=None, help="token_ids.npy of an earlier recording, used instead of the token cache.")
     parser.add_argument("--tokens", type=int, default=None, help="Recording tokens to process, rounded down to whole contexts. Default: the full recording split.")
     parser.add_argument("--model-batch-size", type=int, default=None, help="Contexts processed together. Default: the training configuration.")
     parser.add_argument("--no-compile-model", action="store_false", dest="compile_model", help="Disable compilation of the transformer layers before the capture point (MPS and CUDA).")
@@ -127,7 +128,10 @@ def main() -> None:
     sae, config = load_sae(args.sae_dir, device)
 
     split = context_splits(config.train_tokens, config.validation_tokens, config.recording_tokens, config.context_size)["recording"]
-    contexts = token_cache(args.cache_dir, config.model_id, config.mix, config.context_size, split.stop)[0][split]
+    if args.token_ids is not None:
+        contexts = np.load(args.token_ids, mmap_mode="r").reshape(-1, config.context_size)
+    else:
+        contexts = token_cache(args.cache_dir, config.model_id, config.mix, config.context_size, split.stop)[0][split]
     if args.tokens is not None:
         if args.tokens > contexts.size:
             raise ValueError(f"--tokens requests {args.tokens:,} tokens, but the recording split has {contexts.size:,}")
