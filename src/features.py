@@ -82,6 +82,7 @@ class FeatureIndex:
         lines = self.interpretations_path.read_text().splitlines() if self.interpretations_path.exists() else []
         self.interpretations = {record["feature"]: record for record in map(json.loads, lines)}
         self.titles = {feature: record["title"].lower() for feature, record in self.interpretations.items()}
+        self.descriptions = {feature: record["description"].lower() for feature, record in self.interpretations.items()}
         # 0 trusted, 1 low confidence, 2 unnamed: the order of the groups in the feature list.
         self.group = np.full(len(self.counts), 2)
         tests, detection = np.zeros(len(self.counts)), np.zeros(len(self.counts))
@@ -123,8 +124,17 @@ class FeatureIndex:
         if trusted_only:
             features = features[self.group[features] == 0]
         if words := name.lower().split():
-            features = features[np.isin(features, [feature for feature, title in self.titles.items() if all(word in title for word in words)])]
-        # Trusted titles first, then low-confidence ones, then unnamed features, each group in the chosen order.
+            # 0 when the title has every word, 1 when the description has the ones it lacks, 2 for no match.
+            match = np.full(len(self.counts), 2)
+            for feature, title in self.titles.items():
+                if all(word in title for word in words):
+                    match[feature] = 0
+                elif all(word in title or word in self.descriptions[feature] for word in words):
+                    match[feature] = 1
+            features = features[match[features] < 2]
+            features = features[np.argsort(match[features], kind="stable")]
+        # Trusted titles first, then low-confidence ones, then unnamed features. Within each group, title matches
+        # come first, then the chosen order.
         features = features[np.argsort(self.group[features], kind="stable")]
         return [self.row(feature) for feature in features[offset : offset + limit]]
 
