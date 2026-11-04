@@ -7,15 +7,15 @@ Minimal training and feature interpretability analysis of LLMs with sparse autoe
 - `train.py`: set up the model and data (streamed or cached residuals), calibrate, train the SAE, and plot metrics.
 - `record_activations.py`: record SAE feature activations on the recording split and index them by token and by feature.
 - `interpret.py`: name features with an LLM and check each name: detection on held-out text, generated test texts run through the model, and steering tokens.
-- `explore.py`: serve the local feature explorer over a recorded activation index.
-- `explorer/`: the explorer's static web UI (overview, feature pages, token pages).
+- `explore.py`: serve the local feature explorer over a recorded activation index, and stream live steering from the model.
+- `explorer/`: the explorer's static web UI (overview, feature pages with live steering, token pages).
 - `docs/experiments.md`: experiment results and reproduction commands.
 - `docs/interpretation.md`: the feature interpretation pipeline: how to run it and how it works.
 - `docs/overview.md`: brief notes on activation layer, width multiplier, and K.
 - `src/data.py`: data mixes (sources, document filters, context-level mixing), token cache, residual cache, and context batching.
 - `src/experiment.py`: run config, calibration, training loop, evaluation, and downstream KL.
 - `src/features.py`: queries over a recorded activation index, the cached per-feature summary (peak tokens, logit effects), and feature interpretations.
-- `src/interpret.py`: example sampling (activation-quantile bins, same-token and neighbor negatives), prompts, the judge client, the model probe (activations on new text, KL-calibrated steering), and scores.
+- `src/interpret.py`: example sampling (activation-quantile bins, same-token and neighbor negatives), prompts, the judge client, the model probe (activations on new text, KL-calibrated steering, steered continuations), and scores.
 - `src/plot.py`: training and feature-density plots.
 - `src/runtime.py`: device selection, model loading, and layer-input capture/patching.
 - `src/sae.py`: Top-K SAE (including input normalization, sink tokens, and pass-through dims) with sparse backward passes and bf16 matmuls on CUDA, AuxK loss, and running metrics.

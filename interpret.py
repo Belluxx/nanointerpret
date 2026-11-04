@@ -8,14 +8,12 @@ from pathlib import Path
 import numpy as np
 from tqdm.auto import tqdm
 
-from src.experiment import load_sae
 from src.features import FeatureIndex
 from src.interpret import (
     EXPLAIN_SCHEMA,
     GENERATE_SCHEMA,
     MIN_FIRES,
     Judge,
-    Probe,
     Sampler,
     detect_prompt,
     detect_schema,
@@ -23,10 +21,10 @@ from src.interpret import (
     explain_prompt,
     generate_prompt,
     generation_scores,
+    load_probe,
     measured_pairs,
     shuffled,
 )
-from src.runtime import choose_device, find_transformer_layers, load_causal_lm
 
 
 def parse_args() -> argparse.Namespace:
@@ -63,11 +61,8 @@ def main() -> None:
     done = {json.loads(line)["feature"] for line in output.read_text().splitlines()} if output.exists() else set()
     features = [feature for feature in choose_features(index, args) if feature not in done]
 
-    device = choose_device(args.device)
-    sae, config = load_sae(args.sae_dir, device)
-    model = load_causal_lm(config.model_id, config.model_dtype, device)
-    probe = Probe(model, find_transformer_layers(model)[config.layer_index], sae, index.tokenizer, index.max, index.vocab)
-    sampler = Sampler(index, sae.decoder_weight.float().cpu())
+    probe = load_probe(index, args.sae_dir, args.device)
+    sampler = Sampler(index, probe.sae.decoder_weight.float().cpu())
     judge = Judge(args.base_url, args.model)
 
     def interpret(feature: int) -> dict:

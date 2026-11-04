@@ -12,9 +12,14 @@ const LIST_PAGE = 200;
 const integer = new Intl.NumberFormat('en-US');
 const list = { offset: 0, done: false, loading: false, generation: 0, range: null, group: null };
 const GROUPS = ['Trusted', 'Low confidence', 'Unnamed'];
+// Log-probability gained from steering, in nats: below the floor a token stays plain, at the peak it has its full color.
+const LIFT_FLOOR = 1;
+const LIFT_PEAK = 8;
 let overview;
 let current = null;
 let viewGeneration = 0;
+let steerPrompt = 'In my experience,';
+let steering = null;
 
 /* DOM: strings are always inserted as text, never parsed as HTML. */
 
@@ -59,18 +64,18 @@ function tokenLabel(text, className = 'token') {
   }));
 }
 
+const heat = (fraction) => ({ background: `color-mix(in srgb, var(--accent) ${(6 + 72 * Math.min(fraction, 1)).toFixed(1)}%, transparent)` });
+const specialToken = (text) => el('span', { class: 'special' }, text.replace(/^<\|?|\|?>$/g, ''));
+const withBreaks = (text, multiline) => text.split('\n').flatMap((line, index) => (index ? [el('span', { class: 'nl' }, multiline ? '⏎\n' : '⏎'), line] : [line]));
+
 function exampleToken(example, index, peak, multiline) {
   const text = example.tokens[index];
   const act = example.acts[index];
-  const alpha = act > 0 ? 6 + 72 * Math.min(act / peak, 1) : 0;
-  const content = example.special.includes(index)
-    ? el('span', { class: 'special' }, text.replace(/^<\|?|\|?>$/g, ''))
-    : text.split('\n').flatMap((line, lineIndex) => (lineIndex ? [el('span', { class: 'nl' }, multiline ? '⏎\n' : '⏎'), line] : [line]));
   return el('span', {
     class: index === example.center ? 't peak' : 't',
-    style: alpha ? { background: `color-mix(in srgb, var(--accent) ${alpha.toFixed(1)}%, transparent)` } : null,
+    style: act > 0 ? heat(act / peak) : null,
     dataset: { tip: `${act > 0 ? act.toFixed(2) : 'not firing'}\n${quoted(text)}` },
-  }, content);
+  }, example.special.includes(index) ? specialToken(text) : withBreaks(text, multiline));
 }
 
 function exampleRow(example, peak) {
@@ -216,6 +221,100 @@ function testsCard(pairs) {
       line(pair.fires, pair.fires_activation), line(pair.silent, pair.silent_activation)))));
 }
 
+/* Steering: continuations of a prompt, unsteered and at rising strengths, streamed a token at a time. */
+
+function continuationToken({ token, end, probability, unsteered }, same, first) {
+  const lift = Math.log(probability / unsteered);
+  const tip = lift
+    ? `${percent(unsteered)} → ${percent(probability)}\n${quoted(token)}\nprobability without → with steering`
+    : `${percent(probability)}\n${quoted(token)}`;
+  return el('span', {
+    class: same ? 't same' : 't',
+    style: lift >= LIFT_FLOOR ? heat(lift / LIFT_PEAK) : null,
+    dataset: { tip },
+  }, end ? specialToken(token) : withBreaks(first ? token.replace(/^ (?=\S)/, '') : token, true));
+}
+
+function rung(strength) {
+  const tip = strength ? `${strength}× max activation` : 'Unsteered';
+  const text = el('p', { class: 'continuation' });
+  return { row: el('div', { class: 'rung' }, el('span', { class: 'act', dataset: { tip } }, `${strength}×`), text), text, parted: !strength };
+}
+
+async function readLines(response, handle) {
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return;
+    const lines = (buffer + value).split('\n');
+    buffer = lines.pop();
+    lines.forEach((line) => handle(JSON.parse(line)));
+  }
+}
+
+async function steer(feature, ladder, button) {
+  steering?.abort();
+  const run = new AbortController();
+  steering = run;
+  button.textContent = 'Stop';
+  button.classList.add('running');
+  ladder.replaceChildren(el('p', { class: 'waiting' }, 'Waiting for the model'));
+  let rungs = [];
+  try {
+    const response = await fetch(`/api/steer?feature=${feature}&prompt=${encodeURIComponent(steerPrompt)}`, { signal: run.signal });
+    if (!response.ok) throw new Error((await response.json()).error);
+    await readLines(response, (event) => {
+      if (event.strengths) {
+        rungs = [0, ...event.strengths].map((strength) => rung(strength));
+        ladder.replaceChildren(...rungs.map(({ row }) => row));
+        return;
+      }
+      event.forEach((token, index) => {
+        if (!token) return;
+        const same = !rungs[index].parted && token.token === event[0]?.token;
+        rungs[index].parted = !same;
+        rungs[index].text.append(continuationToken(token, same, !rungs[index].text.hasChildNodes()));
+      });
+    });
+  } catch (error) {
+    if (!run.signal.aborted) ladder.replaceChildren(el('p', { class: 'notice' }, error.message));
+  }
+  // A newer run has taken over the card.
+  if (steering !== run) return;
+  steering = null;
+  button.textContent = 'Steer';
+  button.classList.remove('running');
+  if (run.signal.aborted && !rungs.length) ladder.replaceChildren();
+}
+
+function steerCard(feature) {
+  const ladder = el('div', { class: 'ladder' });
+  const button = el('button', { type: 'submit' }, 'Steer');
+  const start = () => steerPrompt.trim() && steer(feature, ladder, button);
+  const prompt = el('textarea', {
+    rows: 1,
+    placeholder: 'Text to continue',
+    'aria-label': 'Text to continue',
+    spellcheck: 'false',
+    oninput: () => { steerPrompt = prompt.value; },
+    onkeydown: (event) => {
+      if (event.key !== 'Enter' || event.shiftKey) return;
+      event.preventDefault();
+      start();
+    },
+  }, steerPrompt);
+  const form = el('form', {
+    class: 'steer',
+    onsubmit: (event) => {
+      event.preventDefault();
+      if (steering) steering.abort();
+      else start();
+    },
+  }, prompt, button);
+  return card('Steering', 'strength × max, colored by added likelihood', form, ladder);
+}
+
 function featureView(data) {
   const sections = [['Top activations', 'one per context', data.top], ...data.ranges.map((range) => [
     `${range.low * 100}–${range.high * 100}% of max`, `${percent(range.share)} of fires`, range.examples])];
@@ -230,6 +329,7 @@ function featureView(data) {
       : el('p', { class: 'lede' }, 'Never fires in the recorded tokens'),
     el('div', { class: 'columns' },
       data.fires > 0 && el('div', { class: 'stack' },
+        steerCard(data.id),
         sections.map(([title, meta, examples]) => card(title, meta, examples.map((example) => exampleRow(example, data.max))))),
       el('div', { class: 'stack side' },
         named && testsCard(named.pairs),
@@ -272,6 +372,7 @@ async function show(path, build) {
 }
 
 function route() {
+  steering?.abort();
   const [view, argument] = location.hash.slice(2).split('/');
   current = view === 'feature' ? Number(argument) : null;
   for (const row of listElement.children) row.classList.toggle('active', Number(row.dataset.id) === current);
@@ -352,7 +453,7 @@ query.addEventListener('input', () => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey || event.target.closest('input, select')) return;
+  if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey || event.target.closest('input, select, textarea')) return;
   event.preventDefault();
   query.focus();
 });

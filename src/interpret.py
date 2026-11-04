@@ -2,14 +2,19 @@ import json
 import random
 import threading
 import urllib.request
+from collections.abc import Iterator
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 import torch
 from torch import nn
 
+from .experiment import load_sae
 from .features import FeatureIndex
-from .runtime import capture_layer_input, patch_layer_input
+from .runtime import capture_layer_input, choose_device, find_transformer_layers, load_causal_lm, patch_layer_input
 from .sae import FIRING_THRESHOLD, TopKSAE
 
 WINDOW_BEFORE = 32
@@ -46,6 +51,11 @@ STEER_STRENGTHS = (0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0)
 STEER_KL = 1.0
 STEER_TOKENS = 10
 STEER_MIN_PROBABILITY = 1e-3
+CONTINUATION_TOKENS = 48
+CONTINUATION_TEMPERATURE = 0.7
+# Multiples of the calibrated strength. It limits the KL of the next token, but steering compounds over a continuation,
+# so the last one shows where text breaks.
+CONTINUATION_LADDER = (0.75, 1.5, 3.0)
 
 
 @dataclass
@@ -311,6 +321,7 @@ class Probe:
         self.model, self.layer, self.sae, self.tokenizer = model, layer, sae, tokenizer
         self.feature_max = feature_max
         self.vocab = vocab
+        self.end_tokens = set(tokenizer.all_special_ids)
         # Worker threads share one model, and MPS crashes on concurrent use, so all work on its device holds this lock.
         self.lock = threading.Lock()
         encoded = [tokenizer.encode(prompt) for prompt in STEER_PROMPTS]
@@ -335,24 +346,20 @@ class Probe:
                 result.append(value / float(self.feature_max[feature]) if value > FIRING_THRESHOLD else 0.0)
         return result
 
+    def steering(self, feature: int, strengths: torch.Tensor) -> AbstractContextManager[None]:
+        # Adds the decoder direction at the SAE's layer, to each row at its multiple of the max activation.
+        # Pass-through dims and sink tokens bypass the SAE, so both stay unchanged.
+        direction = torch.zeros(len(self.sae.keep), device=self.sae.keep.device)
+        direction[self.sae.keep] = self.sae.decoder_weight[feature] / self.sae.activation_scale
+        delta = strengths[:, None, None] * float(self.feature_max[feature]) * direction
+        return patch_layer_input(self.layer, lambda hidden: hidden + delta.to(hidden.dtype) * ~self.sae.is_sink(hidden)[..., None])
+
     @torch.inference_mode()
     def steer(self, feature: int) -> dict:
-        # The next tokens made likelier by adding the decoder direction at the SAE's layer, at the strongest
-        # multiple of the max activation that keeps the KL from the unsteered predictions within STEER_KL.
-        # Pass-through dims are outside the SAE, so the direction leaves them unchanged.
-        with self.lock:
-            direction = torch.zeros(len(self.sae.keep), device=self.sae.keep.device)
-            direction[self.sae.keep] = self.sae.decoder_weight[feature] / self.sae.activation_scale
-            delta = self.steer_scales[:, None] * float(self.feature_max[feature]) * direction
-
-            def add(hidden):
-                steered = hidden.clone()
-                # Position 0 is an attention sink and is left alone.
-                steered[:, 1:] += delta[:, None].to(hidden.dtype)
-                return steered
-
-            with patch_layer_input(self.layer, add):
-                logits = self.model(input_ids=self.steer_ids, use_cache=False).logits
+        # The next tokens made likelier by steering, at the strongest multiple of the max activation
+        # that keeps the KL from the unsteered predictions within STEER_KL.
+        with self.lock, self.steering(feature, self.steer_scales):
+            logits = self.model(input_ids=self.steer_ids, use_cache=False).logits
             logprobs = torch.log_softmax(logits[torch.arange(len(logits)), self.steer_last].float(), dim=-1).cpu()
         base, *steered = logprobs.view(len(STEER_STRENGTHS) + 1, len(STEER_PROMPTS), -1)
         kls = [float((run.exp() * (run - base)).sum(dim=-1).mean()) for run in steered]
@@ -365,6 +372,54 @@ class Probe:
             "kl": round(kls[chosen], 3),
             "tokens": [self.vocab[token] for token in shift.topk(STEER_TOKENS).indices.tolist()],
         }
+
+    @lru_cache(maxsize=64)
+    def calibrated_strength(self, feature: int) -> float:
+        return self.steer(feature)["strength"]
+
+    @torch.inference_mode()
+    def continuations(self, feature: int, prompt: str, strengths: list[float]) -> Iterator[list[dict | None]]:
+        # Continues the prompt unsteered and at each strength, yielding each one's next token, or None once it ended.
+        # All rows sample with the same noise, so they only part where steering changes the pick. Each steered row has
+        # an unsteered shadow reading its tokens, which gives how likely they were without steering.
+        count = len(strengths)
+        scales = torch.tensor([0.0, *strengths, *[0.0] * count], device=self.model.device)
+        tokens = torch.tensor([self.tokenizer.encode(prompt)], device=self.model.device).repeat(len(scales), 1)
+        shadows = [0, *range(count + 1, len(scales))]
+        ended = [False] * (count + 1)
+        cache = None
+        for _ in range(CONTINUATION_TOKENS):
+            # Locked per step, so a generation its client abandoned can't hold up the next one.
+            with self.lock, self.steering(feature, scales):
+                output = self.model(input_ids=tokens, past_key_values=cache, use_cache=True, logits_to_keep=1)
+                cache = output.past_key_values
+                logprobs = torch.log_softmax(output.logits[:, -1, : len(self.vocab)].float(), dim=-1)
+                noise = -torch.empty(logprobs.shape[1]).exponential_().log().to(logprobs.device)
+                picks = (logprobs / CONTINUATION_TEMPERATURE + noise).argmax(dim=-1)
+                picks[count + 1 :] = picks[1 : count + 1]
+                probabilities = logprobs.gather(1, picks[:, None]).squeeze(1).exp().tolist()
+                ids = picks.tolist()
+                tokens = picks[:, None]
+            rows = [
+                None if done else {
+                    "token": self.vocab[ids[row]],
+                    "end": ids[row] in self.end_tokens,
+                    "probability": probabilities[row],
+                    "unsteered": probabilities[shadow],
+                }
+                for row, (shadow, done) in enumerate(zip(shadows, ended))
+            ]
+            ended = [done or row["end"] for done, row in zip(ended, rows)]
+            yield rows
+            if all(ended):
+                return
+
+
+def load_probe(index: FeatureIndex, sae_dir: Path, device_name: str) -> Probe:
+    device = choose_device(device_name)
+    sae, config = load_sae(sae_dir, device)
+    model = load_causal_lm(config.model_id, config.model_dtype, device)
+    return Probe(model, find_transformer_layers(model)[config.layer_index], sae, index.tokenizer, index.max, index.vocab)
 
 
 def shuffled(examples: list[Example], seed: int) -> list[Example]:

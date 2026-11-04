@@ -4,7 +4,7 @@ Nanointerpret objective is being a minimal but full-fledged interpretability pla
 - Train your own [SAE](https://www.lesswrong.com/posts/8YnHuN55XJTDwGPMr/a-gentle-introduction-to-sparse-autoencoders)
 - Record SAE feature activations
 - Interpret and filter the features with any LLM
-- Explore the features in a local dashboard
+- Explore the features in a local dashboard and steer the model with them
 
 ## How does this work?
 
@@ -14,7 +14,7 @@ Nanointerpret objective is being a minimal but full-fledged interpretability pla
     - See [methodology](docs/overview.md#methodology), [hyperparameters](docs/overview.md#hyperparams), [ablations](docs/experiments.md#ablations), [massive activations](docs/experiments.md#massive-activations) behind the defaults.
 2. `record_activations.py`: runs the trained SAE over held-out text
 3. `interpret.py`: an LLM names each feature from its activations, then the name is checked on held-out tokens + tests, and by steering the model along the feature ([how it works](docs/interpretation.md)).
-4. `explore.py`: serves a local dashboard to browse the features
+4. `explore.py`: serves a local dashboard to browse the features and steer the model.
 
 ## Train your SAE
 
