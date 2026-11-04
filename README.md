@@ -31,6 +31,12 @@ pip install -r requirements.txt
 - [Gemma3 270M Base](docs/training-guides/gemma.md) (~5GB free RAM required)
 - [Qwen3 1.7B Base](docs/training-guides/qwen.md) (~14GB free RAM required)
 
+## Comparison with Qwen-Scope
+
+Nanointerpret Qwen3 1.7B SAE (layer 11, k50, 1B tokens) vs its [Qwen-Scope](https://huggingface.co/Qwen/SAE-Res-Qwen3-1.7B-Base-W32K-L0_50) equivalent.
+
+![Table of both SAEs' key metrics on the validation split, and their downstream KL with paired gap and 95% confidence intervals, by test set and source](assets/plots/qwen_scope_comparison.svg)
+
 ## Interpretation pipeline
 
 ![For each feature: sample recorded activations, write a title and description, check them on held-out tokens, write test texts that the studied model scores, and steer along the decoder direction](assets/interpretation_pipeline.svg)
