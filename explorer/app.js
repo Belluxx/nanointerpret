@@ -4,6 +4,9 @@ const tooltip = document.getElementById('tooltip');
 const query = document.getElementById('query');
 const sort = document.getElementById('sort');
 const rangeButton = document.getElementById('range');
+const showUntrusted = document.getElementById('show-untrusted');
+const filterButton = document.getElementById('filter');
+const filters = document.getElementById('filters');
 
 const LIST_PAGE = 200;
 const integer = new Intl.NumberFormat('en-US');
@@ -29,8 +32,6 @@ function create(namespace, tag, props, children) {
 
 const el = (tag, props = {}, ...children) => create(null, tag, props, children);
 const svg = (tag, props = {}, ...children) => create('http://www.w3.org/2000/svg', tag, props, children);
-const icon = (path) => svg('svg', { class: 'icon', viewBox: '0 0 16 16', 'aria-hidden': 'true' }, svg('path', { d: path }));
-const kbd = (key) => el('kbd', {}, key);
 const track = (fraction) => el('span', { class: 'track' }, el('span', { style: { width: `${100 * fraction}%` } }));
 
 async function api(path) {
@@ -46,7 +47,7 @@ function percent(fraction) {
 }
 
 const quoted = (text) => JSON.stringify(text);
-const featureHref = (id) => `#/feature/${(id + overview.d_sae) % overview.d_sae}`;
+const featureHref = (id) => `#/feature/${id}`;
 const tokenHref = (token) => (token.trim() ? `#/token/${encodeURIComponent(token.trim())}` : null);
 
 /* Tokens: whitespace is made visible in token labels and kept real in example text. */
@@ -66,8 +67,8 @@ function exampleToken(example, index, peak, multiline) {
     ? el('span', { class: 'special' }, text.replace(/^<\|?|\|?>$/g, ''))
     : text.split('\n').flatMap((line, lineIndex) => (lineIndex ? [el('span', { class: 'nl' }, multiline ? '⏎\n' : '⏎'), line] : [line]));
   return el('span', {
-    class: `t${index === example.center ? ' peak' : ''}${alpha >= 55 ? ' on' : ''}`,
-    style: alpha ? { background: `color-mix(in srgb, var(--ink) ${alpha.toFixed(1)}%, transparent)` } : null,
+    class: index === example.center ? 't peak' : 't',
+    style: alpha ? { background: `color-mix(in srgb, var(--accent) ${alpha.toFixed(1)}%, transparent)` } : null,
     dataset: { tip: `${act > 0 ? act.toFixed(2) : 'not firing'}\n${quoted(text)}` },
   }, content);
 }
@@ -102,7 +103,7 @@ document.addEventListener('pointerover', (event) => {
 document.addEventListener('pointermove', (event) => tooltip.hidden || moveTip(event.clientX, event.clientY));
 document.documentElement.addEventListener('pointerleave', () => { tooltip.hidden = true; });
 
-/* Feature density: the overview histogram and a sparkline of it. */
+/* Feature density: the overview histogram. */
 
 // Percent of features per decade, so the wider lowest bin stays comparable (as in the training plot).
 const perDecade = ({ feature_density_log10_bin_edges: edges, feature_density_bin_counts: counts, total_features: total }) =>
@@ -110,7 +111,7 @@ const perDecade = ({ feature_density_log10_bin_edges: edges, feature_density_bin
 
 function densityChart(histogram) {
   const box = el('div', { class: 'chart' });
-  new ResizeObserver(() => box.replaceChildren(drawDensity(histogram, box.clientWidth, 280))).observe(box);
+  new ResizeObserver(() => box.clientWidth && box.replaceChildren(drawDensity(histogram, box.clientWidth, 280))).observe(box);
   return box;
 }
 
@@ -126,6 +127,12 @@ function drawDensity(histogram, width, height) {
   const y = (value) => margin.top + (1 - value / top) * (height - margin.top - margin.bottom);
 
   const root = svg('svg', { width, height });
+  for (let tick = 0; tick <= top; tick += step) {
+    root.append(
+      svg('line', { class: tick ? 'grid' : 'axis', x1: margin.left, x2: width - margin.right, y1: y(tick), y2: y(tick) }),
+      svg('text', { x: margin.left - 6, y: y(tick) + 3, 'text-anchor': 'end' }, tick),
+    );
+  }
   counts.forEach((count, index) => {
     const range = index ? `${percent(10 ** edges[index])}–${percent(10 ** edges[index + 1])}` : '1–9 fires';
     root.append(svg('rect', {
@@ -135,12 +142,6 @@ function drawDensity(histogram, width, height) {
       onclick: () => filterDensity(edges[index], edges[index + 1], range),
     }));
   });
-  for (let tick = 0; tick <= top; tick += step) {
-    root.append(
-      svg('line', { class: tick ? 'grid' : 'axis', x1: margin.left, x2: width - margin.right, y1: y(tick), y2: y(tick) }),
-      svg('text', { x: margin.left - 6, y: y(tick) + 3, 'text-anchor': 'end' }, tick),
-    );
-  }
   for (let decade = Math.ceil(edges[0]); decade <= 0; decade++) {
     const label = `${Number((100 * 10 ** decade).toPrecision(1))}%`;
     root.append(svg('text', { x: x(decade), y: height - 6, 'text-anchor': decade ? 'middle' : 'end' }, label));
@@ -148,23 +149,6 @@ function drawDensity(histogram, width, height) {
   const steps = values.map((value, index) => `V${y(value)}H${x(edges[index + 1])}`).join('');
   root.append(svg('path', { d: `M${x(edges[0])},${y(0)}${steps}V${y(0)}` }));
   return root;
-}
-
-function densitySpark(density) {
-  const { feature_density_log10_bin_edges: edges, feature_density_bin_counts: counts, total_features: total } = overview.density_histogram;
-  const [width, height] = [120, 30];
-  const values = perDecade(overview.density_histogram);
-  const x = (logDensity) => (1 - logDensity / edges[0]) * width;
-  const y = (value) => height * (1 - value / Math.max(...values));
-  const steps = values.map((value, index) => `V${y(value)}H${x(edges[index + 1])}`).join('');
-  // The feature's whole bin counts as denser, so the rank is at the histogram's resolution.
-  const denser = counts.reduce((sum, count, index) => sum + (edges[index + 1] > Math.log10(density) ? count : 0), 0);
-  const marker = x(Math.log10(density));
-  return svg('svg', { class: 'spark', width, height, dataset: { tip: `top ${percent(denser / total)} by density\nof all ${integer.format(total)} features` } },
-    svg('path', { d: `M0,${height}${steps}V${height}Z` }),
-    svg('line', { class: 'axis', x1: 0, x2: width, y1: height, y2: height }),
-    svg('line', { x1: marker, x2: marker, y1: 6, y2: height }),
-    svg('rect', { x: marker - 2.5, y: 3.5, width: 5, height: 5 }));
 }
 
 /* Views */
@@ -181,28 +165,20 @@ function barList(rows, value, format, tip) {
     el('span', { class: 'num' }, format(row)))));
 }
 
-function pageHead(eyebrow, title, ...extra) {
-  return el('div', { class: 'page-head' }, el('div', {}, el('p', { class: 'eyebrow' }, eyebrow), title), extra);
+function pageHead(eyebrow, title) {
+  return el('div', { class: 'page-head' }, el('p', { class: 'eyebrow' }, eyebrow), title && el('h1', {}, title));
 }
 
 function stats(items) {
   return el('dl', { class: 'stats' }, items.map(([label, ...value]) => el('div', {}, el('dt', {}, label), el('dd', {}, value))));
 }
 
-// Four rising bars, with the one for this quarter of the max activation filled in.
-function quartile(low) {
-  return el('span', { class: 'quartile' }, [0, 0.25, 0.5, 0.75].map((edge) => el('span', { class: edge === low ? 'on' : null })));
-}
-
 function overviewView() {
   return el('div', {},
-    pageHead('Run', el('h1', { class: 'text' }, overview.run)),
+    pageHead('Run', overview.run),
     stats([['Model', overview.model_id], ['Layer', overview.layer_index], ['Features', integer.format(overview.d_sae)], ['k', overview.k],
       ['Tokens recorded', integer.format(overview.tokens)]]),
-    card('Activation frequency', '% of features per decade of density · click a bin to list it', densityChart(overview.density_histogram)),
-    el('p', { class: 'hint' },
-      el('span', {}, kbd('/'), 'Search'),
-      el('span', {}, kbd('←'), kbd('→'), 'Step through features')));
+    card('Activation frequency', '% of features per decade of density: click a bin to list it', densityChart(overview.density_histogram)));
 }
 
 const share = (fraction) => `${Math.round(100 * fraction)}%`;
@@ -242,26 +218,22 @@ function testsCard(pairs) {
 
 function featureView(data) {
   const sections = [['Top activations', 'one per context', data.top], ...data.ranges.map((range) => [
-    [quartile(range.low), `${range.low * 100}–${range.high * 100}% of max`], `${percent(range.share)} of fires`, range.examples])];
+    `${range.low * 100}–${range.high * 100}% of max`, `${percent(range.share)} of fires`, range.examples])];
   const named = data.interpretation;
   return el('div', {},
-    pageHead('Feature', el('h1', {}, el('span', { class: 'hash' }, '#'), data.id),
-      el('nav', { class: 'stepper' },
-        el('a', { class: 'button', href: featureHref(data.id - 1), title: 'Previous feature (←)' }, icon('M10 3.5 5.5 8l4.5 4.5')),
-        el('a', { class: 'button', href: featureHref(data.id + 1), title: 'Next feature (→)' }, icon('M6 3.5 10.5 8 6 12.5')))),
+    pageHead(`Feature #${data.id}`),
     named && el('div', { class: 'naming' },
       el('p', { class: 'name' }, named.title, !data.trusted && confidenceTag(named)),
       el('p', { class: 'description' }, named.description)),
     data.fires
-      ? stats([['Density', percent(data.density), densitySpark(data.density)], ['Fires', integer.format(data.fires)],
-        ['Max activation', data.max.toFixed(2)], ['Peaks on', tokenLabel(data.peak_token)], ...(named ? checkStats(named) : [])])
+      ? stats([['Density', percent(data.density)], ['Fires', integer.format(data.fires)], ...(named ? checkStats(named) : [])])
       : el('p', { class: 'lede' }, 'Never fires in the recorded tokens'),
     el('div', { class: 'columns' },
       data.fires > 0 && el('div', { class: 'stack' },
         sections.map(([title, meta, examples]) => card(title, meta, examples.map((example) => exampleRow(example, data.max))))),
       el('div', { class: 'stack side' },
         named && testsCard(named.pairs),
-        named && card('Steers toward', `${named.steering.strength}× max · KL ${named.steering.kl.toFixed(2)}`,
+        named && card('Steers toward', `${named.steering.strength}× max (KL ${named.steering.kl.toFixed(2)})`,
           el('div', { class: 'chips' }, named.steering.tokens.map((token) => el('a', { href: tokenHref(token) }, tokenLabel(token))))),
         data.fires > 0 && card('Fires on', 'share of fires', barList(data.fires_on, (row) => row.share, (row) => percent(row.share),
           (row) => `${percent(row.share)} of this feature's fires\n${quoted(row.token)}: fires on ${percent(row.precision)} of its occurrences`)),
@@ -269,20 +241,15 @@ function featureView(data) {
           (row) => `+${row.logit.toFixed(2)} logit\n${quoted(row.token)}, centered over the vocabulary`)))));
 }
 
-function tokenView(text, { matches, pieces, features }) {
-  const head = pageHead('Token', el('h1', { class: 'text' }, quoted(text)));
-  if (!matches.length) {
-    return el('div', {}, head, el('p', { class: 'lede' }, 'No single token matches. Its pieces:',
-      pieces.map((piece) => el('a', { href: tokenHref(piece) }, tokenLabel(piece)))));
-  }
+function tokenView(text, { matches, features }) {
   const occurrences = matches.reduce((sum, match) => sum + match.occurrences, 0);
-  return el('div', {}, head,
+  return el('div', {}, pageHead('Token', quoted(text)),
     stats([['Matches', matches.map((match) => tokenLabel(match.token))], ['Occurrences', integer.format(occurrences)]]),
     el('section', { class: 'card scroll' }, el('table', {},
-      el('thead', {}, el('tr', {}, ['Feature', 'Peaks on', 'Mean act.', 'Of its fires'].map((label) => el('th', {}, label)))),
+      el('thead', {}, el('tr', {}, ['Feature', 'Name', 'Mean act.', 'Of its fires'].map((label) => el('th', {}, label)))),
       el('tbody', {}, features.map((row) => el('tr', { onclick: () => { location.hash = featureHref(row.id); } },
         el('td', {}, el('a', { href: featureHref(row.id) }, `#${row.id}`)),
-        el('td', {}, tokenLabel(row.peak_token)),
+        el('td', {}, row.title ? el('span', { class: row.trusted ? null : 'weak' }, row.title) : tokenLabel(row.peak_token)),
         el('td', {}, row.mean.toFixed(2)),
         el('td', {}, track(row.share), percent(row.share))))))));
 }
@@ -310,11 +277,11 @@ function route() {
   for (const row of listElement.children) row.classList.toggle('active', Number(row.dataset.id) === current);
   listElement.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
   if (view === 'feature') {
-    document.title = `#${argument} · Feature Explorer`;
+    document.title = `#${argument}: Feature Explorer`;
     show(`/api/feature/${argument}`, featureView);
   } else if (view === 'token') {
     const text = decodeURIComponent(argument);
-    document.title = `${quoted(text)} · Feature Explorer`;
+    document.title = `${quoted(text)}: Feature Explorer`;
     show(`/api/token?q=${argument}`, (data) => tokenView(text, data));
   } else {
     document.title = 'Feature Explorer';
@@ -341,21 +308,31 @@ function resetList() {
   loadMore();
 }
 
+// Spaces, newlines and tabs get a visible mark in tokenLabel; other blank tokens would leave the row empty.
+const invisible = (token) => /^[\p{Z}\p{C}]+$/u.test(token) && !/[ \n\t]/.test(token);
+
+function rowName(row) {
+  if (row.title) return el('span', { class: row.trusted ? 'label' : 'label weak' }, row.title);
+  return row.peak_token == null || invisible(row.peak_token) ? el('span', {}, `#${row.id}`) : tokenLabel(row.peak_token, 'peak');
+}
+
 async function loadMore() {
   if (list.loading || list.done) return;
   const generation = list.generation;
   list.loading = true;
   const range = list.range ? `&low=${list.range.low}&high=${list.range.high}` : '';
-  const rows = await api(`/api/features?sort=${sort.value}&offset=${list.offset}&limit=${LIST_PAGE}${range}`);
+  const trusted = showUntrusted.checked ? '' : '&trusted=1';
+  const name = query.value.trim() ? `&q=${encodeURIComponent(query.value.trim())}` : '';
+  const rows = await api(`/api/features?sort=${sort.value}&offset=${list.offset}&limit=${LIST_PAGE}${range}${trusted}${name}`);
   if (generation !== list.generation) return;
+  if (!list.offset && !rows.length) sentinel.before(el('div', { class: 'group' }, 'No features to show'));
   sentinel.before(...rows.flatMap((row) => {
     const group = row.title ? (row.trusted ? 0 : 1) : 2;
     // A heading where the group changes, unless no feature in the list has a title.
-    const heading = group !== list.group && !(list.group == null && group === 2) && el('div', { class: 'group' }, GROUPS[group]);
+    const heading = showUntrusted.checked && group !== list.group && !(list.group == null && group === 2) && el('div', { class: 'group' }, GROUPS[group]);
     list.group = group;
     return [heading, el('a', { class: row.id === current ? 'row active' : 'row', href: featureHref(row.id), dataset: { id: row.id } },
-      el('span', {}, `#${row.id}`),
-      row.title ? el('span', { class: row.trusted ? 'label' : 'label weak' }, row.title) : row.peak_token == null ? el('span') : tokenLabel(row.peak_token, 'peak'),
+      rowName(row),
       el('span', { class: 'density' }, percent(row.density)))].filter(Boolean);
   }));
   Object.assign(list, { offset: list.offset + rows.length, done: rows.length < LIST_PAGE, loading: false });
@@ -365,28 +342,40 @@ async function loadMore() {
 
 document.getElementById('search').addEventListener('submit', (event) => {
   event.preventDefault();
-  const text = query.value.trim();
-  if (text) location.hash = /^#?\d+$/.test(text) ? featureHref(Number(text.replace('#', ''))) : tokenHref(text);
   query.blur();
 });
 
-document.addEventListener('keydown', (event) => {
-  if (event.metaKey || event.ctrlKey || event.altKey || event.target.closest('input, select')) return;
-  const actions = {
-    '/': () => query.focus(),
-    ArrowLeft: () => current != null && (location.hash = featureHref(current - 1)),
-    ArrowRight: () => current != null && (location.hash = featureHref(current + 1)),
-  };
-  if (!actions[event.key]) return;
-  event.preventDefault();
-  actions[event.key]();
+let searchTimer;
+query.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(resetList, 150);
 });
 
+document.addEventListener('keydown', (event) => {
+  if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey || event.target.closest('input, select')) return;
+  event.preventDefault();
+  query.focus();
+});
+
+function syncFilter() {
+  document.getElementById('count').textContent = integer.format(showUntrusted.checked ? overview.d_sae : overview.trusted);
+  filterButton.classList.toggle('active', showUntrusted.checked);
+}
+
 sort.addEventListener('change', resetList);
+showUntrusted.addEventListener('change', () => { syncFilter(); resetList(); });
+filters.addEventListener('beforetoggle', (event) => {
+  if (event.newState !== 'open') return;
+  const { left, bottom } = filterButton.getBoundingClientRect();
+  Object.assign(filters.style, { left: `${left}px`, top: `${bottom + 6}px` });
+});
 rangeButton.addEventListener('click', () => filterDensity(null));
 window.addEventListener('hashchange', route);
 
 overview = await api('/api/overview');
-document.getElementById('count').textContent = integer.format(overview.d_sae);
+// Without interpretations there is nothing trusted to narrow the list to.
+filterButton.hidden = !overview.trusted;
+if (!overview.trusted) showUntrusted.checked = true;
+syncFilter();
 resetList();
 route();

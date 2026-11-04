@@ -16,7 +16,7 @@ CONTEXT_BEFORE = 48
 CONTEXT_AFTER = 16
 TOP_EXAMPLES = 12
 TOP_CANDIDATES = 512
-RANGE_EDGES = (1.0, 0.75, 0.5, 0.25, 0.0)
+RANGE_EDGES = (0.75, 0.5, 0.25, 0.0)
 RANGE_EXAMPLES = 6
 FIRES_ON_TOKENS = 8
 TOKEN_SAMPLE = 4096
@@ -81,6 +81,7 @@ class FeatureIndex:
         # Written by interpret.py; features without one are shown unnamed.
         lines = self.interpretations_path.read_text().splitlines() if self.interpretations_path.exists() else []
         self.interpretations = {record["feature"]: record for record in map(json.loads, lines)}
+        self.titles = {feature: record["title"].lower() for feature, record in self.interpretations.items()}
         # 0 trusted, 1 low confidence, 2 unnamed: the order of the groups in the feature list.
         self.group = np.full(len(self.counts), 2)
         tests, detection = np.zeros(len(self.counts)), np.zeros(len(self.counts))
@@ -103,6 +104,7 @@ class FeatureIndex:
             "density_histogram": feature_density_histogram(torch.from_numpy(self.counts), self.active_tokens),
             "trusted_detection": TRUSTED_DETECTION,
             "trusted_pairs": TRUSTED_PAIRS,
+            "trusted": int((self.group == 0).sum()),
         }
 
     def row(self, feature: int) -> dict:
@@ -110,14 +112,18 @@ class FeatureIndex:
         return {"id": int(feature), "density": float(self.density[feature]), "peak_token": self.peak_tokens[feature], "title": title,
                 "trusted": bool(self.group[feature] == 0)}
 
-    def browse(self, sort: str, offset: int, limit: int, low: float | None, high: float | None) -> list[dict]:
-        keys = {"density": -self.density, "rarity": self.density, "max": -self.max, "id": np.arange(len(self.counts)), "check": self.check_rank}
+    def browse(self, sort: str, offset: int, limit: int, low: float | None, high: float | None, trusted_only: bool, name: str) -> list[dict]:
+        keys = {"density": -self.density, "rarity": self.density, "check": self.check_rank}
         features = np.argsort(keys[sort], kind="stable")
         if low is not None:
             # Bounds are log10 densities from the overview histogram; the tolerance keeps exact edges inside.
             with np.errstate(divide="ignore"):
                 log_density = np.log10(self.density[features])
             features = features[(log_density >= low - 1e-9) & (log_density < high - 1e-9)]
+        if trusted_only:
+            features = features[self.group[features] == 0]
+        if words := name.lower().split():
+            features = features[np.isin(features, [feature for feature, title in self.titles.items() if all(word in title for word in words)])]
         # Trusted titles first, then low-confidence ones, then unnamed features, each group in the chosen order.
         features = features[np.argsort(self.group[features], kind="stable")]
         return [self.row(feature) for feature in features[offset : offset + limit]]
@@ -193,8 +199,7 @@ class FeatureIndex:
     def token_search(self, query: str) -> dict:
         matches = [token for token, text in enumerate(self.vocab) if text.strip() == query.strip()]
         if not matches:
-            pieces = self.tokenizer.encode(" " + query.strip(), add_special_tokens=False)
-            return {"matches": [], "pieces": [self.vocab[token] for token in pieces]}
+            raise ValueError(f"no token matches {query!r}")
 
         occurrences = np.flatnonzero(np.isin(self.token_ids, matches))
         sample = np.random.default_rng(0).choice(occurrences, min(TOKEN_SAMPLE, len(occurrences)), replace=False)

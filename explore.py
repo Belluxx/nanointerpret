@@ -45,7 +45,7 @@ class ExplorerHandler(SimpleHTTPRequestHandler):
             return self.index.overview()
         if path == "/api/features":
             low, high = (float(query["low"]), float(query["high"])) if "low" in query else (None, None)
-            return self.index.browse(query["sort"], int(query["offset"]), int(query["limit"]), low, high)
+            return self.index.browse(query["sort"], int(query["offset"]), int(query["limit"]), low, high, "trusted" in query, query.get("q", ""))
         if path.startswith("/api/feature/"):
             return self.index.feature(int(path.removeprefix("/api/feature/")))
         if path == "/api/token":

@@ -8,25 +8,26 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <header class="topbar">
+  <aside class="sidebar">
     <a class="brand" href="#/">
       <img class="logo" src="/logo.svg" alt="">
       nanointerpret<span>explorer</span>
     </a>
     <form id="search" role="search">
       <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="m10.25 10.25 3.25 3.25"/></svg>
-      <input id="query" type="search" placeholder="Search a feature # or token" aria-label="Feature number or token" autocomplete="off" spellcheck="false">
+      <input id="query" type="search" placeholder="Search feature names" aria-label="Search feature names" autocomplete="off" spellcheck="false">
       <kbd>/</kbd>
     </form>
-  </header>
-  <aside class="sidebar">
     <div class="sidebar-head">
-      <span>Features<span id="count"></span></span>
+      <span>
+        Features<span id="count"></span>
+        <button class="filter" id="filter" type="button" popovertarget="filters" title="Filters" aria-label="Filters" hidden>
+          <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M4.5 8h7M6.5 11.5h3"/></svg>
+        </button>
+      </span>
       <select id="sort" aria-label="Sort">
         <option value="density">Density ↓</option>
         <option value="rarity">Density ↑</option>
-        <option value="max">Max activation ↓</option>
-        <option value="id">Feature #</option>
         <option value="check">Name check ↓</option>
       </select>
     </div>
@@ -34,6 +35,9 @@
     <nav class="list" id="list"></nav>
   </aside>
   <main class="main" id="main"></main>
+  <div class="filters" id="filters" popover>
+    <label><input id="show-untrusted" type="checkbox">Show untrusted</label>
+  </div>
   <div class="tooltip" id="tooltip" hidden></div>
   <script type="module" src="/app.js"></script>
 </body>
