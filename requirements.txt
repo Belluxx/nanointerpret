@@ -1,5 +1,6 @@
 torch>=2.10
 transformers>=4.56
+safetensors>=0.4
 huggingface_hub>=0.28
 pyarrow>=15
 gigatoken==0.10.0

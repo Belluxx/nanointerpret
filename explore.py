@@ -17,7 +17,7 @@ STATIC_DIR = Path(__file__).parent / "explorer"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sae-dir", type=Path, required=True, help="Training output directory containing config.json and sae_final.pt.")
+    parser.add_argument("--sae-dir", type=Path, required=True, help="Training output directory containing config.json and sae_final.safetensors.")
     parser.add_argument("--activations", type=Path, default=None, help="Recorded activation directory. Default: <sae-dir>/activations.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)

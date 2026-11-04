@@ -31,7 +31,7 @@ from src.runtime import choose_device, find_transformer_layers, load_causal_lm
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sae-dir", type=Path, required=True, help="Training output directory containing config.json and sae_final.pt.")
+    parser.add_argument("--sae-dir", type=Path, required=True, help="Training output directory containing config.json and sae_final.safetensors.")
     parser.add_argument("--activations", type=Path, default=None, help="Recorded activation directory. Default: <sae-dir>/activations.")
     parser.add_argument("--base-url", required=True, help="OpenAI-compatible API of the explainer and judge model, e.g. http://127.0.0.1:8080/v1 for llama-server.")
     parser.add_argument("--model", default="judge", help="Model name sent with each request; llama-server ignores it. Default: judge.")

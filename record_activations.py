@@ -22,7 +22,7 @@ INDEX_CHUNK = 1 << 24
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sae-dir", type=Path, required=True, help="Training output directory containing config.json and sae_final.pt.")
+    parser.add_argument("--sae-dir", type=Path, required=True, help="Training output directory containing config.json and sae_final.safetensors.")
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/token_cache"), help="Token-cache directory populated during training. Default: artifacts/token_cache.")
     parser.add_argument("--token-ids", type=Path, default=None, help="token_ids.npy of an earlier recording, used instead of the token cache.")
     parser.add_argument("--tokens", type=int, default=None, help="Recording tokens to process, rounded down to whole contexts. Default: the full recording split.")

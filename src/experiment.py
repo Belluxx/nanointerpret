@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
+from safetensors.torch import load_file, save_file
 from torch import Tensor, nn
 from tqdm.auto import tqdm
 
@@ -69,7 +70,7 @@ def build_sae(config: Config) -> TopKSAE:
 def load_sae(sae_dir: Path, device: torch.device) -> tuple[TopKSAE, Config]:
     config = Config(**json.loads((sae_dir / "config.json").read_text()))
     sae = build_sae(config)
-    sae.load_state_dict(torch.load(sae_dir / "sae_final.pt", map_location="cpu"))
+    sae.load_state_dict(load_file(sae_dir / "sae_final.safetensors"))
     return sae.to(device).eval().requires_grad_(False), config
 
 
@@ -323,7 +324,7 @@ def train_sae(
 
     status.close()
     progress.close()
-    torch.save(sae.state_dict(), output_dir / "sae_final.pt")
+    save_file(sae.state_dict(), output_dir / "sae_final.safetensors")
 
 
 def crossed(previous: int, current: int, every: int) -> bool:

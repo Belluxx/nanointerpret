@@ -100,7 +100,7 @@ def main() -> None:
     config_path = output_dir / "config.json"
     if args.resume and not config_path.exists():
         raise FileNotFoundError(f"{output_dir} holds no run to resume; pass the run's --output-dir")
-    if not args.resume and any(output_dir.glob("*.pt")):
+    if not args.resume and (any(output_dir.glob("*.pt")) or (output_dir / "sae_final.safetensors").exists()):
         raise FileExistsError(f"{output_dir} already holds a run; pass --resume or choose another --output-dir")
     saved = json.loads(config_path.read_text()) if args.resume else None
     extended_from = extension_history(saved, args)
